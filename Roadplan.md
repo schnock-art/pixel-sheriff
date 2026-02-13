@@ -249,3 +249,127 @@ ONNX inference service
 Suggestions + “accept” workflow
 
 Active sampling
+
+
+
+MAL extension plan (designed so v1 doesn’t get rewritten)
+MAL goal
+
+Show model suggestions in the UI, let user accept/adjust quickly, and log outcomes so you can improve the model and sampling.
+
+Core idea: add “suggestions” as first-class objects
+
+Don’t stuff suggestions into annotations. Suggestions are proposals that can be accepted or rejected.
+
+New entity: prediction_suggestions
+
+Minimal fields:
+
+suggestion_id
+
+asset_id
+
+project_id
+
+model_id (or model_version_id)
+
+payload_json (same shape as annotation payload)
+
+score / confidence
+
+created_at
+
+status: pending | accepted | rejected | superseded
+
+Payload examples:
+
+{ "type": "classification", "category_ids": [2], "scores": {"2": 0.91, "1": 0.06} }
+
+New entity: models
+
+model_id
+
+project_id
+
+name
+
+task_type
+
+labels_hash (must match dataset manifest categories hash)
+
+artifact_uri (onnx path)
+
+created_at
+
+Rule: if labels_hash mismatches the project categories snapshot/hash, the UI must warn and the API should block suggestions.
+
+MAL v1 (simple, high leverage)
+Flow
+
+User opens asset in labeling UI
+
+UI calls: GET /assets/:id/suggestions?model=active
+
+UI displays:
+
+top suggested label
+
+confidence bar
+
+top-k optional
+
+Hotkey to accept suggestion (e.g. A)
+
+When accepted: UI writes normal annotation via existing endpoint
+
+API endpoints
+
+POST /projects/:id/models (register ONNX + metadata)
+
+GET /projects/:id/models (list)
+
+POST /models/:id/suggest (enqueue batch suggestion job OR inline for single)
+
+GET /assets/:asset_id/suggestions?model_id=...
+
+Worker jobs
+
+inference_suggest.py:
+
+loads ONNX once per worker process
+
+runs inference for a batch of assets
+
+writes prediction_suggestions
+
+MAL v2 (batch + queue integration)
+Add “Suggest next N”
+
+UI button: “Generate suggestions for unlabeled”
+
+API: POST /projects/:id/suggestions:batch with criteria
+
+Worker runs inference over assets and stores suggestions
+
+UI queue shows “suggested” badge and lets you accept with 1 keypress
+
+MAL v3 (active learning sampling)
+
+Add a sampler job that selects which assets should be labeled next:
+
+entropy / margin sampling
+
+disagreement across ensemble models
+
+coverage balancing across videos/time
+
+New table: sampling_runs (optional), or just store in assets.metadata_json.
+
+MAL v4 (geometry tasks later)
+
+Because your annotation payloads are typed, you can extend:
+
+bbox suggestions
+
+polygon suggestions
+…and the UI overlay tools start using the same payload shapes.
