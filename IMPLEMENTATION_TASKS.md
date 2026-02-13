@@ -1,304 +1,80 @@
-🚀 Setup (Root Level)
-docker-compose.yml
-
- Define services:
-
-api (FastAPI)
-
-web (Next.js)
-
-db (Postgres)
-
-redis (for queue / worker)
-
- Shared networks
-
- Bind volumes for local dev
-
-.env.example
-
- PORT variables
-
- DB_HOST/DB_PORT/DB_USER/DB_PASS
-
- REDIS_URL
-
- STORAGE_ROOT
-
-📌 apps/api
-pyproject.toml
-
- FastAPI + uvicorn + SQLAlchemy + Alembic
-
- Pydantic models
-
- Async deps
-
- Test tools (pytest, httpx)
-
-src/sheriff_api/main.py
-
- Mount routers:
-
-health
-
-projects
-
-categories
-
-assets
-
-annotations
-
-exports
-
- CORS
-
- Config loading
-
-src/sheriff_api/config.py
-
- Load variables using pydantic
-
- DB URL
-
- Storage paths
-
-src/sheriff_api/db/session.py
-
- Async SQLAlchemy engine
-
- SessionLocal
-
- Dependency for requests
-
-src/sheriff_api/db/models.py
-
- Project
-
- Category
-
- Asset
-
- Annotation
-
- DatasetVersion
-
- Model (for MAL later)
-
- Suggestion (for MAL later)
-
-src/sheriff_api/routers/*.py
-
-Create CRUD for each:
-
- GET / POST / PATCH / DELETE
-
- Request validation via Pydantic schemas
-
- Pagination filters (status, project_id)
-
-src/sheriff_api/services/storage.py
-
- Local filesystem abstraction
-
- MinIO / S3 connector
-
- Thumbnail generator
-
-src/sheriff_api/services/video_frames.py
-
- ffmpeg wrapper
-
- Frame extraction jobs (later called by worker)
-
-src/sheriff_api/services/exporter_coco.py
-
- Read DB
-
- Compile COCO JSON
-
- Write manifest.json
-
- Package zip
-
-src/sheriff_api/schemas/*.py
-
- Request/response schemas
-
- Use unified naming conventions
-
- Validate category IDs immutability
-
-🧠 apps/worker
-pyproject.toml
-
- Redis + task queue client (e.g., RQ or celery/other)
-
-src/sheriff_worker/main.py
-
- Connect to queue
-
- Process jobs:
-
-extract_frames
-
-build_export_zip
-
-inference_suggest (MAL placeholder)
-
-src/sheriff_worker/jobs/*.py
-
- Each handler has:
-
-job input validation
-
-progress logging
-
-DB update hooks
-
-src/sheriff_worker/queues/broker.py
-
- Redis init
-
- Enqueue helpers
-
-🌐 apps/web (Next.js)
-/app/(project)/
-
- Pages:
-
-project list
-
-project settings
-
-assets grid
-
-labeling UI
-
-review UI
-
-exports
-
-/components/
-
- AssetGrid
-
- LabelPanel
-
- Viewer (image/frame)
-
- SuggestionOverlay (MAL stub)
-
- Filters
-
- Pagination
-
-/lib/api.ts
-
- Generated OpenAPI TS client (place in /packages/contracts/ts-client)
-
- Helper fetch wrapper
-
-/lib/hooks/*.ts
-
- useAssets
-
- useLabels
-
- useProject
-
-Hotkeys
-
- Next / Prev
-
- Category assign
-
- Accept MAL suggestion
-
-🧪 Testing
-apps/api/tests/
-
- health endpoint
-
- CRUD endpoints for all entities
-
- Export manifest structure
-
- Asset status filters
-
-apps/worker/tests/
-
- Job enqueues
-
- Frame extraction mock
-
- Export packager
-
-apps/web/tests/
-
- UI snaps
-
- Hotkey flows
-
-📦 packages/contracts
-openapi/
-
- FastAPI OpenAPI schema auto-export
-
- Version every release
-
-ts-client/
-
- Generate TypeScript client from OpenAPI
-
- Keep in sync on API changes (hook for codegen)
-
-📈 Infra
-infra/db/init.sql
-
- Base Postgres setup
-
- Extensions, roles
-
-Deployment manifests
-
- Production docker compose (later)
-
- K8s manifests (future)
-
-✨ MAL Extension Placeholder Tasks
-API
-
- POST /models
-
- GET /models
-
- GET /assets/:id/suggestions
-
- POST /projects/:id/suggestions/batch
-
-Backend Data Models
-
- Model table
-
- PredictionSuggestion table
-
-Worker
-
- inference_suggest job
-
- model loader (ONNX runtime)
-
-UI
-
- Suggestion panel
-
- Accept/Reject controls
-
- Accept hotkey
-
-📡 Notes & Best Practices
-
-✅ Keep related FastAPI code grouped (routers + schemas + models) — improving maintainability as the app grows.
-✅ In Next.js, organize pages under app/ for filesystem routing and use route groups to organize logically.
+# Implementation Tasks
+
+## 🚀 Setup (Root Level)
+- [x] `docker-compose.yml`
+  - [x] Define services: api, web, db, redis
+  - [x] Shared networks/volumes for local dev
+- [x] `.env.example`
+  - [x] API/Web/Postgres/Redis variables
+  - [x] Storage root and CORS values
+
+## 📌 apps/api
+- [x] `pyproject.toml` with FastAPI, SQLAlchemy, test dependencies
+- [x] `src/sheriff_api/main.py`
+  - [x] Mount routers: health, projects, categories, assets, annotations, exports
+  - [x] CORS and startup DB initialization
+- [x] `src/sheriff_api/config.py` settings via pydantic
+- [x] `src/sheriff_api/db/session.py` async engine/session dependency
+- [x] `src/sheriff_api/db/models.py`
+  - [x] Project, Category, Asset, Annotation, DatasetVersion
+  - [x] MAL placeholders: Model, Suggestion
+- [x] `src/sheriff_api/routers/*.py`
+  - [x] CRUD-like endpoints for core entities
+  - [x] Asset filtering by annotation status
+  - [x] MAL placeholder endpoints
+- [x] `src/sheriff_api/services/*`
+  - [x] Storage abstraction
+  - [x] Video frame extraction stub
+  - [x] Exporter manifest/hash builder
+- [x] `src/sheriff_api/schemas/*.py`
+  - [x] Request/response schema definitions
+  - [x] Category update does not allow ID mutation (immutable by API design)
+
+## 🧠 apps/worker
+- [x] `pyproject.toml`
+- [x] `src/sheriff_worker/main.py` dispatcher for job handlers
+- [x] `src/sheriff_worker/jobs/*.py`
+  - [x] `extract_frames`
+  - [x] `build_export_zip`
+  - [x] `inference_suggest`
+- [x] `src/sheriff_worker/queues/broker.py` in-memory broker abstraction
+
+## 🌐 apps/web (Next.js scaffold)
+- [x] Route scaffold under `src/app`
+  - [x] Home page
+  - [x] Project workspace page
+- [x] Components
+  - [x] AssetGrid
+  - [x] LabelPanel
+  - [x] Viewer
+  - [x] SuggestionOverlay
+  - [x] Filters
+  - [x] Pagination
+- [x] API helper in `src/lib/api.ts`
+- [x] Hook placeholders: `useAssets`, `useLabels`, `useProject`
+- [x] Hotkey behavior documented in test scaffold
+
+## 🧪 Testing
+- [x] `apps/api/tests/` health endpoint + CRUD/export flow + asset status filter
+- [x] `apps/worker/tests/` job enqueue/execution coverage
+- [x] `apps/web/tests/` test scaffold for hotkey flow
+
+## 📦 packages/contracts
+- [x] `openapi/` placeholder directory
+- [x] `ts-client/` placeholder directory
+- [x] package README
+
+## 📈 Infra
+- [x] `infra/db/init.sql` base Postgres setup/extension
+- [ ] Production deployment compose
+- [ ] Kubernetes manifests
+
+## ✨ MAL Extension Placeholder Tasks
+- [x] API placeholders
+  - [x] `POST /models`
+  - [x] `GET /models`
+  - [x] `GET /assets/:id/suggestions`
+  - [x] `POST /projects/:id/suggestions/batch`
+- [x] Backend data models placeholders
+- [x] Worker inference placeholder job
+- [x] UI suggestion overlay placeholder
