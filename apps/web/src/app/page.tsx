@@ -8,6 +8,7 @@ import { LabelPanel } from "../components/LabelPanel";
 import { Viewer } from "../components/Viewer";
 import {
   ApiError,
+  createExport,
   createCategory,
   createProject,
   patchCategory,
@@ -138,6 +139,7 @@ export default function HomePage() {
   const [isImporting, setIsImporting] = useState(false);
   const [isCreatingLabel, setIsCreatingLabel] = useState(false);
   const [isSavingLabelChanges, setIsSavingLabelChanges] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
   const [editMode, setEditMode] = useState(false);
   const [multiLabelEnabled, setMultiLabelEnabled] = useState(false);
   const [pendingAnnotations, setPendingAnnotations] = useState<Record<string, PendingAnnotation>>({});
@@ -522,6 +524,40 @@ export default function HomePage() {
     picker.click();
   }
 
+  async function handleExport() {
+    if (!selectedProjectId) {
+      setMessage("Select a dataset before exporting.");
+      return;
+    }
+
+    try {
+      setIsExporting(true);
+      setMessage("Building export...");
+      const created = await createExport(selectedProjectId, {
+        selection_criteria_json: { statuses: ["labeled", "approved", "needs_review", "skipped"] },
+      });
+
+      const url = resolveAssetUri(created.export_uri);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `${selectedDatasetName.replace(/[^a-zA-Z0-9-_]+/g, "_") || "dataset"}-${created.hash.slice(0, 8)}.zip`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+
+      const counts = created.manifest_json.counts as Record<string, number> | undefined;
+      if (counts && typeof counts.assets === "number" && typeof counts.annotations === "number") {
+        setMessage(`Export ready. ${counts.assets} assets, ${counts.annotations} annotations.`);
+      } else {
+        setMessage("Export ready.");
+      }
+    } catch (error) {
+      setMessage(error instanceof Error ? `Export failed: ${error.message}` : "Export failed.");
+    } finally {
+      setIsExporting(false);
+    }
+  }
+
   function handleSelectTreeAsset(assetId: string) {
     const index = assetRows.findIndex((item) => item.id === assetId);
     if (index >= 0) setAssetIndex(index);
@@ -606,8 +642,8 @@ export default function HomePage() {
             <button type="button" className="ghost-button" onClick={handleImport} disabled={isImporting}>
               {isImporting ? "Importing..." : "Import"}
             </button>
-            <button type="button" className="ghost-button">
-              Export Dataset
+            <button type="button" className="ghost-button" onClick={handleExport} disabled={isExporting || !selectedProjectId}>
+              {isExporting ? "Exporting..." : "Export Dataset"}
             </button>
           </div>
 

@@ -1,8 +1,8 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class ExportCreate(BaseModel):
-    selection_criteria_json: dict = {"status": "approved"}
+    selection_criteria_json: dict = Field(default_factory=lambda: {"statuses": ["labeled", "approved"]})
 
 
 class ExportRead(BaseModel):

@@ -21,6 +21,8 @@ Status reflects current repository behavior.
   - [x] content stream
 - [x] Annotation endpoints (upsert/list)
 - [x] Export metadata endpoints (create/list)
+- [x] Export zip build (`manifest.json`, `annotations.json`, `images/`)
+- [x] Export download endpoint
 - [x] MAL placeholder endpoints (models/suggestions)
 - [x] Local storage safety checks (path containment)
 - [x] API packaging fixes for `src` layout Docker builds
@@ -33,6 +35,7 @@ Status reflects current repository behavior.
 - [x] Import dialog:
   - [x] existing vs new project
   - [x] target folder naming
+- [x] Hierarchical file tree with preserved parent/child ordering
 - [x] Robust import diagnostics:
   - [x] MIME + extension filtering fallback
   - [x] detailed per-file failure messages
@@ -40,6 +43,7 @@ Status reflects current repository behavior.
   - [x] add label
   - [x] manage labels (rename/reorder/activate/deactivate)
   - [x] multi-label toggle in edit mode
+  - [x] add-label input visible only in manage mode
 - [x] Annotation UX:
   - [x] edit mode staging
   - [x] batch submit staged changes
@@ -57,14 +61,14 @@ Status reflects current repository behavior.
 - [ ] Validate upload target project exists before persisting file
 - [ ] Populate image `width/height` on upload
 - [ ] Add delete asset endpoint(s)
-- [ ] Add export zip build + download endpoint
 - [ ] Add richer structured API error responses for UI
 
 ### Web
 - [ ] Add explicit staged/dirty indicators in file tree and pagination
 - [ ] Improve import dialog UX (validation hints + remembered defaults)
 - [ ] Add full keyboard labeling shortcuts (1..9, skip, etc.)
-- [ ] Wire export button to backend flow
+- [x] Wire export button to backend flow
+- [ ] Add export history/filter UI
 - [ ] Add better loading/empty states per panel
 
 ### Testing

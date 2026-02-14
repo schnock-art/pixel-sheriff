@@ -21,6 +21,11 @@ All notable changes to this project will be documented in this file.
 - Multi-label toggle (available in edit mode).
 - Arrow-key image navigation.
 - Detailed import diagnostics for local file-read and network failures.
+- Export pipeline:
+  - COCO-style export bundle generation on API
+  - zip artifact persistence in storage
+  - export download endpoint
+  - web "Export Dataset" action wired to create + download
 - Documentation refresh:
   - `README.md`
   - `Architecture.md`

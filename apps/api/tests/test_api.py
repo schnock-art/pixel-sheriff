@@ -1,3 +1,7 @@
+import json
+from io import BytesIO
+import zipfile
+
 from httpx import ASGITransport, AsyncClient
 import pytest
 
@@ -26,12 +30,12 @@ async def test_crud_and_export_flow() -> None:
         patched = (await client.patch(f"/api/v1/categories/{category['id']}", json={"name": "kitty"})).json()
         assert patched["id"] == category["id"]
 
-        asset = (
-            await client.post(
-                f"/api/v1/projects/{project_id}/assets",
-                json={"uri": "assets/x.jpg", "mime_type": "image/jpeg", "checksum": "abc"},
-            )
-        ).json()
+        upload = await client.post(
+            f"/api/v1/projects/{project_id}/assets/upload",
+            files={"file": ("sample.jpg", b"fake-image-bytes", "image/jpeg")},
+        )
+        assert upload.status_code == 200
+        asset = upload.json()
 
         await client.post(
             f"/api/v1/projects/{project_id}/annotations",
@@ -45,6 +49,23 @@ async def test_crud_and_export_flow() -> None:
         assert export.status_code == 200
         assert "manifest_json" in export.json()
         assert export.json()["manifest_json"]["categories"][0]["name"] == "kitty"
+        assert export.json()["export_uri"].startswith(f"/api/v1/projects/{project_id}/exports/")
+
+        archive = await client.get(export.json()["export_uri"])
+        assert archive.status_code == 200
+        assert archive.headers["content-type"].startswith("application/zip")
+
+        with zipfile.ZipFile(BytesIO(archive.content), "r") as bundle:
+            names = set(bundle.namelist())
+            assert "manifest.json" in names
+            assert "annotations.json" in names
+            assert any(name.startswith("images/") for name in names)
+
+            manifest = json.loads(bundle.read("manifest.json").decode("utf-8"))
+            assert manifest["counts"]["assets"] == 1
+
+            annotations = json.loads(bundle.read("annotations.json").decode("utf-8"))
+            assert annotations["categories"][0]["name"] == "kitty"
 
 
 @pytest.mark.asyncio

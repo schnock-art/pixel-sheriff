@@ -136,6 +136,19 @@ export interface AnnotationUpsert {
   annotated_by?: string;
 }
 
+export interface ExportCreatePayload {
+  selection_criteria_json?: Record<string, unknown>;
+}
+
+export interface ExportVersion {
+  id: string;
+  project_id: string;
+  selection_criteria_json: Record<string, unknown>;
+  manifest_json: Record<string, unknown>;
+  export_uri: string;
+  hash: string;
+}
+
 function inferMimeType(filename: string): string {
   const ext = filename.split(".").pop()?.toLowerCase() ?? "";
   if (ext === "jpg" || ext === "jpeg") return "image/jpeg";
@@ -200,6 +213,14 @@ export function listAnnotations(projectId: string): Promise<Annotation[]> {
 
 export function upsertAnnotation(projectId: string, payload: AnnotationUpsert): Promise<Annotation> {
   return apiPost<Annotation, AnnotationUpsert>(`/projects/${projectId}/annotations`, payload);
+}
+
+export function createExport(projectId: string, payload: ExportCreatePayload = {}): Promise<ExportVersion> {
+  return apiPost<ExportVersion, ExportCreatePayload>(`/projects/${projectId}/exports`, payload);
+}
+
+export function listExports(projectId: string): Promise<ExportVersion[]> {
+  return apiGet<ExportVersion[]>(`/projects/${projectId}/exports`);
 }
 
 export function uploadAsset(projectId: string, file: File, relativePath?: string): Promise<Asset> {
