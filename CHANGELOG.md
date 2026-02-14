@@ -28,11 +28,20 @@ All notable changes to this project will be documented in this file.
   - per-folder expand/collapse
   - collapse-all / expand-all actions
 - Labeled/unlabeled visual status indicators in tree and pagination.
+- Import progress telemetry in UI:
+  - completed/total
+  - uploaded/failed/remaining
+  - bytes processed
+  - transfer speed and ETA
 - Export pipeline:
   - COCO-style export bundle generation on API
   - zip artifact persistence in storage
   - export download endpoint
   - web "Export Dataset" action wired to create + download
+- Viewer queue navigation enhancements:
+  - skip buttons (`-10`, `-5`, `<`, `>`, `+5`, `+10`)
+  - dynamic pagination chip window sized by available width
+  - `First` / `Last` quick jumps
 - Documentation refresh:
   - `README.md`
   - `Architecture.md`
@@ -41,6 +50,7 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 - Viewer image behavior now preserves aspect ratio with letterbox rendering (`object-fit: contain`) on black background.
+- Viewer layout now keeps a bounded responsive viewport height to avoid pushing controls/panels off-screen.
 - API CORS handling improved for localhost/127.0.0.1 development origins.
 - API Docker packaging fixed for `src/` layout installation reliability.
 - Local env defaults updated to conflict-resistant ports in `.env.example`.

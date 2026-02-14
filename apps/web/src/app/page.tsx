@@ -55,6 +55,17 @@ interface ImportDialogState {
   files: File[];
 }
 
+interface ImportProgressState {
+  totalFiles: number;
+  completedFiles: number;
+  uploadedFiles: number;
+  failedFiles: number;
+  totalBytes: number;
+  processedBytes: number;
+  startedAtMs: number;
+  activeFileName: string | null;
+}
+
 function isImageCandidate(file: File): boolean {
   if (file.type.toLowerCase().startsWith("image/")) return true;
   const extension = file.name.split(".").pop()?.toLowerCase() ?? "";
@@ -105,6 +116,27 @@ function folderChain(path: string): string[] {
     chain.push(prefix);
   }
   return chain;
+}
+
+function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB"];
+  let value = bytes;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+  return `${value.toFixed(unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
+}
+
+function formatDuration(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds <= 0) return "0s";
+  const rounded = Math.round(seconds);
+  const mins = Math.floor(rounded / 60);
+  const secs = rounded % 60;
+  if (mins === 0) return `${secs}s`;
+  return `${mins}m ${secs}s`;
 }
 
 function buildTreeEntries(assets: { id: string; uri: string; metadata_json: Record<string, unknown> }[]): TreeBuildResult {
@@ -212,6 +244,7 @@ export default function HomePage() {
   const [collapsedFolders, setCollapsedFolders] = useState<Record<string, boolean>>({});
   const [importFolderOptionsByProject, setImportFolderOptionsByProject] = useState<Record<string, string[]>>({});
   const [selectedImportExistingFolder, setSelectedImportExistingFolder] = useState<string>("");
+  const [importProgress, setImportProgress] = useState<ImportProgressState | null>(null);
 
   useEffect(() => {
     if (!selectedProjectId && projects.length > 0) {
@@ -651,6 +684,7 @@ export default function HomePage() {
     setSelectedImportExistingFolder("");
     setImportNewProjectName(sourceFolderName);
     setImportFolderName(sourceFolderName);
+    setImportProgress(null);
     setImportDialog({ open: true, sourceFolderName, files });
   }
 
@@ -661,6 +695,7 @@ export default function HomePage() {
     if (files.length === 0) {
       setMessage("Import cancelled: no files selected.");
       setSelectedImportExistingFolder("");
+      setImportProgress(null);
       setImportDialog({ open: false, sourceFolderName: "", files: [] });
       return;
     }
@@ -673,6 +708,17 @@ export default function HomePage() {
       setIsImporting(true);
       setMessage("Importing images...");
       setImportFailures([]);
+      const totalBytes = files.reduce((sum, file) => sum + file.size, 0);
+      setImportProgress({
+        totalFiles: files.length,
+        completedFiles: 0,
+        uploadedFiles: 0,
+        failedFiles: 0,
+        totalBytes,
+        processedBytes: 0,
+        startedAtMs: Date.now(),
+        activeFileName: null,
+      });
 
       let targetProjectId = "";
       let targetProjectName = "";
@@ -700,10 +746,22 @@ export default function HomePage() {
       const failures: string[] = [];
 
       for (const file of files) {
+        setImportProgress((previous) => (previous ? { ...previous, activeFileName: file.name } : previous));
         try {
           const targetRelativePath = buildTargetRelativePath(file, folderName);
           await uploadAsset(targetProjectId, file, targetRelativePath);
           uploadedCount += 1;
+          setImportProgress((previous) =>
+            previous
+              ? {
+                  ...previous,
+                  completedFiles: previous.completedFiles + 1,
+                  uploadedFiles: previous.uploadedFiles + 1,
+                  processedBytes: previous.processedBytes + file.size,
+                  activeFileName: null,
+                }
+              : previous,
+          );
         } catch (error) {
           if (error instanceof ApiError) {
             const reason = error.responseBody ? ` (${error.responseBody})` : "";
@@ -711,6 +769,17 @@ export default function HomePage() {
           } else {
             failures.push(`${file.name}: ${error instanceof Error ? error.message : "unknown upload error"}`);
           }
+          setImportProgress((previous) =>
+            previous
+              ? {
+                  ...previous,
+                  completedFiles: previous.completedFiles + 1,
+                  failedFiles: previous.failedFiles + 1,
+                  processedBytes: previous.processedBytes + file.size,
+                  activeFileName: null,
+                }
+              : previous,
+          );
         }
       }
 
@@ -736,6 +805,7 @@ export default function HomePage() {
       });
       setImportFailures(failures);
       setSelectedImportExistingFolder("");
+      setImportProgress(null);
       setImportDialog({ open: false, sourceFolderName: "", files: [] });
 
       if (uploadedCount === 0) setMessage(`Import failed: no files uploaded to "${folderName}".`);
@@ -744,6 +814,7 @@ export default function HomePage() {
       else setMessage(`Imported ${uploadedCount} images into "${targetProjectName}/${folderName}".`);
     } catch (error) {
       setImportFailures([]);
+      setImportProgress(null);
       setMessage(error instanceof Error ? `Import failed: ${error.message}` : "Import failed.");
     } finally {
       setIsImporting(false);
@@ -863,6 +934,29 @@ export default function HomePage() {
   const selectedDatasetName = datasets.find((dataset) => dataset.id === activeDatasetId)?.name ?? "No dataset selected";
   const headerTitle = selectedTreeFolderPath ? `${selectedDatasetName} / ${selectedTreeFolderPath}` : selectedDatasetName;
   const importExistingFolderOptions = importFolderOptionsByProject[importExistingProjectId] ?? [];
+  const importProgressView = useMemo(() => {
+    if (!importProgress) return null;
+
+    const elapsedSeconds = Math.max((Date.now() - importProgress.startedAtMs) / 1000, 0.001);
+    const fileRate = importProgress.completedFiles / elapsedSeconds;
+    const byteRate = importProgress.processedBytes / elapsedSeconds;
+    const remainingBytes = Math.max(importProgress.totalBytes - importProgress.processedBytes, 0);
+    const etaSeconds = byteRate > 0 ? remainingBytes / byteRate : Number.POSITIVE_INFINITY;
+
+    return {
+      percent: importProgress.totalFiles > 0 ? Math.round((importProgress.completedFiles / importProgress.totalFiles) * 100) : 0,
+      elapsedText: formatDuration(elapsedSeconds),
+      etaText: Number.isFinite(etaSeconds) ? formatDuration(etaSeconds) : "--",
+      fileRateText: `${fileRate.toFixed(fileRate >= 10 ? 0 : 1)} files/s`,
+      speedText: `${formatBytes(byteRate)}/s`,
+      progressText: `${importProgress.completedFiles}/${importProgress.totalFiles}`,
+      bytesText: `${formatBytes(importProgress.processedBytes)} / ${formatBytes(importProgress.totalBytes)}`,
+      remainingFilesText: `${Math.max(importProgress.totalFiles - importProgress.completedFiles, 0)} remaining`,
+      uploadedFilesText: `${importProgress.uploadedFiles} uploaded`,
+      failedFilesText: `${importProgress.failedFiles} failed`,
+      activeFileName: importProgress.activeFileName,
+    };
+  }, [importProgress]);
   const canSubmit = Object.keys(pendingAnnotations).length > 0 || (!editMode && selectedLabelIds.length > 0 && currentAsset !== null);
 
   return (
@@ -1073,12 +1167,39 @@ export default function HomePage() {
               <span>Folder Name</span>
               <input value={importFolderName} onChange={(event) => setImportFolderName(event.target.value)} placeholder={importDialog.sourceFolderName} />
             </label>
+            {isImporting && importProgressView ? (
+              <section className="import-progress" aria-live="polite">
+                <div className="import-progress-head">
+                  <strong>Importing {importProgressView.progressText}</strong>
+                  <span>{importProgressView.percent}%</span>
+                </div>
+                <div className="import-progress-bar">
+                  <span style={{ width: `${importProgressView.percent}%` }} />
+                </div>
+                <div className="import-progress-metrics">
+                  <span>{importProgressView.bytesText}</span>
+                  <span>{importProgressView.speedText}</span>
+                  <span>{importProgressView.fileRateText}</span>
+                </div>
+                <div className="import-progress-metrics">
+                  <span>{importProgressView.uploadedFilesText}</span>
+                  <span>{importProgressView.failedFilesText}</span>
+                  <span>{importProgressView.remainingFilesText}</span>
+                </div>
+                <div className="import-progress-metrics">
+                  <span>Elapsed: {importProgressView.elapsedText}</span>
+                  <span>ETA: {importProgressView.etaText}</span>
+                </div>
+                {importProgressView.activeFileName ? <p className="import-progress-file">Uploading: {importProgressView.activeFileName}</p> : null}
+              </section>
+            ) : null}
             <div className="import-modal-actions">
                 <button
                   type="button"
                   className="ghost-button"
                   onClick={() => {
                     setSelectedImportExistingFolder("");
+                    setImportProgress(null);
                     setImportDialog({ open: false, sourceFolderName: "", files: [] });
                   }}
                   disabled={isImporting}

@@ -30,6 +30,7 @@ Status reflects current repository behavior.
 ### Web (`apps/web`)
 - [x] Main workspace UI integrated at `/`
 - [x] Responsive styling + viewer letterbox rendering
+- [x] Bounded responsive viewport height (stable with large datasets)
 - [x] Dataset sidebar with search
 - [x] Hierarchical file tree with folder/file navigation
 - [x] Import dialog:
@@ -41,9 +42,12 @@ Status reflects current repository behavior.
 - [x] Folder-scoped queue selection from tree
 - [x] Tree expand/collapse (per-folder + collapse all/expand all)
 - [x] Labeled/unlabeled status coloring in tree and pagination
+- [x] Adaptive pagination (width-aware chip window + `First`/`Last`)
+- [x] Viewer skip controls (`-10`, `-5`, `<`, `>`, `+5`, `+10`)
 - [x] Robust import diagnostics:
   - [x] MIME + extension filtering fallback
   - [x] detailed per-file failure messages
+- [x] Import progress/throughput/ETA panel
 - [x] Label panel features:
   - [x] add label
   - [x] manage labels (rename/reorder/activate/deactivate)
@@ -59,6 +63,7 @@ Status reflects current repository behavior.
 - [x] README aligned with implemented stack/workflow
 - [x] Architecture doc aligned with code
 - [x] Roadmap refreshed and feature requests recorded
+- [x] Changelog maintained for major feature increments
 
 ## In Progress / Next
 

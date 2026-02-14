@@ -10,7 +10,7 @@ labeling -> training -> deployment.
 - `M0` foundation: done
 - `M1` project/category management: mostly done
 - `M2` image ingestion/storage: done for local workflow
-- `M3` labeling workstation: in progress (major functionality implemented)
+- `M3` labeling workstation: in progress (core loop implemented)
 - `M4+` review/export hardening/video/MAL: pending
 
 ## Guiding Principles
@@ -55,6 +55,10 @@ Implemented:
 - persisted relative paths for hierarchy rendering
 - backend image storage + streaming endpoint
 - automatic asset/tree refresh after import
+- import progress card (files, bytes, rates, ETA)
+- robust import diagnostics:
+  - extension fallback when MIME is missing
+  - per-file read/network/API error details
 
 Remaining:
 - image metadata extraction (`width/height`)
@@ -64,6 +68,7 @@ Remaining:
 
 Implemented:
 - viewer navigation (buttons + arrow keys)
+- skip controls (`-10`, `-5`, `<`, `>`, `+5`, `+10`)
 - staged edit mode
 - batch submit staged edits
 - single-label and multi-label assignment
@@ -71,6 +76,8 @@ Implemented:
 - folder-scoped review selection from tree
 - tree expand/collapse controls (single folder + collapse/expand all)
 - labeled/unlabeled visual status in pagination and tree
+- responsive bounded viewport with black letterbox rendering
+- adaptive pagination window sized to available width
 - COCO-style classification payload fields
 
 Remaining:

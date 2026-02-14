@@ -379,7 +379,7 @@ button {
 .viewer-canvas {
   border-radius: 24px;
   border: 1px solid #c5ccd8;
-  min-height: 560px;
+  height: clamp(320px, 56vh, 620px);
   position: relative;
   overflow: hidden;
   background:
@@ -469,20 +469,27 @@ button {
 }
 
 .viewer-controls {
-  display: flex;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 14px;
+  width: 100%;
 }
 
 .viewer-pagination {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: 8px;
   padding: 8px 10px;
   border: 1px solid #cad0db;
   border-radius: 14px;
   background: #f1f4f9;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  flex: 1 1 auto;
+  overflow-x: auto;
+  white-space: nowrap;
 }
 
 .page-chip {
@@ -516,10 +523,24 @@ button {
   font-weight: 700;
 }
 
+.page-chip.page-jump {
+  font-size: 12px;
+  min-width: 48px;
+}
+
+.page-ellipsis {
+  color: #6d7990;
+  font-size: 14px;
+  padding: 0 2px;
+}
+
 .viewer-nav {
   display: flex;
   align-items: center;
   gap: 8px;
+  margin-left: 0;
+  justify-self: end;
+  flex: 0 0 auto;
 }
 
 .labels-panel {
@@ -847,6 +868,55 @@ button {
   gap: 8px;
 }
 
+.import-progress {
+  border: 1px solid #ccd5e3;
+  border-radius: 10px;
+  padding: 10px;
+  background: #f2f6fd;
+  display: grid;
+  gap: 6px;
+}
+
+.import-progress-head {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+  color: #23354d;
+}
+
+.import-progress-bar {
+  width: 100%;
+  height: 9px;
+  border-radius: 999px;
+  background: #dce4f2;
+  overflow: hidden;
+}
+
+.import-progress-bar span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #2f71cb, #4a8ce4);
+  transition: width 0.18s ease;
+}
+
+.import-progress-metrics {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: #43556f;
+}
+
+.import-progress-file {
+  margin: 0;
+  font-size: 12px;
+  color: #2f4765;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 @media (max-width: 1400px) {
   .workspace-header-cell {
     font-size: 33px;
@@ -858,7 +928,7 @@ button {
   }
 
   .viewer-canvas {
-    min-height: 430px;
+    height: clamp(300px, 52vh, 500px);
   }
 
   .nav-link-button {
@@ -916,11 +986,22 @@ button {
   }
 
   .viewer-canvas {
-    min-height: 330px;
+    height: clamp(260px, 44vh, 380px);
   }
 
   .viewer-controls {
-    flex-direction: column;
-    align-items: flex-start;
+    grid-template-columns: 1fr;
+    align-items: stretch;
+    gap: 8px;
+  }
+
+  .viewer-pagination {
+    width: 100%;
+  }
+
+  .viewer-nav {
+    margin-left: 0;
+    justify-content: flex-start;
+    flex-wrap: wrap;
   }
 }
