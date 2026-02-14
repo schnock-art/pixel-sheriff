@@ -13,7 +13,7 @@ Operational flow:
 1. Pick/create project.
 2. Import local images to a project folder.
 3. Persist images in API storage.
-4. Annotate in edit mode (single or multi-label).
+4. Annotate in edit mode (single or multi-label, based on project setting).
 5. Submit staged annotations.
 6. Generate and download export artifact (`.zip`).
 
@@ -103,17 +103,24 @@ Layout:
 Implemented behaviors:
 - Import modal:
   - existing/new project destination
+  - optional existing folder/subfolder destination for existing projects
   - editable target folder name
+  - post-import asset refresh without manual reload
 - Hierarchical folder/file tree generation from asset relative paths
+  - per-folder expand/collapse
+  - collapse-all / expand-all actions
+  - folder-scope filtering for review queue
+  - labeled/unlabeled visual indicators in tree
 - Viewer letterbox rendering (`contain` on black background)
 - Arrow key image navigation
+- Pagination chips show labeled/unlabeled state
 - Label management mode:
   - add labels
   - rename/reorder/activate/deactivate
 - Edit mode:
   - stage per-asset edits
   - batch submit staged annotations
-- Multi-label toggle in edit mode
+- Project-scoped multi-label toggle in label manage mode
 
 ## 6. Annotation Payload Shape
 

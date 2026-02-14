@@ -34,15 +34,20 @@ Status reflects current repository behavior.
 - [x] Hierarchical file tree with folder/file navigation
 - [x] Import dialog:
   - [x] existing vs new project
+  - [x] existing folder/subfolder destination option (existing-project imports)
   - [x] target folder naming
+- [x] Auto-refresh asset/tree view after import
 - [x] Hierarchical file tree with preserved parent/child ordering
+- [x] Folder-scoped queue selection from tree
+- [x] Tree expand/collapse (per-folder + collapse all/expand all)
+- [x] Labeled/unlabeled status coloring in tree and pagination
 - [x] Robust import diagnostics:
   - [x] MIME + extension filtering fallback
   - [x] detailed per-file failure messages
 - [x] Label panel features:
   - [x] add label
   - [x] manage labels (rename/reorder/activate/deactivate)
-  - [x] multi-label toggle in edit mode
+  - [x] project-scoped multi-label toggle (managed in label manage mode)
   - [x] add-label input visible only in manage mode
 - [x] Annotation UX:
   - [x] edit mode staging

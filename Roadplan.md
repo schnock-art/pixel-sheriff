@@ -50,9 +50,11 @@ Implemented:
 - import destination selection:
   - existing project
   - new project
+- existing-folder/subfolder destination support for existing project imports
 - editable target folder naming
 - persisted relative paths for hierarchy rendering
 - backend image storage + streaming endpoint
+- automatic asset/tree refresh after import
 
 Remaining:
 - image metadata extraction (`width/height`)
@@ -66,6 +68,9 @@ Implemented:
 - batch submit staged edits
 - single-label and multi-label assignment
 - hierarchical file tree navigation
+- folder-scoped review selection from tree
+- tree expand/collapse controls (single folder + collapse/expand all)
+- labeled/unlabeled visual status in pagination and tree
 - COCO-style classification payload fields
 
 Remaining:

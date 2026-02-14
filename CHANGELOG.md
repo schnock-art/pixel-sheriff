@@ -13,14 +13,21 @@ All notable changes to this project will be documented in this file.
 - Import dialog supporting:
   - existing project destination
   - new project creation
+  - existing folder/subfolder destination selection for existing-project imports
   - editable target folder name
+- Automatic asset/tree refresh after import.
 - Label management UI:
   - create labels
   - rename/reorder/activate/deactivate labels
 - Edit mode with staged annotations and batch submit.
-- Multi-label toggle (available in edit mode).
+- Project-scoped multi-label toggle (managed in label manage mode).
 - Arrow-key image navigation.
 - Detailed import diagnostics for local file-read and network failures.
+- Folder-scoped review from sidebar tree.
+- Tree controls:
+  - per-folder expand/collapse
+  - collapse-all / expand-all actions
+- Labeled/unlabeled visual status indicators in tree and pagination.
 - Export pipeline:
   - COCO-style export bundle generation on API
   - zip artifact persistence in storage

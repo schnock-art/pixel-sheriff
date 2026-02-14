@@ -8,8 +8,9 @@ export function useAssets(projectId: string | null) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const refetch = useCallback(async () => {
-    if (!projectId) {
+  const refetch = useCallback(async (projectIdOverride?: string | null) => {
+    const effectiveProjectId = projectIdOverride ?? projectId;
+    if (!effectiveProjectId) {
       setData([]);
       setAnnotations([]);
       return;
@@ -18,7 +19,7 @@ export function useAssets(projectId: string | null) {
     try {
       setIsLoading(true);
       setError(null);
-      const [assets, annotationRows] = await Promise.all([listAssets(projectId), listAnnotations(projectId)]);
+      const [assets, annotationRows] = await Promise.all([listAssets(effectiveProjectId), listAnnotations(effectiveProjectId)]);
       setData(assets);
       setAnnotations(annotationRows);
     } catch (err) {

@@ -15,9 +15,14 @@ Local-first CV annotation platform.
 - Folder import for local images
 - Single import dialog:
   - existing project or new project
+  - optional existing folder/subfolder target when importing to existing project
   - editable target folder name
+- Automatic asset/tree refresh after import (no manual page reload)
 - Persistent asset upload/storage
 - Hierarchical file tree (folders/subfolders/files)
+- Tree expand/collapse controls (per-folder + collapse all/expand all)
+- Folder-scoped review queue (select folder to review only that subtree)
+- Labeled/unlabeled color indicators in tree and pagination
 - Viewer with aspect-ratio-preserving black letterbox
 - Keyboard image navigation (`ArrowLeft` / `ArrowRight`)
 - Label management:
@@ -25,7 +30,7 @@ Local-first CV annotation platform.
   - rename/reorder/activate/deactivate
 - Edit mode with staged annotation changes
 - Batch submit staged annotations
-- Multi-label toggle (in edit mode)
+- Project-scoped multi-label toggle (configured in Manage Labels mode)
 - Annotation upsert/list APIs
 - COCO-style export bundle generation (manifest + annotations + images)
 - One-click export download from web UI

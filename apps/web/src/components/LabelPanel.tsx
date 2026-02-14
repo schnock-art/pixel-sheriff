@@ -117,9 +117,9 @@ export function LabelPanel({
           type="button"
           className={multiLabelEnabled ? "ghost-button active-toggle" : "ghost-button"}
           onClick={onToggleMultiLabel}
-          disabled={!editMode}
+          disabled={!manageMode}
         >
-          Multi-label: {multiLabelEnabled ? "On" : "Off"}
+          Project Multi-label: {multiLabelEnabled ? "On" : "Off"}
         </button>
         {manageMode ? (
           <button type="button" className="primary-button" onClick={handleSaveLabelChanges} disabled={isSavingLabelChanges}>

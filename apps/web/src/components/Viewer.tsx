@@ -9,12 +9,13 @@ interface ViewerProps {
   currentAsset: ViewerAsset | null;
   totalAssets: number;
   currentIndex: number;
+  pageStatuses?: Array<"labeled" | "unlabeled">;
   onSelectIndex: (index: number) => void;
   onPrev: () => void;
   onNext: () => void;
 }
 
-export function Viewer({ currentAsset, totalAssets, currentIndex, onSelectIndex, onPrev, onNext }: ViewerProps) {
+export function Viewer({ currentAsset, totalAssets, currentIndex, pageStatuses, onSelectIndex, onPrev, onNext }: ViewerProps) {
   const hasImage = Boolean(currentAsset?.uri);
 
   return (
@@ -29,7 +30,12 @@ export function Viewer({ currentAsset, totalAssets, currentIndex, onSelectIndex,
       </div>
 
       <div className="viewer-controls">
-        <Pagination total={Math.max(totalAssets, 1)} current={Math.max(currentIndex, 0)} onSelect={onSelectIndex} />
+        <Pagination
+          total={Math.max(totalAssets, 1)}
+          current={Math.max(currentIndex, 0)}
+          onSelect={onSelectIndex}
+          statuses={pageStatuses}
+        />
         <div className="viewer-nav">
           <button type="button" className="ghost-button" onClick={onNext}>
             Next

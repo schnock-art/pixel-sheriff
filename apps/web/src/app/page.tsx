@@ -11,6 +11,7 @@ import {
   createExport,
   createCategory,
   createProject,
+  listAssets,
   patchCategory,
   resolveAssetUri,
   uploadAsset,
@@ -23,6 +24,7 @@ import { useLabels } from "../lib/hooks/useLabels";
 import { useProject } from "../lib/hooks/useProject";
 
 const IMAGE_EXTENSIONS = new Set(["jpg", "jpeg", "png", "gif", "bmp", "webp", "tif", "tiff"]);
+const PROJECT_MULTILABEL_STORAGE_KEY = "pixel-sheriff:project-multilabel:v1";
 
 interface PendingAnnotation {
   labelIds: number[];
@@ -34,8 +36,18 @@ interface TreeEntry {
   name: string;
   depth: number;
   kind: "folder" | "file";
+  path: string;
   assetId?: string;
+  folderPath?: string;
 }
+
+interface TreeBuildResult {
+  entries: TreeEntry[];
+  orderedAssetIds: string[];
+  folderAssetIds: Record<string, string[]>;
+}
+
+type FolderReviewStatus = "all_labeled" | "has_unlabeled" | "empty";
 
 interface ImportDialogState {
   open: boolean;
@@ -65,7 +77,37 @@ function asRelativePath(asset: { uri: string; metadata_json: Record<string, unkn
   return asset.uri;
 }
 
-function buildTreeEntries(assets: { id: string; uri: string; metadata_json: Record<string, unknown> }[]): TreeEntry[] {
+function collectFolderPaths(assets: { uri: string; metadata_json: Record<string, unknown> }[]): string[] {
+  return collectFolderPathsFromRelativePaths(assets.map((asset) => asRelativePath(asset)));
+}
+
+function collectFolderPathsFromRelativePaths(relativePaths: string[]): string[] {
+  const paths = new Set<string>();
+  for (const rawPath of relativePaths) {
+    const rel = rawPath.replaceAll("\\", "/");
+    const parts = rel.split("/").filter(Boolean);
+    const folderParts = parts.slice(0, -1);
+    let prefix = "";
+    for (const part of folderParts) {
+      prefix = prefix ? `${prefix}/${part}` : part;
+      paths.add(prefix);
+    }
+  }
+  return Array.from(paths).sort((a, b) => a.localeCompare(b));
+}
+
+function folderChain(path: string): string[] {
+  const parts = path.split("/").filter(Boolean);
+  const chain: string[] = [];
+  let prefix = "";
+  for (const part of parts) {
+    prefix = prefix ? `${prefix}/${part}` : part;
+    chain.push(prefix);
+  }
+  return chain;
+}
+
+function buildTreeEntries(assets: { id: string; uri: string; metadata_json: Record<string, unknown> }[]): TreeBuildResult {
   type FolderNode = {
     name: string;
     path: string;
@@ -99,8 +141,11 @@ function buildTreeEntries(assets: { id: string; uri: string; metadata_json: Reco
   }
 
   const result: TreeEntry[] = [];
+  const orderedAssetIds: string[] = [];
+  const folderAssetIds = new Map<string, string[]>();
 
-  function visit(node: FolderNode, depth: number): void {
+  function visit(node: FolderNode, depth: number): string[] {
+    const subtreeAssetIds: string[] = [];
     const folders = Array.from(node.folders.values()).sort((a, b) => a.name.localeCompare(b.name));
     for (const folder of folders) {
       result.push({
@@ -108,24 +153,37 @@ function buildTreeEntries(assets: { id: string; uri: string; metadata_json: Reco
         name: folder.name,
         depth,
         kind: "folder",
+        path: folder.path,
       });
-      visit(folder, depth + 1);
+      const childAssetIds = visit(folder, depth + 1);
+      folderAssetIds.set(folder.path, childAssetIds);
+      subtreeAssetIds.push(...childAssetIds);
     }
 
     const files = node.files.slice().sort((a, b) => a.name.localeCompare(b.name));
     for (const file of files) {
+      orderedAssetIds.push(file.id);
+      subtreeAssetIds.push(file.id);
       result.push({
         key: `file:${file.id}`,
         name: file.name,
         depth,
         kind: "file",
+        path: file.name,
         assetId: file.id,
+        folderPath: node.path,
       });
     }
+    return subtreeAssetIds;
   }
 
   visit(root, 0);
-  return result;
+  const folderAssetIdsRecord: Record<string, string[]> = {};
+  folderAssetIds.forEach((ids, folderPath) => {
+    folderAssetIdsRecord[folderPath] = ids;
+  });
+
+  return { entries: result, orderedAssetIds, folderAssetIds: folderAssetIdsRecord };
 }
 
 export default function HomePage() {
@@ -141,7 +199,7 @@ export default function HomePage() {
   const [isSavingLabelChanges, setIsSavingLabelChanges] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [editMode, setEditMode] = useState(false);
-  const [multiLabelEnabled, setMultiLabelEnabled] = useState(false);
+  const [projectMultiLabelSettings, setProjectMultiLabelSettings] = useState<Record<string, boolean>>({});
   const [pendingAnnotations, setPendingAnnotations] = useState<Record<string, PendingAnnotation>>({});
   const [message, setMessage] = useState<string | null>(null);
   const [importFailures, setImportFailures] = useState<string[]>([]);
@@ -150,6 +208,10 @@ export default function HomePage() {
   const [importExistingProjectId, setImportExistingProjectId] = useState<string>("");
   const [importNewProjectName, setImportNewProjectName] = useState("");
   const [importFolderName, setImportFolderName] = useState("");
+  const [selectedTreeFolderPath, setSelectedTreeFolderPath] = useState<string | null>(null);
+  const [collapsedFolders, setCollapsedFolders] = useState<Record<string, boolean>>({});
+  const [importFolderOptionsByProject, setImportFolderOptionsByProject] = useState<Record<string, string[]>>({});
+  const [selectedImportExistingFolder, setSelectedImportExistingFolder] = useState<string>("");
 
   useEffect(() => {
     if (!selectedProjectId && projects.length > 0) {
@@ -157,13 +219,113 @@ export default function HomePage() {
     }
   }, [projects, selectedProjectId]);
 
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const raw = window.localStorage.getItem(PROJECT_MULTILABEL_STORAGE_KEY);
+      if (!raw) return;
+      const parsed: unknown = JSON.parse(raw);
+      if (!parsed || typeof parsed !== "object") return;
+
+      const normalized: Record<string, boolean> = {};
+      for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+        normalized[key] = Boolean(value);
+      }
+      setProjectMultiLabelSettings(normalized);
+    } catch {
+      setProjectMultiLabelSettings({});
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(PROJECT_MULTILABEL_STORAGE_KEY, JSON.stringify(projectMultiLabelSettings));
+  }, [projectMultiLabelSettings]);
+
   const datasets = projects.map((project) => ({ id: project.id, name: project.name }));
   const filteredDatasets = datasets.filter((dataset) => dataset.name.toLowerCase().includes(query.trim().toLowerCase()));
   const activeDatasetId = selectedProjectId;
+  const multiLabelEnabled = selectedProjectId ? Boolean(projectMultiLabelSettings[selectedProjectId]) : false;
 
-  const { data: assets, annotations, setAnnotations } = useAssets(selectedProjectId);
+  const { data: assets, annotations, setAnnotations, refetch: refetchAssets, isLoading: isAssetsLoading } = useAssets(selectedProjectId);
   const { data: labels, refetch: refetchLabels } = useLabels(selectedProjectId);
-  const assetRows = assets;
+
+  useEffect(() => {
+    if (!importDialog.open) return;
+    if (importMode !== "existing") return;
+    if (!importExistingProjectId) return;
+    if (importFolderOptionsByProject[importExistingProjectId]) return;
+
+    let isActive = true;
+
+    async function loadFolderOptions() {
+      try {
+        if (importExistingProjectId === selectedProjectId) {
+          if (isAssetsLoading) return;
+          if (!isActive) return;
+          setImportFolderOptionsByProject((previous) => ({
+            ...previous,
+            [importExistingProjectId]: collectFolderPaths(assets),
+          }));
+          return;
+        }
+
+        const projectAssets = await listAssets(importExistingProjectId);
+        if (!isActive) return;
+        setImportFolderOptionsByProject((previous) => ({
+          ...previous,
+          [importExistingProjectId]: collectFolderPaths(projectAssets),
+        }));
+      } catch {
+        if (!isActive) return;
+        setImportFolderOptionsByProject((previous) => ({
+          ...previous,
+          [importExistingProjectId]: [],
+        }));
+      }
+    }
+
+    void loadFolderOptions();
+    return () => {
+      isActive = false;
+    };
+  }, [assets, importDialog.open, importExistingProjectId, importFolderOptionsByProject, importMode, isAssetsLoading, selectedProjectId]);
+  const assetById = useMemo(() => {
+    const map = new Map<string, (typeof assets)[number]>();
+    for (const asset of assets) map.set(asset.id, asset);
+    return map;
+  }, [assets]);
+
+  const treeBuild = useMemo(() => buildTreeEntries(assets), [assets]);
+  const treeEntries = treeBuild.entries;
+  const treeFolderPaths = useMemo(() => Object.keys(treeBuild.folderAssetIds), [treeBuild.folderAssetIds]);
+  const visibleTreeEntries = useMemo(() => {
+    function isHiddenByCollapsedAncestor(entry: TreeEntry): boolean {
+      const parentPath = entry.kind === "folder" ? entry.path.split("/").slice(0, -1).join("/") : entry.folderPath ?? "";
+      if (!parentPath) return false;
+      for (const ancestor of folderChain(parentPath)) {
+        if (collapsedFolders[ancestor]) return true;
+      }
+      return false;
+    }
+
+    return treeEntries.filter((entry) => !isHiddenByCollapsedAncestor(entry));
+  }, [collapsedFolders, treeEntries]);
+  const orderedAssetRows = useMemo(
+    () =>
+      treeBuild.orderedAssetIds
+        .map((assetId) => assetById.get(assetId))
+        .filter((asset): asset is (typeof assets)[number] => asset !== undefined),
+    [assetById, treeBuild.orderedAssetIds],
+  );
+
+  const filteredAssetRows = useMemo(() => {
+    if (!selectedTreeFolderPath) return orderedAssetRows;
+    const prefix = `${selectedTreeFolderPath}/`;
+    return orderedAssetRows.filter((asset) => asRelativePath(asset).replaceAll("\\", "/").startsWith(prefix));
+  }, [orderedAssetRows, selectedTreeFolderPath]);
+
+  const assetRows = filteredAssetRows;
   const allLabelRows = labels.map((label) => ({
     id: label.id,
     name: label.name,
@@ -175,7 +337,6 @@ export default function HomePage() {
   const safeAssetIndex = Math.min(assetIndex, Math.max(assetRows.length - 1, 0));
   const currentAsset = assetRows[safeAssetIndex] ?? null;
   const viewerAsset = currentAsset ? { id: currentAsset.id, uri: resolveAssetUri(currentAsset.uri) } : null;
-  const treeEntries = useMemo(() => buildTreeEntries(assetRows), [assetRows]);
 
   const annotationByAssetId = useMemo(() => {
     const map = new Map<string, Annotation>();
@@ -184,6 +345,40 @@ export default function HomePage() {
     }
     return map;
   }, [annotations]);
+
+  const assetReviewStatusById = useMemo(() => {
+    const map = new Map<string, "labeled" | "unlabeled">();
+    for (const asset of orderedAssetRows) {
+      const pending = pendingAnnotations[asset.id];
+      if (pending) {
+        const isLabeled = pending.status !== "unlabeled" && pending.labelIds.length > 0;
+        map.set(asset.id, isLabeled ? "labeled" : "unlabeled");
+        continue;
+      }
+      const annotation = annotationByAssetId.get(asset.id);
+      const isLabeled = Boolean(annotation && annotation.status !== "unlabeled");
+      map.set(asset.id, isLabeled ? "labeled" : "unlabeled");
+    }
+    return map;
+  }, [annotationByAssetId, orderedAssetRows, pendingAnnotations]);
+
+  const pageStatuses = useMemo(
+    () => assetRows.map((asset) => assetReviewStatusById.get(asset.id) ?? "unlabeled"),
+    [assetReviewStatusById, assetRows],
+  );
+
+  const folderReviewStatusByPath = useMemo(() => {
+    const status: Record<string, FolderReviewStatus> = {};
+    for (const [folderPath, assetIds] of Object.entries(treeBuild.folderAssetIds)) {
+      if (assetIds.length === 0) {
+        status[folderPath] = "empty";
+        continue;
+      }
+      const hasUnlabeled = assetIds.some((assetId) => (assetReviewStatusById.get(assetId) ?? "unlabeled") === "unlabeled");
+      status[folderPath] = hasUnlabeled ? "has_unlabeled" : "all_labeled";
+    }
+    return status;
+  }, [assetReviewStatusById, treeBuild.folderAssetIds]);
 
   useEffect(() => {
     if (!currentAsset) {
@@ -222,6 +417,32 @@ export default function HomePage() {
   }, [annotationByAssetId, currentAsset, pendingAnnotations]);
 
   useEffect(() => {
+    if (multiLabelEnabled) return;
+
+    if (selectedLabelIds.length > 1) {
+      setSelectedLabelIds([selectedLabelIds[0]]);
+    }
+
+    setPendingAnnotations((previous) => {
+      let changed = false;
+      const next: Record<string, PendingAnnotation> = {};
+      for (const [assetId, pending] of Object.entries(previous)) {
+        if (pending.labelIds.length > 1) {
+          changed = true;
+          next[assetId] = { ...pending, labelIds: [pending.labelIds[0]] };
+        } else {
+          next[assetId] = pending;
+        }
+      }
+      return changed ? next : previous;
+    });
+  }, [multiLabelEnabled, selectedLabelIds]);
+
+  useEffect(() => {
+    setAssetIndex((previous) => Math.min(previous, Math.max(assetRows.length - 1, 0)));
+  }, [assetRows.length]);
+
+  useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
       const target = event.target as HTMLElement | null;
       const tag = target?.tagName?.toLowerCase();
@@ -243,6 +464,8 @@ export default function HomePage() {
 
   function handleSelectDataset(id: string) {
     setSelectedProjectId(id);
+    setSelectedTreeFolderPath(null);
+    setCollapsedFolders({});
     setAssetIndex(0);
     setPendingAnnotations({});
     setEditMode(false);
@@ -271,6 +494,14 @@ export default function HomePage() {
     setPendingAnnotations((previous) => ({
       ...previous,
       [currentAsset.id]: { labelIds: nextLabelIds, status: effectiveStatus },
+    }));
+  }
+
+  function handleToggleProjectMultiLabel() {
+    if (!selectedProjectId) return;
+    setProjectMultiLabelSettings((previous) => ({
+      ...previous,
+      [selectedProjectId]: !Boolean(previous[selectedProjectId]),
     }));
   }
 
@@ -417,6 +648,7 @@ export default function HomePage() {
     const defaultMode: "existing" | "new" = projects.length > 0 ? "existing" : "new";
     setImportMode(defaultMode);
     setImportExistingProjectId(defaultProject?.id ?? "");
+    setSelectedImportExistingFolder("");
     setImportNewProjectName(sourceFolderName);
     setImportFolderName(sourceFolderName);
     setImportDialog({ open: true, sourceFolderName, files });
@@ -428,6 +660,7 @@ export default function HomePage() {
     const folderName = importFolderName.trim();
     if (files.length === 0) {
       setMessage("Import cancelled: no files selected.");
+      setSelectedImportExistingFolder("");
       setImportDialog({ open: false, sourceFolderName: "", files: [] });
       return;
     }
@@ -482,13 +715,27 @@ export default function HomePage() {
       }
 
       await refetchProjects();
+      await refetchAssets(targetProjectId);
       setSelectedProjectId(targetProjectId);
+      setSelectedTreeFolderPath(null);
+      setCollapsedFolders({});
       setAssetIndex(0);
       setSelectedLabelIds([]);
       setCurrentStatus("unlabeled");
       setPendingAnnotations({});
       setEditMode(false);
+      setSelectedImportExistingFolder("");
+      setImportFolderOptionsByProject((previous) => {
+        const importedRelativePaths = files.map((file) => buildTargetRelativePath(file, folderName));
+        const importedFolders = collectFolderPathsFromRelativePaths(importedRelativePaths);
+        const merged = new Set([...(previous[targetProjectId] ?? []), ...importedFolders]);
+        return {
+          ...previous,
+          [targetProjectId]: Array.from(merged).sort((a, b) => a.localeCompare(b)),
+        };
+      });
       setImportFailures(failures);
+      setSelectedImportExistingFolder("");
       setImportDialog({ open: false, sourceFolderName: "", files: [] });
 
       if (uploadedCount === 0) setMessage(`Import failed: no files uploaded to "${folderName}".`);
@@ -558,12 +805,64 @@ export default function HomePage() {
     }
   }
 
-  function handleSelectTreeAsset(assetId: string) {
-    const index = assetRows.findIndex((item) => item.id === assetId);
+  function handleSelectFolderScope(folderPath: string | null) {
+    if (folderPath) {
+      setCollapsedFolders((previous) => {
+        const next = { ...previous };
+        for (const path of folderChain(folderPath)) next[path] = false;
+        return next;
+      });
+    }
+    setSelectedTreeFolderPath(folderPath);
+    setAssetIndex(0);
+  }
+
+  function handleToggleFolderCollapsed(folderPath: string) {
+    setCollapsedFolders((previous) => ({
+      ...previous,
+      [folderPath]: !Boolean(previous[folderPath]),
+    }));
+  }
+
+  function handleCollapseAllFolders() {
+    const next: Record<string, boolean> = {};
+    for (const folderPath of treeFolderPaths) {
+      next[folderPath] = true;
+    }
+    setCollapsedFolders(next);
+  }
+
+  function handleExpandAllFolders() {
+    setCollapsedFolders({});
+  }
+
+  function handleSelectTreeAsset(assetId: string, folderPath?: string) {
+    let scopedRows = assetRows;
+
+    if (folderPath && folderPath !== selectedTreeFolderPath) {
+      const prefix = `${folderPath}/`;
+      scopedRows = orderedAssetRows.filter((asset) => asRelativePath(asset).replaceAll("\\", "/").startsWith(prefix));
+      setSelectedTreeFolderPath(folderPath);
+      setCollapsedFolders((previous) => {
+        const next = { ...previous };
+        for (const path of folderChain(folderPath)) next[path] = false;
+        return next;
+      });
+    }
+
+    let index = scopedRows.findIndex((item) => item.id === assetId);
+    if (index < 0) {
+      setSelectedTreeFolderPath(null);
+      scopedRows = orderedAssetRows;
+      index = scopedRows.findIndex((item) => item.id === assetId);
+    }
+
     if (index >= 0) setAssetIndex(index);
   }
 
   const selectedDatasetName = datasets.find((dataset) => dataset.id === activeDatasetId)?.name ?? "No dataset selected";
+  const headerTitle = selectedTreeFolderPath ? `${selectedDatasetName} / ${selectedTreeFolderPath}` : selectedDatasetName;
+  const importExistingFolderOptions = importFolderOptionsByProject[importExistingProjectId] ?? [];
   const canSubmit = Object.keys(pendingAnnotations).length > 0 || (!editMode && selectedLabelIds.length > 0 && currentAsset !== null);
 
   return (
@@ -571,7 +870,7 @@ export default function HomePage() {
       <section className="workspace-frame">
         <header className="workspace-header">
           <div className="workspace-header-cell">Datasets</div>
-          <div className="workspace-header-cell workspace-header-title">{selectedDatasetName}</div>
+          <div className="workspace-header-cell workspace-header-title">{headerTitle}</div>
           <div className="workspace-header-cell workspace-header-actions" aria-label="Toolbar">
             <span />
             <span />
@@ -585,20 +884,60 @@ export default function HomePage() {
             <Filters query={query} onQueryChange={setQuery} />
             <AssetGrid datasets={filteredDatasets} selectedDatasetId={activeDatasetId} onSelectDataset={handleSelectDataset} />
             <section className="project-tree">
-              <h3>Files</h3>
+              <div className="project-tree-head">
+                <h3>Files</h3>
+                <div className="tree-head-actions">
+                  <button type="button" className="tree-scope-button" onClick={handleCollapseAllFolders}>
+                    Collapse all
+                  </button>
+                  <button type="button" className="tree-scope-button" onClick={handleExpandAllFolders}>
+                    Expand all
+                  </button>
+                  <button
+                    type="button"
+                    className={selectedTreeFolderPath === null ? "tree-scope-button active" : "tree-scope-button"}
+                    onClick={() => handleSelectFolderScope(null)}
+                  >
+                    All files
+                  </button>
+                </div>
+              </div>
+              {selectedTreeFolderPath ? <p className="tree-scope-caption">Scope: {selectedTreeFolderPath}</p> : null}
               <ul>
-                {treeEntries.map((entry) => (
+                {visibleTreeEntries.map((entry) => (
                   <li key={entry.key}>
                     {entry.kind === "folder" ? (
-                      <div className="tree-folder" style={{ paddingLeft: `${entry.depth * 14 + 8}px` }}>
-                        {entry.name}
+                      <div className="tree-folder-row" style={{ paddingLeft: `${entry.depth * 14 + 8}px` }}>
+                        <button
+                          type="button"
+                          className="tree-folder-toggle"
+                          aria-label={collapsedFolders[entry.path] ? "Expand folder" : "Collapse folder"}
+                          onClick={() => handleToggleFolderCollapsed(entry.path)}
+                        >
+                          {collapsedFolders[entry.path] ? ">" : "v"}
+                        </button>
+                        <button
+                          type="button"
+                          className={`tree-folder-button${selectedTreeFolderPath === entry.path ? " active" : ""} ${
+                            folderReviewStatusByPath[entry.path] === "all_labeled"
+                              ? "is-labeled"
+                              : folderReviewStatusByPath[entry.path] === "has_unlabeled"
+                                ? "has-unlabeled"
+                                : "is-empty"
+                          }`}
+                          onClick={() => handleSelectFolderScope(entry.path)}
+                        >
+                          {entry.name}
+                        </button>
                       </div>
                     ) : (
                       <button
                         type="button"
-                        className={entry.assetId === currentAsset?.id ? "tree-file active" : "tree-file"}
+                        className={`tree-file${entry.assetId === currentAsset?.id ? " active" : ""} ${
+                          entry.assetId && assetReviewStatusById.get(entry.assetId) === "labeled" ? "is-labeled" : "is-unlabeled"
+                        }`}
                         style={{ paddingLeft: `${entry.depth * 14 + 8}px` }}
-                        onClick={() => entry.assetId && handleSelectTreeAsset(entry.assetId)}
+                        onClick={() => entry.assetId && handleSelectTreeAsset(entry.assetId, entry.folderPath)}
                       >
                         {entry.name}
                       </button>
@@ -613,6 +952,7 @@ export default function HomePage() {
             currentAsset={viewerAsset}
             totalAssets={assetRows.length}
             currentIndex={safeAssetIndex}
+            pageStatuses={pageStatuses}
             onSelectIndex={setAssetIndex}
             onPrev={handlePrevAsset}
             onNext={handleNextAsset}
@@ -633,7 +973,7 @@ export default function HomePage() {
             isSavingLabelChanges={isSavingLabelChanges}
             canSubmit={canSubmit}
             multiLabelEnabled={multiLabelEnabled}
-            onToggleMultiLabel={() => setMultiLabelEnabled((value) => !value)}
+            onToggleMultiLabel={handleToggleProjectMultiLabel}
           />
         </div>
 
@@ -644,27 +984,6 @@ export default function HomePage() {
             </button>
             <button type="button" className="ghost-button" onClick={handleExport} disabled={isExporting || !selectedProjectId}>
               {isExporting ? "Exporting..." : "Export Dataset"}
-            </button>
-          </div>
-
-          <div className="footer-center">
-            <button type="button" className="nav-link-button" onClick={handlePrevAsset}>
-              Previous
-            </button>
-            <button type="button" className="nav-link-button" onClick={handleNextAsset}>
-              Next
-            </button>
-          </div>
-
-          <div className="footer-right">
-            <span>Status: {currentStatus}</span>
-            <button
-              type="button"
-              className="toggle-button"
-              aria-label="Toggle status"
-              onClick={() => setCurrentStatus((status) => (status === "unlabeled" ? "labeled" : "unlabeled"))}
-            >
-              <span className={currentStatus === "unlabeled" ? "" : "is-on"} />
             </button>
           </div>
         </footer>
@@ -683,11 +1002,28 @@ export default function HomePage() {
             <h3>Import Images</h3>
             <div className="import-mode-row">
               <label>
-                <input type="radio" checked={importMode === "existing"} onChange={() => setImportMode("existing")} disabled={projects.length === 0} />
+                <input
+                  type="radio"
+                  checked={importMode === "existing"}
+                  onChange={() => {
+                    setImportMode("existing");
+                    setSelectedImportExistingFolder("");
+                    setImportFolderName(importDialog.sourceFolderName);
+                  }}
+                  disabled={projects.length === 0}
+                />
                 Existing Project
               </label>
               <label>
-                <input type="radio" checked={importMode === "new"} onChange={() => setImportMode("new")} />
+                <input
+                  type="radio"
+                  checked={importMode === "new"}
+                  onChange={() => {
+                    setImportMode("new");
+                    setSelectedImportExistingFolder("");
+                    setImportFolderName(importDialog.sourceFolderName);
+                  }}
+                />
                 New Project
               </label>
             </div>
@@ -696,7 +1032,14 @@ export default function HomePage() {
               {importMode === "new" ? (
                 <input value={importNewProjectName} onChange={(event) => setImportNewProjectName(event.target.value)} placeholder="Project name" />
               ) : (
-                <select value={importExistingProjectId} onChange={(event) => setImportExistingProjectId(event.target.value)}>
+                <select
+                  value={importExistingProjectId}
+                  onChange={(event) => {
+                    setImportExistingProjectId(event.target.value);
+                    setSelectedImportExistingFolder("");
+                    setImportFolderName(importDialog.sourceFolderName);
+                  }}
+                >
                   <option value="">Select project</option>
                   {projects.map((project) => (
                     <option key={project.id} value={project.id}>
@@ -706,17 +1049,40 @@ export default function HomePage() {
                 </select>
               )}
             </label>
+            {importMode === "existing" ? (
+              <label className="import-field">
+                <span>Existing Folder/Subfolder (optional)</span>
+                <select
+                  value={selectedImportExistingFolder}
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    setSelectedImportExistingFolder(value);
+                    if (value) setImportFolderName(value);
+                  }}
+                >
+                  <option value="">Create new / custom</option>
+                  {importExistingFolderOptions.map((folderPath) => (
+                    <option key={folderPath} value={folderPath}>
+                      {folderPath}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
             <label className="import-field">
               <span>Folder Name</span>
               <input value={importFolderName} onChange={(event) => setImportFolderName(event.target.value)} placeholder={importDialog.sourceFolderName} />
             </label>
             <div className="import-modal-actions">
-              <button
-                type="button"
-                className="ghost-button"
-                onClick={() => setImportDialog({ open: false, sourceFolderName: "", files: [] })}
-                disabled={isImporting}
-              >
+                <button
+                  type="button"
+                  className="ghost-button"
+                  onClick={() => {
+                    setSelectedImportExistingFolder("");
+                    setImportDialog({ open: false, sourceFolderName: "", files: [] });
+                  }}
+                  disabled={isImporting}
+                >
                 Cancel
               </button>
               <button type="button" className="primary-button" onClick={confirmImportFromDialog} disabled={isImporting}>
