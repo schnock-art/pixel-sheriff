@@ -25,6 +25,7 @@ import { useProject } from "../lib/hooks/useProject";
 
 const IMAGE_EXTENSIONS = new Set(["jpg", "jpeg", "png", "gif", "bmp", "webp", "tif", "tiff"]);
 const PROJECT_MULTILABEL_STORAGE_KEY = "pixel-sheriff:project-multilabel:v1";
+const LAST_PROJECT_STORAGE_KEY = "pixel-sheriff:last-project-id:v1";
 
 interface PendingAnnotation {
   labelIds: number[];
@@ -245,12 +246,47 @@ export default function HomePage() {
   const [importFolderOptionsByProject, setImportFolderOptionsByProject] = useState<Record<string, string[]>>({});
   const [selectedImportExistingFolder, setSelectedImportExistingFolder] = useState<string>("");
   const [importProgress, setImportProgress] = useState<ImportProgressState | null>(null);
+  const [preferredProjectId, setPreferredProjectId] = useState<string | null>(null);
+  const [hasLoadedPreferredProject, setHasLoadedPreferredProject] = useState(false);
 
   useEffect(() => {
-    if (!selectedProjectId && projects.length > 0) {
-      setSelectedProjectId(projects[0].id);
+    if (typeof window === "undefined") return;
+    try {
+      const raw = window.localStorage.getItem(LAST_PROJECT_STORAGE_KEY);
+      setPreferredProjectId(raw && raw.trim() !== "" ? raw : null);
+    } finally {
+      setHasLoadedPreferredProject(true);
     }
-  }, [projects, selectedProjectId]);
+  }, []);
+
+  useEffect(() => {
+    if (!hasLoadedPreferredProject) return;
+
+    if (projects.length === 0) {
+      if (selectedProjectId !== null) setSelectedProjectId(null);
+      return;
+    }
+
+    if (selectedProjectId && projects.some((project) => project.id === selectedProjectId)) {
+      return;
+    }
+
+    if (preferredProjectId && projects.some((project) => project.id === preferredProjectId)) {
+      setSelectedProjectId(preferredProjectId);
+      return;
+    }
+
+    setSelectedProjectId(projects[0].id);
+  }, [hasLoadedPreferredProject, preferredProjectId, projects, selectedProjectId]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (selectedProjectId) {
+      window.localStorage.setItem(LAST_PROJECT_STORAGE_KEY, selectedProjectId);
+    } else {
+      window.localStorage.removeItem(LAST_PROJECT_STORAGE_KEY);
+    }
+  }, [selectedProjectId]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
