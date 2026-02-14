@@ -76,6 +76,42 @@ Status reflects current repository behavior.
 
 ## In Progress / Next
 
+### Refactor Workstream (Lean + Readable, No Behavior Loss)
+- [x] Baseline code review completed with prioritized findings
+
+#### P0 - Integrity Hardening (do first)
+- [x] Guard annotation upsert by both `project_id` and `asset_id` (prevent cross-project updates)
+- [x] Validate project existence before writing uploaded bytes
+- [x] Ensure upload rollback cleanup when DB write fails after file write
+- [x] Replace mutable schema defaults (for example `metadata_json = {}`) with safe factories
+- [x] Add API tests for delete flows and integrity guards
+- [ ] Stabilize API async test harness in container/local so full suite passes reliably (currently loop/lifespan related)
+
+#### P1 - Web Behavior Consistency
+- [ ] Fix submit gating so "clear label" (unlabeled submit) is possible in non-edit mode
+- [ ] Keep staged/selected label state transitions explicit and test-covered
+
+#### P2 - Frontend Structure Refactor
+- [ ] Split `apps/web/src/app/page.tsx` into focused hooks/modules:
+  - [ ] `useImportWorkflow`
+  - [ ] `useDeleteWorkflow`
+  - [ ] `useAnnotationWorkflow`
+  - [ ] tree/pagination pure helpers in `apps/web/src/lib/workspace/*`
+- [ ] Keep `page.tsx` primarily composition/render wiring
+- [ ] Add unit tests for extracted pure tree/pagination helpers
+
+#### P3 - Hook Cleanup
+- [ ] Remove duplicated fetch logic in `useAssets` by centralizing loader function
+- [ ] Standardize error handling shape across hooks (`useProject`, `useLabels`, `useAssets`)
+
+#### P4 - Regression Coverage
+- [ ] Replace placeholder hotkey test with real interaction tests
+- [ ] Add web integration tests for:
+  - [ ] number-key labeling (`1..9`, numpad)
+  - [ ] multi-delete selection/delete
+  - [ ] folder/subfolder delete behavior
+  - [ ] edit-mode stage/submit/clear flows
+
 ### API
 - [ ] Validate upload target project exists before persisting file
 - [ ] Populate image `width/height` on upload

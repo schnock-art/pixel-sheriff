@@ -160,3 +160,23 @@ Support dual ingestion:
 - upload asset once and link to multiple projects
 - independent per-project annotation state
 - optional taxonomy templates reusable across projects
+
+### P9 - Maintainability + Refactor Track
+
+Goal:
+- keep current behavior stable while reducing complexity and bug surface
+
+Planned sequence:
+1. integrity hardening:
+   - validate upload project before file write
+   - prevent cross-project annotation mutation
+   - add rollback cleanup + targeted API tests
+2. workflow consistency:
+   - ensure unlabeled/clear-label submit path remains reachable
+   - tighten staged vs committed annotation state handling
+3. frontend decomposition:
+   - split large workspace page into focused workflow hooks/modules
+   - move tree/pagination logic to pure tested helpers
+4. regression coverage:
+   - replace placeholder hotkey tests with real UI interaction tests
+   - add delete + folder-scope + submit regression suites

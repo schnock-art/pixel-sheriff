@@ -134,6 +134,10 @@ docker compose up --build
 - Bounding boxes and segmentation tools
 - MAL implementation beyond placeholder endpoints
 - Shared-asset reference mode (upload-once/link-many)
+- Refactor/maintainability workstream in progress (tracked in `IMPLEMENTATION_TASKS.md`):
+  - API integrity hardening
+  - workspace page decomposition
+  - expanded regression testing
 
 ## Troubleshooting
 

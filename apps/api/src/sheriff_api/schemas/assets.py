@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from sheriff_api.db.models import AnnotationStatus, AssetType
 
@@ -10,7 +10,7 @@ class AssetCreate(BaseModel):
     width: int | None = None
     height: int | None = None
     checksum: str
-    metadata_json: dict = {}
+    metadata_json: dict = Field(default_factory=dict)
 
 
 class AssetRead(BaseModel):

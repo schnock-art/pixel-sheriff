@@ -6,9 +6,10 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile, status
 from fastapi.responses import FileResponse
 from sqlalchemy import delete, select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from sheriff_api.db.models import Annotation, Asset, AssetType, Suggestion
+from sheriff_api.db.models import Annotation, Asset, AssetType, Project, Suggestion
 from sheriff_api.config import get_settings
 from sheriff_api.db.session import get_db
 from sheriff_api.schemas.assets import AssetCreate, AssetRead
@@ -21,6 +22,10 @@ storage = LocalStorage(settings.storage_root)
 
 @router.post("/projects/{project_id}/assets", response_model=AssetRead)
 async def create_asset(project_id: str, payload: AssetCreate, db: AsyncSession = Depends(get_db)) -> Asset:
+    project = await db.get(Project, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+
     asset = Asset(project_id=project_id, **payload.model_dump())
     db.add(asset)
     await db.commit()
@@ -44,6 +49,10 @@ async def upload_asset(
     relative_path: str | None = Form(default=None),
     db: AsyncSession = Depends(get_db),
 ) -> Asset:
+    project = await db.get(Project, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+
     content = await file.read()
     if len(content) == 0:
         raise HTTPException(status_code=400, detail="Uploaded file is empty")
@@ -53,7 +62,6 @@ async def upload_asset(
     suffix = Path(file.filename or "upload.bin").suffix.lower()
     generated_id = str(uuid.uuid4())
     relative_uri = f"assets/{project_id}/{generated_id}{suffix}"
-    storage.write_bytes(relative_uri, content)
 
     mime_type = file.content_type or "application/octet-stream"
     checksum = hashlib.sha256(content).hexdigest()
@@ -72,8 +80,22 @@ async def upload_asset(
             "size_bytes": len(content),
         },
     )
-    db.add(asset)
-    await db.commit()
+
+    wrote_file = False
+    try:
+        storage.write_bytes(relative_uri, content)
+        wrote_file = True
+        db.add(asset)
+        await db.commit()
+    except SQLAlchemyError as exc:
+        await db.rollback()
+        if wrote_file:
+            try:
+                storage.delete_file(relative_uri)
+            except ValueError:
+                pass
+        raise HTTPException(status_code=500, detail="Failed to persist uploaded asset") from exc
+
     await db.refresh(asset)
     return asset
 
