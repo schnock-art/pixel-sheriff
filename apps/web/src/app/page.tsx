@@ -1,3 +1,695 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+
+import { AssetGrid } from "../components/AssetGrid";
+import { Filters } from "../components/Filters";
+import { LabelPanel } from "../components/LabelPanel";
+import { Viewer } from "../components/Viewer";
+import {
+  ApiError,
+  createCategory,
+  createProject,
+  patchCategory,
+  resolveAssetUri,
+  uploadAsset,
+  upsertAnnotation,
+  type Annotation,
+  type AnnotationStatus,
+} from "../lib/api";
+import { useAssets } from "../lib/hooks/useAssets";
+import { useLabels } from "../lib/hooks/useLabels";
+import { useProject } from "../lib/hooks/useProject";
+
+const IMAGE_EXTENSIONS = new Set(["jpg", "jpeg", "png", "gif", "bmp", "webp", "tif", "tiff"]);
+
+interface PendingAnnotation {
+  labelIds: number[];
+  status: AnnotationStatus;
+}
+
+interface TreeEntry {
+  key: string;
+  name: string;
+  depth: number;
+  kind: "folder" | "file";
+  assetId?: string;
+}
+
+interface ImportDialogState {
+  open: boolean;
+  sourceFolderName: string;
+  files: File[];
+}
+
+function isImageCandidate(file: File): boolean {
+  if (file.type.toLowerCase().startsWith("image/")) return true;
+  const extension = file.name.split(".").pop()?.toLowerCase() ?? "";
+  return IMAGE_EXTENSIONS.has(extension);
+}
+
+function buildTargetRelativePath(file: File, targetFolder: string): string {
+  const normalizedFolder = targetFolder.replaceAll("\\", "/").replace(/^\/+|\/+$/g, "");
+  const relative = (file.webkitRelativePath || file.name).replaceAll("\\", "/");
+  const parts = relative.split("/").filter(Boolean);
+  const remainder = file.webkitRelativePath ? parts.slice(1).join("/") : file.name;
+  return `${normalizedFolder}/${remainder || file.name}`;
+}
+
+function asRelativePath(asset: { uri: string; metadata_json: Record<string, unknown> }): string {
+  const fromMetadata = asset.metadata_json.relative_path;
+  if (typeof fromMetadata === "string" && fromMetadata.trim() !== "") return fromMetadata;
+  const original = asset.metadata_json.original_filename;
+  if (typeof original === "string" && original.trim() !== "") return original;
+  return asset.uri;
+}
+
+function buildTreeEntries(assets: { id: string; uri: string; metadata_json: Record<string, unknown> }[]): TreeEntry[] {
+  type FolderNode = {
+    name: string;
+    path: string;
+    folders: Map<string, FolderNode>;
+    files: Array<{ id: string; name: string }>;
+  };
+
+  const root: FolderNode = { name: "", path: "", folders: new Map(), files: [] };
+
+  for (const asset of assets) {
+    const rel = asRelativePath(asset).replaceAll("\\", "/");
+    const segments = rel.split("/").filter(Boolean);
+    const filename = segments[segments.length - 1] ?? rel;
+    const folderParts = segments.slice(0, -1);
+
+    let cursor = root;
+    let prefix = "";
+    for (const part of folderParts) {
+      prefix = prefix ? `${prefix}/${part}` : part;
+      const existing = cursor.folders.get(part);
+      if (existing) {
+        cursor = existing;
+      } else {
+        const next: FolderNode = { name: part, path: prefix, folders: new Map(), files: [] };
+        cursor.folders.set(part, next);
+        cursor = next;
+      }
+    }
+
+    cursor.files.push({ id: asset.id, name: filename });
+  }
+
+  const result: TreeEntry[] = [];
+
+  function visit(node: FolderNode, depth: number): void {
+    const folders = Array.from(node.folders.values()).sort((a, b) => a.name.localeCompare(b.name));
+    for (const folder of folders) {
+      result.push({
+        key: `folder:${folder.path}`,
+        name: folder.name,
+        depth,
+        kind: "folder",
+      });
+      visit(folder, depth + 1);
+    }
+
+    const files = node.files.slice().sort((a, b) => a.name.localeCompare(b.name));
+    for (const file of files) {
+      result.push({
+        key: `file:${file.id}`,
+        name: file.name,
+        depth,
+        kind: "file",
+        assetId: file.id,
+      });
+    }
+  }
+
+  visit(root, 0);
+  return result;
+}
+
 export default function HomePage() {
-  return <main>Pixel Sheriff Labeling UI</main>;
+  const { data: projects, refetch: refetchProjects } = useProject();
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const [assetIndex, setAssetIndex] = useState(0);
+  const [selectedLabelIds, setSelectedLabelIds] = useState<number[]>([]);
+  const [currentStatus, setCurrentStatus] = useState<AnnotationStatus>("unlabeled");
+  const [isSaving, setIsSaving] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
+  const [isCreatingLabel, setIsCreatingLabel] = useState(false);
+  const [isSavingLabelChanges, setIsSavingLabelChanges] = useState(false);
+  const [editMode, setEditMode] = useState(false);
+  const [multiLabelEnabled, setMultiLabelEnabled] = useState(false);
+  const [pendingAnnotations, setPendingAnnotations] = useState<Record<string, PendingAnnotation>>({});
+  const [message, setMessage] = useState<string | null>(null);
+  const [importFailures, setImportFailures] = useState<string[]>([]);
+  const [importDialog, setImportDialog] = useState<ImportDialogState>({ open: false, sourceFolderName: "", files: [] });
+  const [importMode, setImportMode] = useState<"existing" | "new">("existing");
+  const [importExistingProjectId, setImportExistingProjectId] = useState<string>("");
+  const [importNewProjectName, setImportNewProjectName] = useState("");
+  const [importFolderName, setImportFolderName] = useState("");
+
+  useEffect(() => {
+    if (!selectedProjectId && projects.length > 0) {
+      setSelectedProjectId(projects[0].id);
+    }
+  }, [projects, selectedProjectId]);
+
+  const datasets = projects.map((project) => ({ id: project.id, name: project.name }));
+  const filteredDatasets = datasets.filter((dataset) => dataset.name.toLowerCase().includes(query.trim().toLowerCase()));
+  const activeDatasetId = selectedProjectId;
+
+  const { data: assets, annotations, setAnnotations } = useAssets(selectedProjectId);
+  const { data: labels, refetch: refetchLabels } = useLabels(selectedProjectId);
+  const assetRows = assets;
+  const allLabelRows = labels.map((label) => ({
+    id: label.id,
+    name: label.name,
+    isActive: label.is_active,
+    displayOrder: label.display_order,
+  }));
+  const activeLabelRows = allLabelRows.filter((label) => label.isActive).sort((a, b) => a.displayOrder - b.displayOrder);
+
+  const safeAssetIndex = Math.min(assetIndex, Math.max(assetRows.length - 1, 0));
+  const currentAsset = assetRows[safeAssetIndex] ?? null;
+  const viewerAsset = currentAsset ? { id: currentAsset.id, uri: resolveAssetUri(currentAsset.uri) } : null;
+  const treeEntries = useMemo(() => buildTreeEntries(assetRows), [assetRows]);
+
+  const annotationByAssetId = useMemo(() => {
+    const map = new Map<string, Annotation>();
+    for (const annotation of annotations) {
+      map.set(annotation.asset_id, annotation);
+    }
+    return map;
+  }, [annotations]);
+
+  useEffect(() => {
+    if (!currentAsset) {
+      setCurrentStatus("unlabeled");
+      setSelectedLabelIds([]);
+      return;
+    }
+
+    const pending = pendingAnnotations[currentAsset.id];
+    if (pending) {
+      setCurrentStatus(pending.status);
+      setSelectedLabelIds(pending.labelIds);
+      return;
+    }
+
+    const annotation = annotationByAssetId.get(currentAsset.id);
+    if (!annotation) {
+      setCurrentStatus("unlabeled");
+      setSelectedLabelIds([]);
+      return;
+    }
+
+    setCurrentStatus(annotation.status);
+    const categoryIdValue = annotation.payload_json.category_id;
+    const categoryIdsValue = annotation.payload_json.category_ids;
+    if (Array.isArray(categoryIdsValue)) {
+      const ids = categoryIdsValue.filter((item): item is number => typeof item === "number");
+      setSelectedLabelIds(ids);
+      return;
+    }
+    if (typeof categoryIdValue === "number") {
+      setSelectedLabelIds([categoryIdValue]);
+      return;
+    }
+    setSelectedLabelIds([]);
+  }, [annotationByAssetId, currentAsset, pendingAnnotations]);
+
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      const target = event.target as HTMLElement | null;
+      const tag = target?.tagName?.toLowerCase();
+      if (tag === "input" || tag === "textarea" || target?.isContentEditable) return;
+
+      if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        setAssetIndex((previous) => (previous <= 0 ? 0 : previous - 1));
+      }
+      if (event.key === "ArrowRight") {
+        event.preventDefault();
+        setAssetIndex((previous) => (previous >= assetRows.length - 1 ? previous : previous + 1));
+      }
+    }
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [assetRows.length]);
+
+  function handleSelectDataset(id: string) {
+    setSelectedProjectId(id);
+    setAssetIndex(0);
+    setPendingAnnotations({});
+    setEditMode(false);
+    setMessage(null);
+  }
+
+  function handlePrevAsset() {
+    setAssetIndex((previous) => (previous <= 0 ? 0 : previous - 1));
+  }
+
+  function handleNextAsset() {
+    setAssetIndex((previous) => (previous >= assetRows.length - 1 ? previous : previous + 1));
+  }
+
+  function handleToggleLabel(id: number) {
+    if (!currentAsset) return;
+
+    const nextLabelIds = multiLabelEnabled
+      ? selectedLabelIds.includes(id)
+        ? selectedLabelIds.filter((value) => value !== id)
+        : [...selectedLabelIds, id]
+      : [id];
+    setSelectedLabelIds(nextLabelIds);
+
+    const effectiveStatus = currentStatus === "unlabeled" ? "labeled" : currentStatus;
+    setPendingAnnotations((previous) => ({
+      ...previous,
+      [currentAsset.id]: { labelIds: nextLabelIds, status: effectiveStatus },
+    }));
+  }
+
+  async function submitSingleAnnotation() {
+    if (!selectedProjectId || !currentAsset || selectedLabelIds.length === 0) {
+      setMessage("Select a dataset, asset and label before submitting.");
+      return;
+    }
+
+    const resolvedLabelIds = selectedLabelIds.filter((id) => activeLabelRows.some((label) => label.id === id));
+    const selectedLabel = activeLabelRows.find((label) => label.id === resolvedLabelIds[0]);
+    if (resolvedLabelIds.length === 0 || !selectedLabel) {
+      setMessage("Selected label could not be resolved.");
+      return;
+    }
+
+    const annotation = await upsertAnnotation(selectedProjectId, {
+      asset_id: currentAsset.id,
+      status: currentStatus === "unlabeled" ? "labeled" : currentStatus,
+      payload_json: {
+        type: "classification",
+        category_id: selectedLabel.id,
+        category_ids: resolvedLabelIds,
+        category_name: selectedLabel.name,
+        coco: { image_id: currentAsset.id, category_id: selectedLabel.id },
+        source: "web-ui",
+      },
+    });
+
+    setAnnotations((previous) => {
+      const others = previous.filter((item) => item.asset_id !== annotation.asset_id);
+      return [...others, annotation];
+    });
+    setPendingAnnotations((previous) => {
+      const next = { ...previous };
+      delete next[currentAsset.id];
+      return next;
+    });
+    setMessage("Saved annotation.");
+  }
+
+  async function submitPendingAnnotations() {
+    if (!selectedProjectId) {
+      setMessage("Select a dataset before submitting.");
+      return;
+    }
+
+    const entries = Object.entries(pendingAnnotations);
+    if (entries.length === 0) {
+      setMessage("No staged edits to submit.");
+      return;
+    }
+
+    const saved: Annotation[] = [];
+    for (const [assetId, pending] of entries) {
+      const selectedIds = pending.labelIds.filter((id) => activeLabelRows.some((item) => item.id === id));
+      const label = activeLabelRows.find((item) => item.id === selectedIds[0]);
+      if (!label) continue;
+      const annotation = await upsertAnnotation(selectedProjectId, {
+        asset_id: assetId,
+        status: pending.status,
+        payload_json: {
+          type: "classification",
+          category_id: label.id,
+          category_ids: selectedIds,
+          category_name: label.name,
+          coco: { image_id: assetId, category_id: label.id },
+          source: "web-ui",
+        },
+      });
+      saved.push(annotation);
+    }
+
+    setAnnotations((previous) => {
+      const savedAssetIds = new Set(saved.map((item) => item.asset_id));
+      const others = previous.filter((item) => !savedAssetIds.has(item.asset_id));
+      return [...others, ...saved];
+    });
+    setPendingAnnotations({});
+    setEditMode(false);
+    setMessage(`Submitted ${saved.length} staged annotations.`);
+  }
+
+  async function handleSubmit() {
+    try {
+      setIsSaving(true);
+      setMessage(null);
+      if (Object.keys(pendingAnnotations).length > 0) {
+        await submitPendingAnnotations();
+      } else {
+        await submitSingleAnnotation();
+      }
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Failed to submit annotation.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function handleCreateLabel(name: string) {
+    if (!selectedProjectId) {
+      setMessage("Select a dataset before creating labels.");
+      return;
+    }
+
+    try {
+      setIsCreatingLabel(true);
+      setMessage(null);
+      const created = await createCategory(selectedProjectId, { name, display_order: allLabelRows.length });
+      await refetchLabels();
+      setSelectedLabelIds([created.id]);
+      setMessage(`Created label "${created.name}".`);
+    } catch (error) {
+      setMessage(error instanceof Error ? `Failed to create label: ${error.message}` : "Failed to create label.");
+    } finally {
+      setIsCreatingLabel(false);
+    }
+  }
+
+  async function handleSaveLabelChanges(
+    changes: Array<{ id: number; name: string; isActive: boolean; displayOrder: number }>,
+  ) {
+    try {
+      setIsSavingLabelChanges(true);
+      setMessage(null);
+      for (const change of changes) {
+        await patchCategory(change.id, {
+          name: change.name.trim(),
+          is_active: change.isActive,
+          display_order: change.displayOrder,
+        });
+      }
+      await refetchLabels();
+      setMessage("Saved label configuration.");
+    } catch (error) {
+      setMessage(error instanceof Error ? `Failed to save labels: ${error.message}` : "Failed to save labels.");
+    } finally {
+      setIsSavingLabelChanges(false);
+    }
+  }
+
+  function openImportDialog(files: File[], sourceFolderName: string) {
+    const defaultProject = projects.find((project) => project.id === selectedProjectId) ?? projects[0];
+    const defaultMode: "existing" | "new" = projects.length > 0 ? "existing" : "new";
+    setImportMode(defaultMode);
+    setImportExistingProjectId(defaultProject?.id ?? "");
+    setImportNewProjectName(sourceFolderName);
+    setImportFolderName(sourceFolderName);
+    setImportDialog({ open: true, sourceFolderName, files });
+  }
+
+  async function confirmImportFromDialog() {
+    const files = importDialog.files;
+    const sourceFolderName = importDialog.sourceFolderName;
+    const folderName = importFolderName.trim();
+    if (files.length === 0) {
+      setMessage("Import cancelled: no files selected.");
+      setImportDialog({ open: false, sourceFolderName: "", files: [] });
+      return;
+    }
+    if (!folderName) {
+      setMessage("Folder name is required.");
+      return;
+    }
+
+    try {
+      setIsImporting(true);
+      setMessage("Importing images...");
+      setImportFailures([]);
+
+      let targetProjectId = "";
+      let targetProjectName = "";
+
+      if (importMode === "new") {
+        const projectName = importNewProjectName.trim();
+        if (!projectName) {
+          setMessage("Project name is required for new project imports.");
+          return;
+        }
+        const project = await createProject({ name: projectName, task_type: "classification_single" });
+        targetProjectId = project.id;
+        targetProjectName = project.name;
+      } else {
+        const project = projects.find((item) => item.id === importExistingProjectId);
+        if (!project) {
+          setMessage("Please select an existing project.");
+          return;
+        }
+        targetProjectId = project.id;
+        targetProjectName = project.name;
+      }
+
+      let uploadedCount = 0;
+      const failures: string[] = [];
+
+      for (const file of files) {
+        try {
+          const targetRelativePath = buildTargetRelativePath(file, folderName);
+          await uploadAsset(targetProjectId, file, targetRelativePath);
+          uploadedCount += 1;
+        } catch (error) {
+          if (error instanceof ApiError) {
+            const reason = error.responseBody ? ` (${error.responseBody})` : "";
+            failures.push(`${file.name}: ${error.message}${reason}`);
+          } else {
+            failures.push(`${file.name}: ${error instanceof Error ? error.message : "unknown upload error"}`);
+          }
+        }
+      }
+
+      await refetchProjects();
+      setSelectedProjectId(targetProjectId);
+      setAssetIndex(0);
+      setSelectedLabelIds([]);
+      setCurrentStatus("unlabeled");
+      setPendingAnnotations({});
+      setEditMode(false);
+      setImportFailures(failures);
+      setImportDialog({ open: false, sourceFolderName: "", files: [] });
+
+      if (uploadedCount === 0) setMessage(`Import failed: no files uploaded to "${folderName}".`);
+      else if (failures.length > 0)
+        setMessage(`Imported ${uploadedCount}/${files.length} images into "${targetProjectName}/${folderName}".`);
+      else setMessage(`Imported ${uploadedCount} images into "${targetProjectName}/${folderName}".`);
+    } catch (error) {
+      setImportFailures([]);
+      setMessage(error instanceof Error ? `Import failed: ${error.message}` : "Import failed.");
+    } finally {
+      setIsImporting(false);
+    }
+  }
+
+  async function handleImport() {
+    const picker = document.createElement("input");
+    picker.type = "file";
+    picker.accept = "image/*";
+    picker.multiple = true;
+    (picker as HTMLInputElement & { webkitdirectory?: boolean }).webkitdirectory = true;
+
+    picker.onchange = async () => {
+      const files = Array.from(picker.files ?? []).filter(isImageCandidate);
+      if (files.length === 0) {
+        setImportFailures([]);
+        setMessage("No image files were selected (supported by MIME or extension).");
+        return;
+      }
+      const rootName = files[0].webkitRelativePath.split("/")[0] || `Dataset ${new Date().toLocaleString()}`;
+      openImportDialog(files, rootName);
+    };
+
+    picker.click();
+  }
+
+  function handleSelectTreeAsset(assetId: string) {
+    const index = assetRows.findIndex((item) => item.id === assetId);
+    if (index >= 0) setAssetIndex(index);
+  }
+
+  const selectedDatasetName = datasets.find((dataset) => dataset.id === activeDatasetId)?.name ?? "No dataset selected";
+  const canSubmit = Object.keys(pendingAnnotations).length > 0 || (!editMode && selectedLabelIds.length > 0 && currentAsset !== null);
+
+  return (
+    <main className="workspace-shell">
+      <section className="workspace-frame">
+        <header className="workspace-header">
+          <div className="workspace-header-cell">Datasets</div>
+          <div className="workspace-header-cell workspace-header-title">{selectedDatasetName}</div>
+          <div className="workspace-header-cell workspace-header-actions" aria-label="Toolbar">
+            <span />
+            <span />
+            <span />
+            <span />
+          </div>
+        </header>
+
+        <div className="workspace-body">
+          <aside className="workspace-sidebar">
+            <Filters query={query} onQueryChange={setQuery} />
+            <AssetGrid datasets={filteredDatasets} selectedDatasetId={activeDatasetId} onSelectDataset={handleSelectDataset} />
+            <section className="project-tree">
+              <h3>Files</h3>
+              <ul>
+                {treeEntries.map((entry) => (
+                  <li key={entry.key}>
+                    {entry.kind === "folder" ? (
+                      <div className="tree-folder" style={{ paddingLeft: `${entry.depth * 14 + 8}px` }}>
+                        {entry.name}
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        className={entry.assetId === currentAsset?.id ? "tree-file active" : "tree-file"}
+                        style={{ paddingLeft: `${entry.depth * 14 + 8}px` }}
+                        onClick={() => entry.assetId && handleSelectTreeAsset(entry.assetId)}
+                      >
+                        {entry.name}
+                      </button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </section>
+          </aside>
+
+          <Viewer
+            currentAsset={viewerAsset}
+            totalAssets={assetRows.length}
+            currentIndex={safeAssetIndex}
+            onSelectIndex={setAssetIndex}
+            onPrev={handlePrevAsset}
+            onNext={handleNextAsset}
+          />
+          <LabelPanel
+            labels={activeLabelRows}
+            allLabels={allLabelRows}
+            selectedLabelIds={selectedLabelIds}
+            onToggleLabel={handleToggleLabel}
+            onSubmit={handleSubmit}
+            isSaving={isSaving}
+            onCreateLabel={handleCreateLabel}
+            isCreatingLabel={isCreatingLabel}
+            editMode={editMode}
+            onToggleEditMode={() => setEditMode((value) => !value)}
+            pendingCount={Object.keys(pendingAnnotations).length}
+            onSaveLabelChanges={handleSaveLabelChanges}
+            isSavingLabelChanges={isSavingLabelChanges}
+            canSubmit={canSubmit}
+            multiLabelEnabled={multiLabelEnabled}
+            onToggleMultiLabel={() => setMultiLabelEnabled((value) => !value)}
+          />
+        </div>
+
+        <footer className="workspace-footer">
+          <div className="footer-left">
+            <button type="button" className="ghost-button" onClick={handleImport} disabled={isImporting}>
+              {isImporting ? "Importing..." : "Import"}
+            </button>
+            <button type="button" className="ghost-button">
+              Export Dataset
+            </button>
+          </div>
+
+          <div className="footer-center">
+            <button type="button" className="nav-link-button" onClick={handlePrevAsset}>
+              Previous
+            </button>
+            <button type="button" className="nav-link-button" onClick={handleNextAsset}>
+              Next
+            </button>
+          </div>
+
+          <div className="footer-right">
+            <span>Status: {currentStatus}</span>
+            <button
+              type="button"
+              className="toggle-button"
+              aria-label="Toggle status"
+              onClick={() => setCurrentStatus((status) => (status === "unlabeled" ? "labeled" : "unlabeled"))}
+            >
+              <span className={currentStatus === "unlabeled" ? "" : "is-on"} />
+            </button>
+          </div>
+        </footer>
+      </section>
+      {message ? <p className="status-message">{message}</p> : null}
+      {importFailures.length > 0 ? (
+        <ul className="status-errors">
+          {importFailures.map((failure) => (
+            <li key={failure}>{failure}</li>
+          ))}
+        </ul>
+      ) : null}
+      {importDialog.open ? (
+        <div className="import-modal-backdrop">
+          <div className="import-modal">
+            <h3>Import Images</h3>
+            <div className="import-mode-row">
+              <label>
+                <input type="radio" checked={importMode === "existing"} onChange={() => setImportMode("existing")} disabled={projects.length === 0} />
+                Existing Project
+              </label>
+              <label>
+                <input type="radio" checked={importMode === "new"} onChange={() => setImportMode("new")} />
+                New Project
+              </label>
+            </div>
+            <label className="import-field">
+              <span>Project</span>
+              {importMode === "new" ? (
+                <input value={importNewProjectName} onChange={(event) => setImportNewProjectName(event.target.value)} placeholder="Project name" />
+              ) : (
+                <select value={importExistingProjectId} onChange={(event) => setImportExistingProjectId(event.target.value)}>
+                  <option value="">Select project</option>
+                  {projects.map((project) => (
+                    <option key={project.id} value={project.id}>
+                      {project.name}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </label>
+            <label className="import-field">
+              <span>Folder Name</span>
+              <input value={importFolderName} onChange={(event) => setImportFolderName(event.target.value)} placeholder={importDialog.sourceFolderName} />
+            </label>
+            <div className="import-modal-actions">
+              <button
+                type="button"
+                className="ghost-button"
+                onClick={() => setImportDialog({ open: false, sourceFolderName: "", files: [] })}
+                disabled={isImporting}
+              >
+                Cancel
+              </button>
+              <button type="button" className="primary-button" onClick={confirmImportFromDialog} disabled={isImporting}>
+                {isImporting ? "Importing..." : "Import"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </main>
+  );
 }

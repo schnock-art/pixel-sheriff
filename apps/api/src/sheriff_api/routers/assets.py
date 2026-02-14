@@ -1,12 +1,22 @@
-from fastapi import APIRouter, Depends
+import hashlib
+import os
+import uuid
+from pathlib import Path
+
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from sheriff_api.db.models import Annotation, Asset
+from sheriff_api.db.models import Annotation, Asset, AssetType
+from sheriff_api.config import get_settings
 from sheriff_api.db.session import get_db
 from sheriff_api.schemas.assets import AssetCreate, AssetRead
+from sheriff_api.services.storage import LocalStorage
 
 router = APIRouter(tags=["assets"])
+settings = get_settings()
+storage = LocalStorage(settings.storage_root)
 
 
 @router.post("/projects/{project_id}/assets", response_model=AssetRead)
@@ -25,3 +35,65 @@ async def list_assets(project_id: str, status: str | None = None, db: AsyncSessi
         stmt = stmt.join(Annotation, Annotation.asset_id == Asset.id).where(Annotation.status == status)
     result = await db.execute(stmt)
     return list(result.scalars().all())
+
+
+@router.post("/projects/{project_id}/assets/upload", response_model=AssetRead)
+async def upload_asset(
+    project_id: str,
+    file: UploadFile = File(...),
+    relative_path: str | None = Form(default=None),
+    db: AsyncSession = Depends(get_db),
+) -> Asset:
+    content = await file.read()
+    if len(content) == 0:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty")
+
+    storage.ensure_project_dirs(project_id)
+
+    suffix = Path(file.filename or "upload.bin").suffix.lower()
+    generated_id = str(uuid.uuid4())
+    relative_uri = f"assets/{project_id}/{generated_id}{suffix}"
+    storage.write_bytes(relative_uri, content)
+
+    mime_type = file.content_type or "application/octet-stream"
+    checksum = hashlib.sha256(content).hexdigest()
+
+    asset = Asset(
+        id=generated_id,
+        project_id=project_id,
+        type=AssetType.image,
+        uri=f"/api/v1/assets/{generated_id}/content",
+        mime_type=mime_type,
+        checksum=checksum,
+        metadata_json={
+            "storage_uri": relative_uri,
+            "original_filename": file.filename,
+            "relative_path": relative_path or file.filename,
+            "size_bytes": len(content),
+        },
+    )
+    db.add(asset)
+    await db.commit()
+    await db.refresh(asset)
+    return asset
+
+
+@router.get("/assets/{asset_id}/content")
+async def get_asset_content(asset_id: str, db: AsyncSession = Depends(get_db)) -> FileResponse:
+    asset = await db.get(Asset, asset_id)
+    if asset is None:
+        raise HTTPException(status_code=404, detail="Asset not found")
+
+    storage_uri = asset.metadata_json.get("storage_uri")
+    if not isinstance(storage_uri, str) or not storage_uri:
+        raise HTTPException(status_code=404, detail="Asset file path missing")
+
+    try:
+        path = storage.resolve(storage_uri)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if not path.exists() or not path.is_file():
+        raise HTTPException(status_code=404, detail="Asset file not found on disk")
+
+    return FileResponse(path=path, media_type=asset.mime_type, filename=os.path.basename(path))

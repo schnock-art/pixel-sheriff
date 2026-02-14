@@ -1,59 +1,96 @@
 # pixel-sheriff
 
-Annotation UI for CV with a monorepo scaffold covering API, worker, and web.
+Local-first CV annotation tool (monorepo) with:
+- `apps/web` (Next.js UI)
+- `apps/api` (FastAPI backend)
+- `apps/worker` (scaffold)
+- `db` (Postgres) + `redis` via Docker Compose
 
-## Repository layout
+## Current State
 
-- `apps/api`: FastAPI backend for projects/categories/assets/annotations/exports
-- `apps/worker`: background job worker scaffolding
-- `apps/web`: Next.js labeling UI scaffolding
-- `packages/contracts`: OpenAPI + TS client placeholders
-- `infra/db`: local Postgres initialization
+Implemented now:
+- Dataset/project list and search
+- Image import from local folders
+- Import destination dialog:
+  - existing project or new project
+  - editable target folder name
+- Persistent backend storage for uploaded assets
+- Hierarchical file tree (folders/subfolders/files) in UI
+- Viewer with aspect-ratio-preserving letterbox (`contain` + black background)
+- Keyboard navigation (`ArrowLeft` / `ArrowRight`)
+- Label management:
+  - add labels
+  - rename/reorder/activate/deactivate labels
+- Edit mode + staged annotations + batch submit
+- Multi-label toggle (in edit mode)
+- Annotation upsert/list and export manifest record endpoints
 
-## Quickstart
+Not implemented yet:
+- Export zip generation/download
+- Review workflow
+- Geometry tools (bbox/polygon)
+- MAL inference integration
 
-### 1) Environment
+## Repo Layout
+
+- `apps/api`: FastAPI service + SQLAlchemy models/routers/services
+- `apps/web`: Next.js app router UI
+- `apps/worker`: worker/job placeholders
+- `infra/db`: DB init SQL
+- `data`: local storage mount for assets/exports
+
+## Run Locally
+
+1. Copy env file:
 
 ```bash
 cp .env.example .env
 ```
 
-### 2) Run with Docker
+2. Start stack:
 
 ```bash
 docker compose up --build
 ```
 
-Services:
-- API: `http://localhost:8000/api/v1`
-- Web: `http://localhost:3000`
-- Postgres: `localhost:5432`
-- Redis: `localhost:6379`
+3. Open (default in current `.env.example`):
+- Web: `http://localhost:3010`
+- API: `http://localhost:8010/api/v1`
+- API docs: `http://localhost:8010/docs`
 
-### 3) API development without Docker
+## Commands
 
-```bash
-cd apps/api
-python -m pip install -e .[dev]
-uvicorn sheriff_api.main:app --reload
-```
+- Start/rebuild: `docker compose up --build`
+- Stop: `docker compose down`
+- Logs: `docker compose logs -f web api`
+- Status: `docker compose ps`
 
-### 4) Run tests
+Note: `docker compose logs ...` does not start services.
 
-```bash
-cd apps/api && pytest
-cd ../worker && pytest
-```
+## API Endpoints In Use
 
-## Example flow (API)
+- `GET /api/v1/health`
+- `GET/POST /api/v1/projects`
+- `GET /api/v1/projects/{project_id}`
+- `GET/POST /api/v1/projects/{project_id}/categories`
+- `PATCH /api/v1/categories/{category_id}`
+- `GET/POST /api/v1/projects/{project_id}/assets`
+- `POST /api/v1/projects/{project_id}/assets/upload`
+- `GET /api/v1/assets/{asset_id}/content`
+- `GET/POST /api/v1/projects/{project_id}/annotations`
+- `GET/POST /api/v1/projects/{project_id}/exports`
 
-1. Create project: `POST /api/v1/projects`
-2. Add categories: `POST /api/v1/projects/{project_id}/categories`
-3. Add assets: `POST /api/v1/projects/{project_id}/assets`
-4. Add/update annotation: `POST /api/v1/projects/{project_id}/annotations`
-5. Export dataset manifest: `POST /api/v1/projects/{project_id}/exports`
+## Troubleshooting
 
-## Notes
+- Import fails with `NetworkError`:
+  - Check API health: `curl http://localhost:8010/api/v1/health`
+  - Check logs: `docker compose logs --tail=200 api web`
+  - Rebuild web+api: `docker compose up --build web api`
 
-- Category IDs are immutable in the API (only name/order/active state are patchable).
-- Worker and web are intentionally scaffolded for incremental implementation of the roadmap.
+- Local file read errors (`NotReadableError`):
+  - Usually source files are cloud placeholders (e.g. OneDrive not fully local)
+  - Move files to a plain local folder and retry
+
+- Old UI after code changes:
+  - `docker compose up --build web`
+  - hard refresh browser

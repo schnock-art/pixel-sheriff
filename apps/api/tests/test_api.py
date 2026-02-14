@@ -45,3 +45,22 @@ async def test_crud_and_export_flow() -> None:
         assert export.status_code == 200
         assert "manifest_json" in export.json()
         assert export.json()["manifest_json"]["categories"][0]["name"] == "kitty"
+
+
+@pytest.mark.asyncio
+async def test_asset_upload_and_content() -> None:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        project = (await client.post("/api/v1/projects", json={"name": "upload-demo"})).json()
+        project_id = project["id"]
+
+        upload = await client.post(
+            f"/api/v1/projects/{project_id}/assets/upload",
+            files={"file": ("sample.jpg", b"fake-image-bytes", "image/jpeg")},
+        )
+        assert upload.status_code == 200
+        uploaded_asset = upload.json()
+        assert uploaded_asset["uri"].startswith("/api/v1/assets/")
+
+        content = await client.get(uploaded_asset["uri"])
+        assert content.status_code == 200
+        assert content.content == b"fake-image-bytes"

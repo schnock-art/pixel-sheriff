@@ -1,80 +1,80 @@
 # Implementation Tasks
 
-## 🚀 Setup (Root Level)
-- [x] `docker-compose.yml`
-  - [x] Define services: api, web, db, redis
-  - [x] Shared networks/volumes for local dev
-- [x] `.env.example`
-  - [x] API/Web/Postgres/Redis variables
-  - [x] Storage root and CORS values
+Status reflects current repository behavior.
 
-## 📌 apps/api
-- [x] `pyproject.toml` with FastAPI, SQLAlchemy, test dependencies
-- [x] `src/sheriff_api/main.py`
-  - [x] Mount routers: health, projects, categories, assets, annotations, exports
-  - [x] CORS and startup DB initialization
-- [x] `src/sheriff_api/config.py` settings via pydantic
-- [x] `src/sheriff_api/db/session.py` async engine/session dependency
-- [x] `src/sheriff_api/db/models.py`
-  - [x] Project, Category, Asset, Annotation, DatasetVersion
-  - [x] MAL placeholders: Model, Suggestion
-- [x] `src/sheriff_api/routers/*.py`
-  - [x] CRUD-like endpoints for core entities
-  - [x] Asset filtering by annotation status
-  - [x] MAL placeholder endpoints
-- [x] `src/sheriff_api/services/*`
-  - [x] Storage abstraction
-  - [x] Video frame extraction stub
-  - [x] Exporter manifest/hash builder
-- [x] `src/sheriff_api/schemas/*.py`
-  - [x] Request/response schema definitions
-  - [x] Category update does not allow ID mutation (immutable by API design)
+## Completed
 
-## 🧠 apps/worker
-- [x] `pyproject.toml`
-- [x] `src/sheriff_worker/main.py` dispatcher for job handlers
-- [x] `src/sheriff_worker/jobs/*.py`
-  - [x] `extract_frames`
-  - [x] `build_export_zip`
-  - [x] `inference_suggest`
-- [x] `src/sheriff_worker/queues/broker.py` in-memory broker abstraction
+### Infra / Compose
+- [x] Docker compose services for `web`, `api`, `db`, `redis`
+- [x] Configurable host ports via `.env`
+- [x] API data volume mount (`./data -> /app/data`)
+- [x] DB init script wiring
 
-## 🌐 apps/web (Next.js scaffold)
-- [x] Route scaffold under `src/app`
-  - [x] Home page
-  - [x] Project workspace page
-- [x] Components
-  - [x] AssetGrid
-  - [x] LabelPanel
-  - [x] Viewer
-  - [x] SuggestionOverlay
-  - [x] Filters
-  - [x] Pagination
-- [x] API helper in `src/lib/api.ts`
-- [x] Hook placeholders: `useAssets`, `useLabels`, `useProject`
-- [x] Hotkey behavior documented in test scaffold
+### API (`apps/api`)
+- [x] FastAPI app + router mounting under `/api/v1`
+- [x] Startup DB table initialization
+- [x] Project endpoints (create/list/get)
+- [x] Category endpoints (create/list/patch)
+- [x] Asset endpoints:
+  - [x] create/list
+  - [x] multipart upload
+  - [x] content stream
+- [x] Annotation endpoints (upsert/list)
+- [x] Export metadata endpoints (create/list)
+- [x] MAL placeholder endpoints (models/suggestions)
+- [x] Local storage safety checks (path containment)
+- [x] API packaging fixes for `src` layout Docker builds
 
-## 🧪 Testing
-- [x] `apps/api/tests/` health endpoint + CRUD/export flow + asset status filter
-- [x] `apps/worker/tests/` job enqueue/execution coverage
-- [x] `apps/web/tests/` test scaffold for hotkey flow
+### Web (`apps/web`)
+- [x] Main workspace UI integrated at `/`
+- [x] Responsive styling + viewer letterbox rendering
+- [x] Dataset sidebar with search
+- [x] Hierarchical file tree with folder/file navigation
+- [x] Import dialog:
+  - [x] existing vs new project
+  - [x] target folder naming
+- [x] Robust import diagnostics:
+  - [x] MIME + extension filtering fallback
+  - [x] detailed per-file failure messages
+- [x] Label panel features:
+  - [x] add label
+  - [x] manage labels (rename/reorder/activate/deactivate)
+  - [x] multi-label toggle in edit mode
+- [x] Annotation UX:
+  - [x] edit mode staging
+  - [x] batch submit staged changes
+  - [x] non-edit single submit path
+- [x] Keyboard navigation with arrow keys
 
-## 📦 packages/contracts
-- [x] `openapi/` placeholder directory
-- [x] `ts-client/` placeholder directory
-- [x] package README
+### Docs
+- [x] README aligned with implemented stack/workflow
+- [x] Architecture doc aligned with code
+- [x] Roadmap refreshed and feature requests recorded
 
-## 📈 Infra
-- [x] `infra/db/init.sql` base Postgres setup/extension
-- [ ] Production deployment compose
-- [ ] Kubernetes manifests
+## In Progress / Next
 
-## ✨ MAL Extension Placeholder Tasks
-- [x] API placeholders
-  - [x] `POST /models`
-  - [x] `GET /models`
-  - [x] `GET /assets/:id/suggestions`
-  - [x] `POST /projects/:id/suggestions/batch`
-- [x] Backend data models placeholders
-- [x] Worker inference placeholder job
-- [x] UI suggestion overlay placeholder
+### API
+- [ ] Validate upload target project exists before persisting file
+- [ ] Populate image `width/height` on upload
+- [ ] Add delete asset endpoint(s)
+- [ ] Add export zip build + download endpoint
+- [ ] Add richer structured API error responses for UI
+
+### Web
+- [ ] Add explicit staged/dirty indicators in file tree and pagination
+- [ ] Improve import dialog UX (validation hints + remembered defaults)
+- [ ] Add full keyboard labeling shortcuts (1..9, skip, etc.)
+- [ ] Wire export button to backend flow
+- [ ] Add better loading/empty states per panel
+
+### Testing
+- [ ] Add API tests for upload destination + relative path behavior
+- [ ] Add web integration tests for import -> label -> submit workflow
+- [ ] Add regression tests for edit mode + staged persistence
+
+## Deferred (Roadmap-aligned)
+- [ ] Review/QA mode
+- [ ] Video ingestion + frame extraction
+- [ ] MAL integration beyond placeholders
+- [ ] Reference-mode asset ingestion (cloud/object-store links)
+- [ ] Shared asset library with project-specific annotations
