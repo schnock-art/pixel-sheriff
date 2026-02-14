@@ -1,3 +1,4 @@
+import shutil
 from pathlib import Path
 
 
@@ -22,3 +23,17 @@ class LocalStorage:
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(content)
         return target
+
+    def delete_file(self, relative_uri: str) -> bool:
+        target = self.resolve(relative_uri)
+        if not target.exists() or not target.is_file():
+            return False
+        target.unlink()
+        return True
+
+    def delete_tree(self, relative_uri: str) -> bool:
+        target = self.resolve(relative_uri)
+        if not target.exists() or not target.is_dir():
+            return False
+        shutil.rmtree(target)
+        return True

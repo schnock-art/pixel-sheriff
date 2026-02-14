@@ -46,6 +46,34 @@ async function requestJson<T>(path: string, init: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+async function requestNoContent(path: string, init: RequestInit): Promise<void> {
+  const url = `${API_BASE}/api/v1${path}`;
+  const method = (init.method ?? "GET").toUpperCase();
+
+  let response: Response;
+  try {
+    response = await fetch(url, init);
+  } catch (error) {
+    throw new ApiError({
+      message: `NetworkError on ${method} ${url}`,
+      url,
+      method,
+      responseBody: error instanceof Error ? error.message : String(error),
+    });
+  }
+
+  if (!response.ok) {
+    const responseBody = await response.text();
+    throw new ApiError({
+      message: `Request failed (${response.status}) on ${method} ${url}`,
+      url,
+      method,
+      status: response.status,
+      responseBody,
+    });
+  }
+}
+
 export async function apiGet<T>(path: string): Promise<T> {
   return requestJson<T>(path, { cache: "no-store" });
 }
@@ -199,12 +227,20 @@ export function createProject(payload: ProjectCreatePayload): Promise<Project> {
   return apiPost<Project, ProjectCreatePayload>("/projects", payload);
 }
 
+export function deleteProject(projectId: string): Promise<void> {
+  return requestNoContent(`/projects/${projectId}`, { method: "DELETE" });
+}
+
 export function listAssets(projectId: string): Promise<Asset[]> {
   return apiGet<Asset[]>(`/projects/${projectId}/assets`);
 }
 
 export function createAsset(projectId: string, payload: AssetCreatePayload): Promise<Asset> {
   return apiPost<Asset, AssetCreatePayload>(`/projects/${projectId}/assets`, payload);
+}
+
+export function deleteAsset(projectId: string, assetId: string): Promise<void> {
+  return requestNoContent(`/projects/${projectId}/assets/${assetId}`, { method: "DELETE" });
 }
 
 export function listAnnotations(projectId: string): Promise<Annotation[]> {

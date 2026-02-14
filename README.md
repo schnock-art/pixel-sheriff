@@ -9,6 +9,13 @@ Local-first CV annotation platform.
 - Viewer/navigation improved with bounded responsive viewport height and skip controls (`-10`, `-5`, `<`, `>`, `+5`, `+10`).
 - Pagination now adapts to available width and supports `First`/`Last` quick jumps.
 - Export flow is fully wired from UI to API zip generation and direct download.
+- Delete workflows were added:
+  - project delete
+  - single-image delete
+  - multi-image delete
+  - folder/subfolder delete (tree subtree scope)
+- Delete actions now show confirmation summaries in an auto-dismiss toast with counts.
+- Keyboard labeling shortcuts now support number keys (`1..9`) including numpad keys.
 
 ## Stack
 
@@ -41,6 +48,8 @@ Local-first CV annotation platform.
   - collapse all / expand all
   - folder-scope filtering (review a subtree only)
   - labeled/unlabeled status dots on folders and files
+  - folder/subfolder delete actions
+  - bulk delete mode with in-scope multi-select
 - Viewer:
   - aspect-ratio-preserving black letterbox (`object-fit: contain`)
   - responsive bounded viewport height
@@ -59,6 +68,7 @@ Local-first CV annotation platform.
   - batch submit staged annotations
   - direct single-submit path when not staging
   - status values: `unlabeled`, `labeled`, `skipped`, `needs_review`, `approved`
+  - keyboard label selection by class index (`1..9`, top row and numpad)
 - COCO-style export:
   - export record creation/listing
   - deterministic zip artifact with `manifest.json`, `annotations.json`, and `images/`
@@ -98,10 +108,12 @@ docker compose up --build
 - `GET /api/v1/health`
 - `GET/POST /api/v1/projects`
 - `GET /api/v1/projects/{project_id}`
+- `DELETE /api/v1/projects/{project_id}`
 - `GET/POST /api/v1/projects/{project_id}/categories`
 - `PATCH /api/v1/categories/{category_id}`
 - `GET/POST /api/v1/projects/{project_id}/assets`
 - `POST /api/v1/projects/{project_id}/assets/upload`
+- `DELETE /api/v1/projects/{project_id}/assets/{asset_id}`
 - `GET /api/v1/assets/{asset_id}/content`
 - `GET/POST /api/v1/projects/{project_id}/annotations`
 - `GET/POST /api/v1/projects/{project_id}/exports`

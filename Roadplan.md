@@ -33,6 +33,7 @@ labeling -> training -> deployment.
 
 Implemented:
 - project create/list/get
+- project delete (with related asset/annotation cleanup)
 - category create/list/patch
 - label management UI:
   - add
@@ -69,6 +70,7 @@ Remaining:
 Implemented:
 - viewer navigation (buttons + arrow keys)
 - skip controls (`-10`, `-5`, `<`, `>`, `+5`, `+10`)
+- numeric keyboard label shortcuts (`1..9`, top row + numpad)
 - staged edit mode
 - batch submit staged edits
 - single-label and multi-label assignment
@@ -76,12 +78,16 @@ Implemented:
 - folder-scoped review selection from tree
 - tree expand/collapse controls (single folder + collapse/expand all)
 - labeled/unlabeled visual status in pagination and tree
+- delete tools:
+  - single image remove
+  - bulk image remove
+  - folder/subfolder subtree remove
 - responsive bounded viewport with black letterbox rendering
 - adaptive pagination window sized to available width
 - COCO-style classification payload fields
+- toast-style operation summaries including delete counts
 
 Remaining:
-- broader hotkey set (`1..9`, skip, etc.)
 - clearer dirty/staged indicators in queue/tree/pagination
 - stronger submission feedback/summary UX
 

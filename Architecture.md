@@ -64,6 +64,7 @@ Key invariants:
 - per-project directory setup
 - safe path resolution constrained to storage root
 - byte writes and reads for uploaded assets/exports
+- file and subtree deletion helpers for cleanup workflows
 
 Upload endpoint (`/projects/{project_id}/assets/upload`) writes files as:
 
@@ -99,6 +100,7 @@ Projects:
 - `POST /api/v1/projects`
 - `GET /api/v1/projects`
 - `GET /api/v1/projects/{project_id}`
+- `DELETE /api/v1/projects/{project_id}`
 
 Categories:
 
@@ -111,6 +113,7 @@ Assets:
 - `POST /api/v1/projects/{project_id}/assets`
 - `GET /api/v1/projects/{project_id}/assets`
 - `POST /api/v1/projects/{project_id}/assets/upload`
+- `DELETE /api/v1/projects/{project_id}/assets/{asset_id}`
 - `GET /api/v1/assets/{asset_id}/content`
 
 Annotations:
@@ -172,6 +175,8 @@ Local persisted setting:
   - per-folder expand/collapse + global collapse/expand
   - folder-scope review queue filtering
   - labeled/unlabeled indicators for files and folders
+  - folder/subfolder delete from tree
+  - bulk delete mode (multi-select image removal within current scope)
 - Viewer behavior:
   - black letterbox with image `contain`
   - bounded responsive viewport height
@@ -186,6 +191,10 @@ Local persisted setting:
   - project multi-label toggle only editable in manage mode
   - edit mode stages multi-asset changes
   - submit commits staged changes in batch
+  - number-key shortcuts (`1..9`, top row and numpad) map to active label order
+- Feedback behavior:
+  - auto-dismiss toast message for success/error summaries
+  - delete summaries include removed image and annotation counts
 
 ## 6. Annotation Payload Contract
 

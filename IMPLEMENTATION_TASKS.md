@@ -14,11 +14,13 @@ Status reflects current repository behavior.
 - [x] FastAPI app + router mounting under `/api/v1`
 - [x] Startup DB table initialization
 - [x] Project endpoints (create/list/get)
+- [x] Project delete endpoint
 - [x] Category endpoints (create/list/patch)
 - [x] Asset endpoints:
   - [x] create/list
   - [x] multipart upload
   - [x] content stream
+  - [x] delete single asset
 - [x] Annotation endpoints (upsert/list)
 - [x] Export metadata endpoints (create/list)
 - [x] Export zip build (`manifest.json`, `annotations.json`, `images/`)
@@ -58,6 +60,13 @@ Status reflects current repository behavior.
   - [x] batch submit staged changes
   - [x] non-edit single submit path
 - [x] Keyboard navigation with arrow keys
+- [x] Keyboard labeling shortcuts (`1..9`, top-row and numpad)
+- [x] Delete UX:
+  - [x] project delete action
+  - [x] single-image delete action
+  - [x] multi-image delete mode and selection
+  - [x] folder/subfolder delete from tree
+  - [x] toast-style delete summaries with counts
 
 ### Docs
 - [x] README aligned with implemented stack/workflow
@@ -70,13 +79,11 @@ Status reflects current repository behavior.
 ### API
 - [ ] Validate upload target project exists before persisting file
 - [ ] Populate image `width/height` on upload
-- [ ] Add delete asset endpoint(s)
 - [ ] Add richer structured API error responses for UI
 
 ### Web
 - [ ] Add explicit staged/dirty indicators in file tree and pagination
 - [ ] Improve import dialog UX (validation hints + remembered defaults)
-- [ ] Add full keyboard labeling shortcuts (1..9, skip, etc.)
 - [x] Wire export button to backend flow
 - [ ] Add export history/filter UI
 - [ ] Add better loading/empty states per panel

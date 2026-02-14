@@ -8,6 +8,8 @@ import { LabelPanel } from "../components/LabelPanel";
 import { Viewer } from "../components/Viewer";
 import {
   ApiError,
+  deleteAsset,
+  deleteProject,
   createExport,
   createCategory,
   createProject,
@@ -140,6 +142,13 @@ function formatDuration(seconds: number): string {
   return `${mins}m ${secs}s`;
 }
 
+function parseLabelShortcutDigit(event: KeyboardEvent): number | null {
+  const digitCodeMatch = event.code.match(/^(Digit|Numpad)([1-9])$/);
+  if (digitCodeMatch) return Number(digitCodeMatch[2]);
+  if (/^[1-9]$/.test(event.key)) return Number(event.key);
+  return null;
+}
+
 function buildTreeEntries(assets: { id: string; uri: string; metadata_json: Record<string, unknown> }[]): TreeBuildResult {
   type FolderNode = {
     name: string;
@@ -228,6 +237,8 @@ export default function HomePage() {
   const [currentStatus, setCurrentStatus] = useState<AnnotationStatus>("unlabeled");
   const [isSaving, setIsSaving] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
+  const [isDeletingAssets, setIsDeletingAssets] = useState(false);
+  const [isDeletingProject, setIsDeletingProject] = useState(false);
   const [isCreatingLabel, setIsCreatingLabel] = useState(false);
   const [isSavingLabelChanges, setIsSavingLabelChanges] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
@@ -246,6 +257,8 @@ export default function HomePage() {
   const [importFolderOptionsByProject, setImportFolderOptionsByProject] = useState<Record<string, string[]>>({});
   const [selectedImportExistingFolder, setSelectedImportExistingFolder] = useState<string>("");
   const [importProgress, setImportProgress] = useState<ImportProgressState | null>(null);
+  const [bulkDeleteMode, setBulkDeleteMode] = useState(false);
+  const [selectedDeleteAssets, setSelectedDeleteAssets] = useState<Record<string, boolean>>({});
   const [preferredProjectId, setPreferredProjectId] = useState<string | null>(null);
   const [hasLoadedPreferredProject, setHasLoadedPreferredProject] = useState(false);
 
@@ -435,6 +448,20 @@ export default function HomePage() {
     () => assetRows.map((asset) => assetReviewStatusById.get(asset.id) ?? "unlabeled"),
     [assetReviewStatusById, assetRows],
   );
+  const selectedDeleteAssetIds = useMemo(
+    () => Object.keys(selectedDeleteAssets).filter((assetId) => selectedDeleteAssets[assetId]),
+    [selectedDeleteAssets],
+  );
+  const selectedFolderAssetCount = useMemo(() => {
+    if (!selectedTreeFolderPath) return 0;
+    return treeBuild.folderAssetIds[selectedTreeFolderPath]?.length ?? 0;
+  }, [selectedTreeFolderPath, treeBuild.folderAssetIds]);
+  const messageTone = useMemo(() => {
+    if (!message) return "info";
+    const lower = message.toLowerCase();
+    if (lower.includes("failed") || lower.includes("error")) return "error";
+    return "success";
+  }, [message]);
 
   const folderReviewStatusByPath = useMemo(() => {
     const status: Record<string, FolderReviewStatus> = {};
@@ -512,29 +539,61 @@ export default function HomePage() {
   }, [assetRows.length]);
 
   useEffect(() => {
+    setSelectedDeleteAssets((previous) => {
+      const next: Record<string, boolean> = {};
+      for (const assetId of Object.keys(previous)) {
+        if (assetById.has(assetId) && previous[assetId]) next[assetId] = true;
+      }
+      const previousKeys = Object.keys(previous);
+      const nextKeys = Object.keys(next);
+      if (previousKeys.length === nextKeys.length && previousKeys.every((key) => next[key] === previous[key])) return previous;
+      return next;
+    });
+  }, [assetById]);
+
+  useEffect(() => {
+    if (!message) return;
+    const timeout = window.setTimeout(() => setMessage(null), 6000);
+    return () => window.clearTimeout(timeout);
+  }, [message]);
+
+  useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
       const target = event.target as HTMLElement | null;
       const tag = target?.tagName?.toLowerCase();
       if (tag === "input" || tag === "textarea" || target?.isContentEditable) return;
+      if (event.altKey || event.ctrlKey || event.metaKey) return;
 
       if (event.key === "ArrowLeft") {
         event.preventDefault();
         setAssetIndex((previous) => (previous <= 0 ? 0 : previous - 1));
+        return;
       }
       if (event.key === "ArrowRight") {
         event.preventDefault();
         setAssetIndex((previous) => (previous >= assetRows.length - 1 ? previous : previous + 1));
+        return;
       }
+
+      const digit = parseLabelShortcutDigit(event);
+      if (digit === null || digit > activeLabelRows.length) return;
+      const label = activeLabelRows[digit - 1];
+      if (!label) return;
+
+      event.preventDefault();
+      handleToggleLabel(label.id);
     }
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [assetRows.length]);
+  }, [activeLabelRows, assetRows.length, currentAsset, currentStatus, multiLabelEnabled, selectedLabelIds]);
 
   function handleSelectDataset(id: string) {
     setSelectedProjectId(id);
     setSelectedTreeFolderPath(null);
     setCollapsedFolders({});
+    setBulkDeleteMode(false);
+    setSelectedDeleteAssets({});
     setAssetIndex(0);
     setPendingAnnotations({});
     setEditMode(false);
@@ -549,21 +608,31 @@ export default function HomePage() {
     setAssetIndex((previous) => (previous >= assetRows.length - 1 ? previous : previous + 1));
   }
 
-  function handleToggleLabel(id: number) {
+  function stageLabelSelection(nextLabelIds: number[]) {
     if (!currentAsset) return;
+    const normalizedLabelIds = Array.from(new Set(nextLabelIds));
+    const nextStatus: AnnotationStatus = normalizedLabelIds.length === 0 ? "unlabeled" : currentStatus === "unlabeled" ? "labeled" : currentStatus;
 
-    const nextLabelIds = multiLabelEnabled
-      ? selectedLabelIds.includes(id)
-        ? selectedLabelIds.filter((value) => value !== id)
-        : [...selectedLabelIds, id]
-      : [id];
-    setSelectedLabelIds(nextLabelIds);
-
-    const effectiveStatus = currentStatus === "unlabeled" ? "labeled" : currentStatus;
+    setSelectedLabelIds(normalizedLabelIds);
+    setCurrentStatus(nextStatus);
     setPendingAnnotations((previous) => ({
       ...previous,
-      [currentAsset.id]: { labelIds: nextLabelIds, status: effectiveStatus },
+      [currentAsset.id]: { labelIds: normalizedLabelIds, status: nextStatus },
     }));
+  }
+
+  function getNextToggledLabels(labelId: number): number[] {
+    if (multiLabelEnabled) {
+      return selectedLabelIds.includes(labelId)
+        ? selectedLabelIds.filter((value) => value !== labelId)
+        : [...selectedLabelIds, labelId];
+    }
+    return selectedLabelIds.length === 1 && selectedLabelIds[0] === labelId ? [] : [labelId];
+  }
+
+  function handleToggleLabel(id: number) {
+    if (!currentAsset) return;
+    stageLabelSelection(getNextToggledLabels(id));
   }
 
   function handleToggleProjectMultiLabel() {
@@ -575,29 +644,37 @@ export default function HomePage() {
   }
 
   async function submitSingleAnnotation() {
-    if (!selectedProjectId || !currentAsset || selectedLabelIds.length === 0) {
-      setMessage("Select a dataset, asset and label before submitting.");
+    if (!selectedProjectId || !currentAsset) {
+      setMessage("Select a dataset and asset before submitting.");
       return;
     }
 
     const resolvedLabelIds = selectedLabelIds.filter((id) => activeLabelRows.some((label) => label.id === id));
     const selectedLabel = activeLabelRows.find((label) => label.id === resolvedLabelIds[0]);
-    if (resolvedLabelIds.length === 0 || !selectedLabel) {
+    const isUnlabeledSelection = resolvedLabelIds.length === 0;
+    if (!isUnlabeledSelection && !selectedLabel) {
       setMessage("Selected label could not be resolved.");
       return;
     }
 
     const annotation = await upsertAnnotation(selectedProjectId, {
       asset_id: currentAsset.id,
-      status: currentStatus === "unlabeled" ? "labeled" : currentStatus,
-      payload_json: {
-        type: "classification",
-        category_id: selectedLabel.id,
-        category_ids: resolvedLabelIds,
-        category_name: selectedLabel.name,
-        coco: { image_id: currentAsset.id, category_id: selectedLabel.id },
-        source: "web-ui",
-      },
+      status: isUnlabeledSelection ? "unlabeled" : currentStatus === "unlabeled" ? "labeled" : currentStatus,
+      payload_json: isUnlabeledSelection
+        ? {
+            type: "classification",
+            category_ids: [],
+            coco: { image_id: currentAsset.id, category_id: null },
+            source: "web-ui",
+          }
+        : {
+            type: "classification",
+            category_id: selectedLabel.id,
+            category_ids: resolvedLabelIds,
+            category_name: selectedLabel.name,
+            coco: { image_id: currentAsset.id, category_id: selectedLabel.id },
+            source: "web-ui",
+          },
     });
 
     setAnnotations((previous) => {
@@ -609,7 +686,8 @@ export default function HomePage() {
       delete next[currentAsset.id];
       return next;
     });
-    setMessage("Saved annotation.");
+    setCurrentStatus(annotation.status);
+    setMessage(isUnlabeledSelection ? "Cleared annotation labels." : "Saved annotation.");
   }
 
   async function submitPendingAnnotations() {
@@ -628,18 +706,27 @@ export default function HomePage() {
     for (const [assetId, pending] of entries) {
       const selectedIds = pending.labelIds.filter((id) => activeLabelRows.some((item) => item.id === id));
       const label = activeLabelRows.find((item) => item.id === selectedIds[0]);
-      if (!label) continue;
+      const isUnlabeledSelection = selectedIds.length === 0;
+      if (!isUnlabeledSelection && !label) continue;
+
       const annotation = await upsertAnnotation(selectedProjectId, {
         asset_id: assetId,
-        status: pending.status,
-        payload_json: {
-          type: "classification",
-          category_id: label.id,
-          category_ids: selectedIds,
-          category_name: label.name,
-          coco: { image_id: assetId, category_id: label.id },
-          source: "web-ui",
-        },
+        status: isUnlabeledSelection ? "unlabeled" : pending.status,
+        payload_json: isUnlabeledSelection
+          ? {
+              type: "classification",
+              category_ids: [],
+              coco: { image_id: assetId, category_id: null },
+              source: "web-ui",
+            }
+          : {
+              type: "classification",
+              category_id: label.id,
+              category_ids: selectedIds,
+              category_name: label.name,
+              coco: { image_id: assetId, category_id: label.id },
+              source: "web-ui",
+            },
       });
       saved.push(annotation);
     }
@@ -667,6 +754,227 @@ export default function HomePage() {
       setMessage(error instanceof Error ? error.message : "Failed to submit annotation.");
     } finally {
       setIsSaving(false);
+    }
+  }
+
+  async function deleteAssetsWithSummary(assetIds: string[], contextLabel: string) {
+    if (!selectedProjectId) {
+      setMessage("Select a dataset before deleting assets.");
+      return { removed: 0, failed: assetIds.length };
+    }
+
+    const uniqueIds = Array.from(new Set(assetIds)).filter((assetId) => assetById.has(assetId));
+    if (uniqueIds.length === 0) {
+      setMessage(`No images selected to remove in ${contextLabel}.`);
+      return { removed: 0, failed: 0 };
+    }
+
+    const targetSet = new Set(uniqueIds);
+    const removedAssetIds: string[] = [];
+    let removed = 0;
+    let failed = 0;
+
+    try {
+      setIsDeletingAssets(true);
+      setMessage(null);
+
+      for (const assetId of uniqueIds) {
+        try {
+          await deleteAsset(selectedProjectId, assetId);
+          removed += 1;
+          removedAssetIds.push(assetId);
+        } catch {
+          failed += 1;
+        }
+      }
+
+      if (removed > 0) {
+        const removedAssetSet = new Set(removedAssetIds);
+        const removedAnnotationCount = annotations.reduce(
+          (count, annotation) => (removedAssetSet.has(annotation.asset_id) ? count + 1 : count),
+          0,
+        );
+        setPendingAnnotations((previous) => {
+          const next = { ...previous };
+          for (const assetId of uniqueIds) delete next[assetId];
+          return next;
+        });
+        setAnnotations((previous) => previous.filter((annotation) => !targetSet.has(annotation.asset_id)));
+        await refetchAssets(selectedProjectId);
+        setMessage(
+          `Deleted ${removed}/${uniqueIds.length} images from ${contextLabel} (annotations removed: ${removedAnnotationCount}${
+            failed > 0 ? `, failed: ${failed}` : ""
+          }).`,
+        );
+      } else {
+        setMessage(`Deleted 0/${uniqueIds.length} images from ${contextLabel}${failed > 0 ? ` (failed: ${failed}).` : "."}`);
+      }
+      setSelectedDeleteAssets((previous) => {
+        const next = { ...previous };
+        for (const assetId of uniqueIds) delete next[assetId];
+        return next;
+      });
+      return { removed, failed };
+    } finally {
+      setIsDeletingAssets(false);
+    }
+  }
+
+  async function handleDeleteCurrentAsset() {
+    if (!currentAsset) {
+      setMessage("Select an image before removing it.");
+      return;
+    }
+
+    const assetName = asRelativePath(currentAsset);
+    const confirmed = window.confirm(`Remove image "${assetName}" from "${selectedDatasetName}"?`);
+    if (!confirmed) return;
+
+    await deleteAssetsWithSummary([currentAsset.id], `"${selectedDatasetName}"`);
+  }
+
+  function handleToggleBulkDeleteMode() {
+    setBulkDeleteMode((previous) => {
+      const next = !previous;
+      if (!next) setSelectedDeleteAssets({});
+      return next;
+    });
+  }
+
+  function handleToggleDeleteSelection(assetId: string) {
+    if (!bulkDeleteMode) return;
+    setSelectedDeleteAssets((previous) => {
+      const next = { ...previous };
+      if (next[assetId]) delete next[assetId];
+      else next[assetId] = true;
+      return next;
+    });
+  }
+
+  function handleSelectAllDeleteScope() {
+    const inScopeIds = assetRows.map((asset) => asset.id);
+    if (inScopeIds.length === 0) {
+      setMessage("No images in current scope.");
+      return;
+    }
+    setSelectedDeleteAssets(Object.fromEntries(inScopeIds.map((assetId) => [assetId, true])));
+  }
+
+  function handleClearDeleteSelection() {
+    setSelectedDeleteAssets({});
+  }
+
+  async function handleDeleteSelectedAssets() {
+    if (selectedDeleteAssetIds.length === 0) {
+      setMessage("Select one or more images to remove.");
+      return;
+    }
+
+    const scopeLabel = selectedTreeFolderPath ? `folder "${selectedTreeFolderPath}"` : `project "${selectedDatasetName}"`;
+    const confirmed = window.confirm(`Remove ${selectedDeleteAssetIds.length} selected image(s) from ${scopeLabel}?`);
+    if (!confirmed) return;
+
+    await deleteAssetsWithSummary(selectedDeleteAssetIds, scopeLabel);
+  }
+
+  async function handleDeleteSelectedFolder() {
+    if (!selectedTreeFolderPath) {
+      setMessage("Select a folder before deleting it.");
+      return;
+    }
+    const folderAssetIds = treeBuild.folderAssetIds[selectedTreeFolderPath] ?? [];
+    if (folderAssetIds.length === 0) {
+      setMessage(`Folder "${selectedTreeFolderPath}" has no images to delete.`);
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Delete folder "${selectedTreeFolderPath}" and ${folderAssetIds.length} image(s) in this subtree?`,
+    );
+    if (!confirmed) return;
+
+    const result = await deleteAssetsWithSummary(folderAssetIds, `folder "${selectedTreeFolderPath}"`);
+    if (result.removed > 0) {
+      setSelectedTreeFolderPath(null);
+      setAssetIndex(0);
+    }
+  }
+
+  async function handleDeleteFolderPath(folderPath: string) {
+    const folderAssetIds = treeBuild.folderAssetIds[folderPath] ?? [];
+    if (folderAssetIds.length === 0) {
+      setMessage(`Folder "${folderPath}" has no images to delete.`);
+      return;
+    }
+
+    const confirmed = window.confirm(`Delete folder "${folderPath}" and ${folderAssetIds.length} image(s) in this subtree?`);
+    if (!confirmed) return;
+
+    const result = await deleteAssetsWithSummary(folderAssetIds, `folder "${folderPath}"`);
+    if (result.removed > 0) {
+      if (selectedTreeFolderPath === folderPath || selectedTreeFolderPath?.startsWith(`${folderPath}/`)) {
+        setSelectedTreeFolderPath(null);
+        setAssetIndex(0);
+      }
+      setCollapsedFolders((previous) => {
+        const next = { ...previous };
+        for (const key of Object.keys(next)) {
+          if (key === folderPath || key.startsWith(`${folderPath}/`)) {
+            delete next[key];
+          }
+        }
+        return next;
+      });
+    }
+  }
+
+  async function handleDeleteCurrentProject() {
+    if (!selectedProjectId) {
+      setMessage("Select a dataset before deleting it.");
+      return;
+    }
+
+    const projectId = selectedProjectId;
+    const projectName = selectedDatasetName;
+    const confirmed = window.confirm(`Delete project "${projectName}" and all its assets/annotations?`);
+    if (!confirmed) return;
+
+    try {
+      setIsDeletingProject(true);
+      setMessage(null);
+      const projectAssetCount = assets.length;
+      const projectAnnotationCount = annotations.length;
+      await deleteProject(projectId);
+
+      setPendingAnnotations({});
+      setSelectedLabelIds([]);
+      setCurrentStatus("unlabeled");
+      setEditMode(false);
+      setAssetIndex(0);
+      setSelectedTreeFolderPath(null);
+      setCollapsedFolders({});
+      setImportExistingProjectId("");
+      setSelectedImportExistingFolder("");
+      setImportFolderOptionsByProject((previous) => {
+        const next = { ...previous };
+        delete next[projectId];
+        return next;
+      });
+      setProjectMultiLabelSettings((previous) => {
+        const next = { ...previous };
+        delete next[projectId];
+        return next;
+      });
+      setSelectedProjectId(null);
+      await refetchProjects();
+      await refetchAssets(null);
+      setMessage(
+        `Deleted project "${projectName}" (assets removed: ${projectAssetCount}, annotations removed: ${projectAnnotationCount}).`,
+      );
+    } catch (error) {
+      setMessage(error instanceof Error ? `Failed to delete project: ${error.message}` : "Failed to delete project.");
+    } finally {
+      setIsDeletingProject(false);
     }
   }
 
@@ -1032,6 +1340,44 @@ export default function HomePage() {
                   </button>
                 </div>
               </div>
+              <div className="tree-delete-toolbar">
+                <button
+                  type="button"
+                  className={bulkDeleteMode ? "tree-scope-button danger active" : "tree-scope-button danger"}
+                  onClick={handleToggleBulkDeleteMode}
+                  disabled={!selectedProjectId || isDeletingAssets}
+                >
+                  {bulkDeleteMode ? "Exit multi-delete" : "Multi-delete"}
+                </button>
+                {bulkDeleteMode ? (
+                  <>
+                    <button type="button" className="tree-scope-button" onClick={handleSelectAllDeleteScope} disabled={isDeletingAssets}>
+                      Select scope
+                    </button>
+                    <button type="button" className="tree-scope-button" onClick={handleClearDeleteSelection} disabled={isDeletingAssets}>
+                      Clear
+                    </button>
+                    <button
+                      type="button"
+                      className="tree-scope-button danger"
+                      onClick={handleDeleteSelectedAssets}
+                      disabled={isDeletingAssets || selectedDeleteAssetIds.length === 0}
+                    >
+                      Delete selected ({selectedDeleteAssetIds.length})
+                    </button>
+                  </>
+                ) : null}
+                {selectedTreeFolderPath ? (
+                  <button
+                    type="button"
+                    className="tree-scope-button danger"
+                    onClick={handleDeleteSelectedFolder}
+                    disabled={isDeletingAssets || selectedFolderAssetCount === 0}
+                  >
+                    Delete folder ({selectedFolderAssetCount})
+                  </button>
+                ) : null}
+              </div>
               {selectedTreeFolderPath ? <p className="tree-scope-caption">Scope: {selectedTreeFolderPath}</p> : null}
               <ul>
                 {visibleTreeEntries.map((entry) => (
@@ -1059,18 +1405,43 @@ export default function HomePage() {
                         >
                           {entry.name}
                         </button>
+                        <button
+                          type="button"
+                          className="tree-row-delete"
+                          onClick={() => void handleDeleteFolderPath(entry.path)}
+                          disabled={isDeletingAssets}
+                          title={`Delete "${entry.path}"`}
+                        >
+                          x
+                        </button>
                       </div>
                     ) : (
-                      <button
-                        type="button"
-                        className={`tree-file${entry.assetId === currentAsset?.id ? " active" : ""} ${
-                          entry.assetId && assetReviewStatusById.get(entry.assetId) === "labeled" ? "is-labeled" : "is-unlabeled"
-                        }`}
-                        style={{ paddingLeft: `${entry.depth * 14 + 8}px` }}
-                        onClick={() => entry.assetId && handleSelectTreeAsset(entry.assetId, entry.folderPath)}
-                      >
-                        {entry.name}
-                      </button>
+                      <div className="tree-file-row" style={{ paddingLeft: `${entry.depth * 14 + 8}px` }}>
+                        {bulkDeleteMode && entry.assetId ? (
+                          <input
+                            className="tree-file-checkbox"
+                            type="checkbox"
+                            checked={Boolean(selectedDeleteAssets[entry.assetId])}
+                            onChange={() => {
+                              if (entry.assetId) handleToggleDeleteSelection(entry.assetId);
+                            }}
+                            disabled={isDeletingAssets}
+                            aria-label={`Select ${entry.name} for delete`}
+                          />
+                        ) : null}
+                        <button
+                          type="button"
+                          className={`tree-file${entry.assetId === currentAsset?.id ? " active" : ""} ${
+                            entry.assetId && assetReviewStatusById.get(entry.assetId) === "labeled" ? "is-labeled" : "is-unlabeled"
+                          }${entry.assetId && selectedDeleteAssets[entry.assetId] ? " delete-selected" : ""}`}
+                          onClick={() =>
+                            entry.assetId &&
+                            (bulkDeleteMode ? handleToggleDeleteSelection(entry.assetId) : handleSelectTreeAsset(entry.assetId, entry.folderPath))
+                          }
+                        >
+                          {entry.name}
+                        </button>
+                      </div>
                     )}
                   </li>
                 ))}
@@ -1115,10 +1486,57 @@ export default function HomePage() {
             <button type="button" className="ghost-button" onClick={handleExport} disabled={isExporting || !selectedProjectId}>
               {isExporting ? "Exporting..." : "Export Dataset"}
             </button>
+            <button
+              type="button"
+              className="ghost-button danger-button"
+              onClick={handleDeleteCurrentAsset}
+              disabled={isDeletingAssets || !selectedProjectId || !currentAsset}
+            >
+              {isDeletingAssets ? "Removing..." : "Remove Image"}
+            </button>
+            <button
+              type="button"
+              className={bulkDeleteMode ? "ghost-button active-toggle" : "ghost-button"}
+              onClick={handleToggleBulkDeleteMode}
+              disabled={!selectedProjectId || isDeletingAssets}
+            >
+              {bulkDeleteMode ? "Exit Multi-delete" : "Multi-delete"}
+            </button>
+            <button
+              type="button"
+              className="ghost-button danger-button"
+              onClick={handleDeleteSelectedAssets}
+              disabled={isDeletingAssets || selectedDeleteAssetIds.length === 0}
+            >
+              {isDeletingAssets ? "Removing..." : `Delete Selected (${selectedDeleteAssetIds.length})`}
+            </button>
+            <button
+              type="button"
+              className="ghost-button danger-button"
+              onClick={handleDeleteSelectedFolder}
+              disabled={isDeletingAssets || !selectedTreeFolderPath || selectedFolderAssetCount === 0}
+            >
+              Delete Folder
+            </button>
+            <button
+              type="button"
+              className="ghost-button danger-button"
+              onClick={handleDeleteCurrentProject}
+              disabled={isDeletingProject || !selectedProjectId}
+            >
+              {isDeletingProject ? "Deleting..." : "Delete Project"}
+            </button>
           </div>
         </footer>
       </section>
-      {message ? <p className="status-message">{message}</p> : null}
+      {message ? (
+        <div className={`status-toast ${messageTone === "error" ? "is-error" : "is-success"}`} role="status" aria-live="polite">
+          <span>{message}</span>
+          <button type="button" aria-label="Dismiss message" onClick={() => setMessage(null)}>
+            x
+          </button>
+        </div>
+      ) : null}
       {importFailures.length > 0 ? (
         <ul className="status-errors">
           {importFailures.map((failure) => (

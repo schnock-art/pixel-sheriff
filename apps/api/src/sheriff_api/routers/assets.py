@@ -3,12 +3,12 @@ import os
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile, status
 from fastapi.responses import FileResponse
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from sheriff_api.db.models import Annotation, Asset, AssetType
+from sheriff_api.db.models import Annotation, Asset, AssetType, Suggestion
 from sheriff_api.config import get_settings
 from sheriff_api.db.session import get_db
 from sheriff_api.schemas.assets import AssetCreate, AssetRead
@@ -97,3 +97,25 @@ async def get_asset_content(asset_id: str, db: AsyncSession = Depends(get_db)) -
         raise HTTPException(status_code=404, detail="Asset file not found on disk")
 
     return FileResponse(path=path, media_type=asset.mime_type, filename=os.path.basename(path))
+
+
+@router.delete("/projects/{project_id}/assets/{asset_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_asset(project_id: str, asset_id: str, db: AsyncSession = Depends(get_db)) -> Response:
+    asset = await db.get(Asset, asset_id)
+    if asset is None or asset.project_id != project_id:
+        raise HTTPException(status_code=404, detail="Asset not found")
+
+    storage_uri = asset.metadata_json.get("storage_uri")
+
+    await db.execute(delete(Annotation).where(Annotation.asset_id == asset_id))
+    await db.execute(delete(Suggestion).where(Suggestion.asset_id == asset_id))
+    await db.delete(asset)
+    await db.commit()
+
+    if isinstance(storage_uri, str) and storage_uri:
+        try:
+            storage.delete_file(storage_uri)
+        except ValueError:
+            pass
+
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

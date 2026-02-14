@@ -42,6 +42,15 @@ All notable changes to this project will be documented in this file.
   - skip buttons (`-10`, `-5`, `<`, `>`, `+5`, `+10`)
   - dynamic pagination chip window sized by available width
   - `First` / `Last` quick jumps
+- Delete capabilities:
+  - `DELETE /api/v1/projects/{project_id}`
+  - `DELETE /api/v1/projects/{project_id}/assets/{asset_id}`
+  - web actions for project delete, single-image delete, multi-image delete, and folder/subfolder subtree delete
+- Keyboard labeling shortcuts:
+  - class selection with number keys `1..9` (top row and numpad)
+- Toast-style operation feedback:
+  - auto-dismiss success/error notifications
+  - delete summaries with image/annotation counts
 - Documentation refresh:
   - `README.md`
   - `Architecture.md`
@@ -54,6 +63,7 @@ All notable changes to this project will be documented in this file.
 - API CORS handling improved for localhost/127.0.0.1 development origins.
 - API Docker packaging fixed for `src/` layout installation reliability.
 - Local env defaults updated to conflict-resistant ports in `.env.example`.
+- Tree panel now supports delete-mode multi-selection and per-folder delete controls.
 
 ### Fixed
 - Root route prerender conflict caused by duplicate `/` page definitions.
