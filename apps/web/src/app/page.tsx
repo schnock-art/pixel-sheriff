@@ -24,6 +24,14 @@ import {
 import { useAssets } from "../lib/hooks/useAssets";
 import { useLabels } from "../lib/hooks/useLabels";
 import { useProject } from "../lib/hooks/useProject";
+import {
+  canSubmitWithStates,
+  deriveNextAnnotationStatus,
+  getCommittedSelectionState,
+  normalizeLabelIds,
+  readAnnotationLabelIds,
+  resolvePendingAnnotation,
+} from "../lib/workspace/annotationState";
 
 const IMAGE_EXTENSIONS = new Set(["jpg", "jpeg", "png", "gif", "bmp", "webp", "tif", "tiff"]);
 const PROJECT_MULTILABEL_STORAGE_KEY = "pixel-sheriff:project-multilabel:v1";
@@ -498,18 +506,7 @@ export default function HomePage() {
     }
 
     setCurrentStatus(annotation.status);
-    const categoryIdValue = annotation.payload_json.category_id;
-    const categoryIdsValue = annotation.payload_json.category_ids;
-    if (Array.isArray(categoryIdsValue)) {
-      const ids = categoryIdsValue.filter((item): item is number => typeof item === "number");
-      setSelectedLabelIds(ids);
-      return;
-    }
-    if (typeof categoryIdValue === "number") {
-      setSelectedLabelIds([categoryIdValue]);
-      return;
-    }
-    setSelectedLabelIds([]);
+    setSelectedLabelIds(readAnnotationLabelIds(annotation.payload_json));
   }, [annotationByAssetId, currentAsset, pendingAnnotations]);
 
   useEffect(() => {
@@ -610,15 +607,22 @@ export default function HomePage() {
 
   function stageLabelSelection(nextLabelIds: number[]) {
     if (!currentAsset) return;
-    const normalizedLabelIds = Array.from(new Set(nextLabelIds));
-    const nextStatus: AnnotationStatus = normalizedLabelIds.length === 0 ? "unlabeled" : currentStatus === "unlabeled" ? "labeled" : currentStatus;
+    const normalizedLabelIds = normalizeLabelIds(nextLabelIds);
+    const draftState: PendingAnnotation = {
+      labelIds: normalizedLabelIds,
+      status: deriveNextAnnotationStatus(currentStatus, normalizedLabelIds),
+    };
+    const committedState = getCommittedSelectionState(annotationByAssetId.get(currentAsset.id));
+    const nextPending = resolvePendingAnnotation(draftState, committedState);
 
-    setSelectedLabelIds(normalizedLabelIds);
-    setCurrentStatus(nextStatus);
-    setPendingAnnotations((previous) => ({
-      ...previous,
-      [currentAsset.id]: { labelIds: normalizedLabelIds, status: nextStatus },
-    }));
+    setSelectedLabelIds(draftState.labelIds);
+    setCurrentStatus(draftState.status);
+    setPendingAnnotations((previous) => {
+      const next = { ...previous };
+      if (nextPending) next[currentAsset.id] = nextPending;
+      else delete next[currentAsset.id];
+      return next;
+    });
   }
 
   function getNextToggledLabels(labelId: number): number[] {
@@ -649,7 +653,8 @@ export default function HomePage() {
       return;
     }
 
-    const resolvedLabelIds = selectedLabelIds.filter((id) => activeLabelRows.some((label) => label.id === id));
+    const activeLabelIds = new Set(activeLabelRows.map((label) => label.id));
+    const resolvedLabelIds = normalizeLabelIds(selectedLabelIds.filter((id) => activeLabelIds.has(id)));
     const selectedLabel = activeLabelRows.find((label) => label.id === resolvedLabelIds[0]);
     const isUnlabeledSelection = resolvedLabelIds.length === 0;
     if (!isUnlabeledSelection && !selectedLabel) {
@@ -659,7 +664,7 @@ export default function HomePage() {
 
     const annotation = await upsertAnnotation(selectedProjectId, {
       asset_id: currentAsset.id,
-      status: isUnlabeledSelection ? "unlabeled" : currentStatus === "unlabeled" ? "labeled" : currentStatus,
+      status: deriveNextAnnotationStatus(currentStatus, resolvedLabelIds),
       payload_json: isUnlabeledSelection
         ? {
             type: "classification",
@@ -703,15 +708,16 @@ export default function HomePage() {
     }
 
     const saved: Annotation[] = [];
+    const activeLabelIds = new Set(activeLabelRows.map((label) => label.id));
     for (const [assetId, pending] of entries) {
-      const selectedIds = pending.labelIds.filter((id) => activeLabelRows.some((item) => item.id === id));
+      const selectedIds = normalizeLabelIds(pending.labelIds.filter((id) => activeLabelIds.has(id)));
       const label = activeLabelRows.find((item) => item.id === selectedIds[0]);
       const isUnlabeledSelection = selectedIds.length === 0;
       if (!isUnlabeledSelection && !label) continue;
 
       const annotation = await upsertAnnotation(selectedProjectId, {
         asset_id: assetId,
-        status: isUnlabeledSelection ? "unlabeled" : pending.status,
+        status: deriveNextAnnotationStatus(pending.status, selectedIds),
         payload_json: isUnlabeledSelection
           ? {
               type: "classification",
@@ -745,7 +751,7 @@ export default function HomePage() {
     try {
       setIsSaving(true);
       setMessage(null);
-      if (Object.keys(pendingAnnotations).length > 0) {
+      if (pendingCount > 0) {
         await submitPendingAnnotations();
       } else {
         await submitSingleAnnotation();
@@ -1277,6 +1283,19 @@ export default function HomePage() {
 
   const selectedDatasetName = datasets.find((dataset) => dataset.id === activeDatasetId)?.name ?? "No dataset selected";
   const headerTitle = selectedTreeFolderPath ? `${selectedDatasetName} / ${selectedTreeFolderPath}` : selectedDatasetName;
+  const pendingCount = Object.keys(pendingAnnotations).length;
+  const currentCommittedSelectionState = useMemo(
+    () => getCommittedSelectionState(currentAsset ? annotationByAssetId.get(currentAsset.id) : null),
+    [annotationByAssetId, currentAsset],
+  );
+  const currentDraftSelectionState = useMemo(() => {
+    const activeLabelIds = new Set(activeLabelRows.map((label) => label.id));
+    const resolvedLabelIds = normalizeLabelIds(selectedLabelIds.filter((id) => activeLabelIds.has(id)));
+    return {
+      labelIds: resolvedLabelIds,
+      status: deriveNextAnnotationStatus(currentStatus, resolvedLabelIds),
+    };
+  }, [activeLabelRows, currentStatus, selectedLabelIds]);
   const importExistingFolderOptions = importFolderOptionsByProject[importExistingProjectId] ?? [];
   const importProgressView = useMemo(() => {
     if (!importProgress) return null;
@@ -1301,7 +1320,13 @@ export default function HomePage() {
       activeFileName: importProgress.activeFileName,
     };
   }, [importProgress]);
-  const canSubmit = Object.keys(pendingAnnotations).length > 0 || (!editMode && selectedLabelIds.length > 0 && currentAsset !== null);
+  const canSubmit = canSubmitWithStates({
+    pendingCount,
+    editMode,
+    hasCurrentAsset: currentAsset !== null,
+    draftState: currentDraftSelectionState,
+    committedState: currentCommittedSelectionState,
+  });
 
   return (
     <main className="workspace-shell">
@@ -1469,7 +1494,7 @@ export default function HomePage() {
             isCreatingLabel={isCreatingLabel}
             editMode={editMode}
             onToggleEditMode={() => setEditMode((value) => !value)}
-            pendingCount={Object.keys(pendingAnnotations).length}
+            pendingCount={pendingCount}
             onSaveLabelChanges={handleSaveLabelChanges}
             isSavingLabelChanges={isSavingLabelChanges}
             canSubmit={canSubmit}

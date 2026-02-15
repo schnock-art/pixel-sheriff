@@ -88,8 +88,8 @@ Status reflects current repository behavior.
 - [x] Stabilize API async test harness in container/local so full suite passes reliably (loop/lifespan fixtures centralized in `conftest.py`)
 
 #### P1 - Web Behavior Consistency
-- [ ] Fix submit gating so "clear label" (unlabeled submit) is possible in non-edit mode
-- [ ] Keep staged/selected label state transitions explicit and test-covered
+- [x] Fix submit gating so "clear label" (unlabeled submit) is possible in non-edit mode
+- [x] Keep staged/selected label state transitions explicit and test-covered
 
 #### P2 - Frontend Structure Refactor
 - [ ] Split `apps/web/src/app/page.tsx` into focused hooks/modules:

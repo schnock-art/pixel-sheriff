@@ -65,6 +65,8 @@ All notable changes to this project will be documented in this file.
 - Local env defaults updated to conflict-resistant ports in `.env.example`.
 - Tree panel now supports delete-mode multi-selection and per-folder delete controls.
 - API async test harness now uses shared `conftest.py` fixtures with explicit FastAPI lifespan handling and deterministic asyncio loop-scope settings.
+- Web annotation transitions now use explicit draft-vs-committed selection state logic, including non-edit clear-label submit eligibility.
+- Web test script now runs focused state-transition tests via Node's built-in test runner.
 
 ### Fixed
 - Root route prerender conflict caused by duplicate `/` page definitions.

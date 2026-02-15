@@ -6,7 +6,7 @@
     "dev": "next dev -p 3000",
     "build": "next build",
     "start": "next start -p 3000",
-    "test": "echo 'web tests scaffolded'"
+    "test": "node --test --test-isolation=none tests/annotationState.test.js"
   },
   "dependencies": {
     "next": "14.2.5",
