@@ -1,11 +1,14 @@
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.exceptions import RequestValidationError
+from fastapi import HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from sheriff_api.config import get_settings
 from sheriff_api.db.models import Base
 from sheriff_api.db.session import engine
+from sheriff_api.errors import http_exception_handler, request_validation_exception_handler
 from sheriff_api.routers import annotations, assets, categories, exports, health, models, projects
 
 settings = get_settings()
@@ -24,6 +27,8 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="pixel-sheriff", version="0.1.0", lifespan=lifespan)
+app.add_exception_handler(HTTPException, http_exception_handler)
+app.add_exception_handler(RequestValidationError, request_validation_exception_handler)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=parse_cors_origins(settings.cors_origins),

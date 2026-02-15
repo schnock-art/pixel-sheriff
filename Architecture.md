@@ -44,6 +44,7 @@ Network behavior:
 - Entry: `apps/api/src/sheriff_api/main.py`
 - DB schema initialization runs on startup (`Base.metadata.create_all`)
 - Routers mounted under `/api/v1`
+- Global exception handlers normalize API failures into a structured envelope for UI consumption
 
 ### Data Model
 
@@ -76,6 +77,10 @@ Upload metadata stored in `assets.metadata_json`:
 - `original_filename`
 - `relative_path`
 - `size_bytes`
+
+Additional upload-enriched fields persisted on `assets` rows:
+
+- `width` and `height` (when dimensions can be inferred from uploaded bytes)
 
 ### Export Builder
 
@@ -134,6 +139,14 @@ MAL placeholders:
 - `GET /api/v1/assets/{asset_id}/suggestions`
 - `POST /api/v1/projects/{project_id}/suggestions/batch`
 
+Error response contract:
+
+- non-2xx API responses use:
+  - `error.code` (stable machine-readable code)
+  - `error.message` (human-readable message)
+  - `error.details` (context including `request_path` and `request_method`)
+- validation failures use `error.code = "validation_error"` and include `details.issues`
+
 ## 5. Web Architecture (`apps/web`)
 
 Main workspace:
@@ -166,6 +179,9 @@ Workspace pure helpers (`apps/web/src/lib/workspace/*`):
 - `tree.*`: relative-path normalization, folder tree construction, folder chain helpers
 - `pagination.*`: width-aware chip capacity and page-token window generation
 - `annotationState.*`: draft vs committed selection-state comparison and submit eligibility rules
+- `hotkeys.*`: keyboard shortcut parsing/routing for navigation and label selection
+- `deleteState.*`: pure selection/pruning helpers for bulk and folder-scope delete flows
+- `annotationSubmission.*`: payload construction helpers for single/staged annotation submit paths
 
 ### Implemented UX Behaviors
 
@@ -225,7 +241,6 @@ Supported statuses:
 
 ## 7. Known Gaps
 
-- Image metadata extraction (`width`/`height`) is not populated on upload
 - Review/QA moderation workflow not implemented
 - Bounding box and segmentation tooling not implemented
 - Auth/multi-user permissions not implemented

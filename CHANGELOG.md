@@ -79,6 +79,14 @@ All notable changes to this project will be documented in this file.
   - replaced placeholder hotkey test with real keyboard interaction tests (`apps/web/tests/hotkeys.test.js`)
   - added integration-style tests for multi-delete selection/delete, folder-subtree delete behavior, and edit-mode stage/submit/clear flows
   - extracted reusable workspace helpers for hotkeys, delete selection state, and annotation submission payload construction
+- API upload and error-shape improvements:
+  - upload now derives and persists image `width`/`height` metadata when dimensions are detectable from uploaded bytes
+  - API errors now return structured responses (`error.code`, `error.message`, `error.details`) including request path/method context
+  - upload/content/delete asset errors now emit stable machine-readable error codes for UI handling
+- API test coverage expanded for:
+  - upload destination validation before storage writes
+  - upload relative-path behavior and dimension extraction
+  - structured validation/error response payload shape
 - Documentation refreshed to reflect current architecture and remaining gaps:
   - `README.md`
   - `Architecture.md`

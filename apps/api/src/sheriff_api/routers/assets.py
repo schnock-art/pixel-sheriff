@@ -3,7 +3,7 @@ import os
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, Response, UploadFile, status
 from fastapi.responses import FileResponse
 from sqlalchemy import delete, select
 from sqlalchemy.exc import SQLAlchemyError
@@ -12,7 +12,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sheriff_api.db.models import Annotation, Asset, AssetType, Project, Suggestion
 from sheriff_api.config import get_settings
 from sheriff_api.db.session import get_db
+from sheriff_api.errors import api_error
 from sheriff_api.schemas.assets import AssetCreate, AssetRead
+from sheriff_api.services.image_metadata import extract_image_dimensions
 from sheriff_api.services.storage import LocalStorage
 
 router = APIRouter(tags=["assets"])
@@ -24,7 +26,7 @@ storage = LocalStorage(settings.storage_root)
 async def create_asset(project_id: str, payload: AssetCreate, db: AsyncSession = Depends(get_db)) -> Asset:
     project = await db.get(Project, project_id)
     if project is None:
-        raise HTTPException(status_code=404, detail="Project not found")
+        raise api_error(status.HTTP_404_NOT_FOUND, code="project_not_found", message="Project not found")
 
     asset = Asset(project_id=project_id, **payload.model_dump())
     db.add(asset)
@@ -51,11 +53,21 @@ async def upload_asset(
 ) -> Asset:
     project = await db.get(Project, project_id)
     if project is None:
-        raise HTTPException(status_code=404, detail="Project not found")
+        raise api_error(
+            status.HTTP_404_NOT_FOUND,
+            code="project_not_found",
+            message="Project not found",
+            details={"project_id": project_id},
+        )
 
     content = await file.read()
     if len(content) == 0:
-        raise HTTPException(status_code=400, detail="Uploaded file is empty")
+        raise api_error(
+            status.HTTP_400_BAD_REQUEST,
+            code="uploaded_file_empty",
+            message="Uploaded file is empty",
+            details={"filename": file.filename},
+        )
 
     storage.ensure_project_dirs(project_id)
 
@@ -65,6 +77,7 @@ async def upload_asset(
 
     mime_type = file.content_type or "application/octet-stream"
     checksum = hashlib.sha256(content).hexdigest()
+    width, height = extract_image_dimensions(content)
 
     asset = Asset(
         id=generated_id,
@@ -72,6 +85,8 @@ async def upload_asset(
         type=AssetType.image,
         uri=f"/api/v1/assets/{generated_id}/content",
         mime_type=mime_type,
+        width=width,
+        height=height,
         checksum=checksum,
         metadata_json={
             "storage_uri": relative_uri,
@@ -94,7 +109,12 @@ async def upload_asset(
                 storage.delete_file(relative_uri)
             except ValueError:
                 pass
-        raise HTTPException(status_code=500, detail="Failed to persist uploaded asset") from exc
+        raise api_error(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            code="asset_persist_failed",
+            message="Failed to persist uploaded asset",
+            details={"filename": file.filename, "project_id": project_id},
+        ) from exc
 
     await db.refresh(asset)
     return asset
@@ -104,19 +124,34 @@ async def upload_asset(
 async def get_asset_content(asset_id: str, db: AsyncSession = Depends(get_db)) -> FileResponse:
     asset = await db.get(Asset, asset_id)
     if asset is None:
-        raise HTTPException(status_code=404, detail="Asset not found")
+        raise api_error(status.HTTP_404_NOT_FOUND, code="asset_not_found", message="Asset not found")
 
     storage_uri = asset.metadata_json.get("storage_uri")
     if not isinstance(storage_uri, str) or not storage_uri:
-        raise HTTPException(status_code=404, detail="Asset file path missing")
+        raise api_error(
+            status.HTTP_404_NOT_FOUND,
+            code="asset_path_missing",
+            message="Asset file path missing",
+            details={"asset_id": asset_id},
+        )
 
     try:
         path = storage.resolve(storage_uri)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise api_error(
+            status.HTTP_400_BAD_REQUEST,
+            code="asset_path_invalid",
+            message="Asset file path is invalid",
+            details={"asset_id": asset_id, "reason": str(exc)},
+        ) from exc
 
     if not path.exists() or not path.is_file():
-        raise HTTPException(status_code=404, detail="Asset file not found on disk")
+        raise api_error(
+            status.HTTP_404_NOT_FOUND,
+            code="asset_file_missing",
+            message="Asset file not found on disk",
+            details={"asset_id": asset_id},
+        )
 
     return FileResponse(path=path, media_type=asset.mime_type, filename=os.path.basename(path))
 
@@ -125,7 +160,7 @@ async def get_asset_content(asset_id: str, db: AsyncSession = Depends(get_db)) -
 async def delete_asset(project_id: str, asset_id: str, db: AsyncSession = Depends(get_db)) -> Response:
     asset = await db.get(Asset, asset_id)
     if asset is None or asset.project_id != project_id:
-        raise HTTPException(status_code=404, detail="Asset not found")
+        raise api_error(status.HTTP_404_NOT_FOUND, code="asset_not_found", message="Asset not found")
 
     storage_uri = asset.metadata_json.get("storage_uri")
 

@@ -20,6 +20,8 @@ Local-first CV annotation platform.
   - `page.tsx` now focuses on composition/wiring
   - annotation, import, and delete workflows moved into dedicated hooks
   - tree/pagination/annotation-state logic moved into pure workspace helpers with unit tests
+- API upload now derives image `width`/`height` when detectable from uploaded bytes.
+- API error responses now use a structured shape (`error.code`, `error.message`, `error.details`) for better UI diagnostics.
 
 ## Stack
 
@@ -46,6 +48,12 @@ Local-first CV annotation platform.
   - per-file read/network/API failure details
 - Automatic asset/tree refresh after import (no page reload)
 - Persistent upload storage + streamed image serving from API
+- Upload metadata enrichment on API:
+  - persisted `width`/`height` when image dimensions can be inferred
+  - preserved `relative_path` (or filename fallback) for tree/export consistency
+- Structured API errors with machine-readable codes:
+  - response envelope: `error.code`, `error.message`, `error.details`
+  - validation failures include per-field issues
 - Hierarchical file tree (folders/subfolders/files), with:
   - preserved hierarchy ordering
   - per-folder expand/collapse
@@ -106,6 +114,7 @@ docker compose up --build
 - Status: `docker compose ps`
 - Web tests: `cd apps/web && npm test`
 - Web build check: `cd apps/web && npm run build`
+- API tests (container): `docker compose exec api python -m pytest /app/tests -q`
 
 `docker compose logs ...` only reads logs; it does not start containers.
 
@@ -140,9 +149,6 @@ docker compose up --build
 - Bounding boxes and segmentation tools
 - MAL implementation beyond placeholder endpoints
 - Shared-asset reference mode (upload-once/link-many)
-- Refactor/maintainability workstream in progress (tracked in `IMPLEMENTATION_TASKS.md`):
-  - hook cleanup (`useAssets` fetch dedupe + standardized hook error shape)
-  - expanded web interaction/regression testing
 
 ## Troubleshooting
 

@@ -113,9 +113,9 @@ Status reflects current repository behavior.
   - [x] edit-mode stage/submit/clear flows
 
 ### API
-- [ ] Validate upload target project exists before persisting file
-- [ ] Populate image `width/height` on upload
-- [ ] Add richer structured API error responses for UI
+- [x] Validate upload target project exists before persisting file
+- [x] Populate image `width/height` on upload
+- [x] Add richer structured API error responses for UI
 
 ### Web
 - [ ] Add explicit staged/dirty indicators in file tree and pagination
@@ -125,7 +125,7 @@ Status reflects current repository behavior.
 - [ ] Add better loading/empty states per panel
 
 ### Testing
-- [ ] Add API tests for upload destination + relative path behavior
+- [x] Add API tests for upload destination + relative path behavior
 - [ ] Add web integration tests for import -> label -> submit workflow
 - [ ] Add regression tests for edit mode + staged persistence
 
