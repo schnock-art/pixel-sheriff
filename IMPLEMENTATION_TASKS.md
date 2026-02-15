@@ -85,7 +85,7 @@ Status reflects current repository behavior.
 - [x] Ensure upload rollback cleanup when DB write fails after file write
 - [x] Replace mutable schema defaults (for example `metadata_json = {}`) with safe factories
 - [x] Add API tests for delete flows and integrity guards
-- [ ] Stabilize API async test harness in container/local so full suite passes reliably (currently loop/lifespan related)
+- [x] Stabilize API async test harness in container/local so full suite passes reliably (loop/lifespan fixtures centralized in `conftest.py`)
 
 #### P1 - Web Behavior Consistency
 - [ ] Fix submit gating so "clear label" (unlabeled submit) is possible in non-edit mode

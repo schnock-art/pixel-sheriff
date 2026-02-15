@@ -64,6 +64,7 @@ All notable changes to this project will be documented in this file.
 - API Docker packaging fixed for `src/` layout installation reliability.
 - Local env defaults updated to conflict-resistant ports in `.env.example`.
 - Tree panel now supports delete-mode multi-selection and per-folder delete controls.
+- API async test harness now uses shared `conftest.py` fixtures with explicit FastAPI lifespan handling and deterministic asyncio loop-scope settings.
 
 ### Fixed
 - Root route prerender conflict caused by duplicate `/` page definitions.
