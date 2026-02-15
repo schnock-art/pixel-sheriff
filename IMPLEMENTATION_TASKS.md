@@ -118,16 +118,16 @@ Status reflects current repository behavior.
 - [x] Add richer structured API error responses for UI
 
 ### Web
-- [ ] Add explicit staged/dirty indicators in file tree and pagination
-- [ ] Improve import dialog UX (validation hints + remembered defaults)
+- [x] Add explicit staged/dirty indicators in file tree and pagination
+- [x] Improve import dialog UX (validation hints + remembered defaults)
 - [x] Wire export button to backend flow
 - [ ] Add export history/filter UI
 - [ ] Add better loading/empty states per panel
 
 ### Testing
 - [x] Add API tests for upload destination + relative path behavior
-- [ ] Add web integration tests for import -> label -> submit workflow
-- [ ] Add regression tests for edit mode + staged persistence
+- [x] Add web integration tests for import -> label -> submit workflow
+- [x] Add regression tests for edit mode + staged persistence
 
 ## Deferred (Roadmap-aligned)
 - [ ] Review/QA mode

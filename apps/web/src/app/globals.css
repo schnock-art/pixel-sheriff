@@ -303,6 +303,27 @@ button {
   color: #1e3760;
 }
 
+.tree-folder-button.is-dirty {
+  padding-right: 66px;
+}
+
+.tree-folder-button.is-dirty::before {
+  content: "staged";
+  position: absolute;
+  right: 18px;
+  top: 50%;
+  transform: translateY(-50%);
+  border: 1px solid #eab270;
+  background: #ffe8c7;
+  color: #884500;
+  border-radius: 999px;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  line-height: 1;
+  padding: 2px 5px;
+}
+
 .tree-file {
   flex: 1;
   border: none;
@@ -343,6 +364,27 @@ button {
 
 .tree-file.delete-selected {
   background: #fdeff2;
+}
+
+.tree-file.is-dirty {
+  padding-right: 66px;
+}
+
+.tree-file.is-dirty::before {
+  content: "staged";
+  position: absolute;
+  right: 18px;
+  top: 50%;
+  transform: translateY(-50%);
+  border: 1px solid #eab270;
+  background: #ffe8c7;
+  color: #884500;
+  border-radius: 999px;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  line-height: 1;
+  padding: 2px 5px;
 }
 
 .tree-file-row {
@@ -569,6 +611,34 @@ button {
   background: var(--blue);
   border-color: #2d73cf;
   font-weight: 700;
+}
+
+.page-chip.is-dirty {
+  position: relative;
+  box-shadow: inset 0 0 0 1px #eca954;
+}
+
+.page-chip.is-dirty::after {
+  content: "S";
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 11px;
+  height: 11px;
+  border-radius: 999px;
+  background: #eca954;
+  color: #ffffff;
+  font-size: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.page-chip.active.is-dirty::after {
+  background: #ffe0b4;
+  color: #825000;
 }
 
 .page-chip.page-jump {
@@ -912,6 +982,12 @@ button {
   color: #223147;
 }
 
+.import-selection-summary {
+  margin: -2px 0 2px;
+  font-size: 12px;
+  color: #4a5f7a;
+}
+
 .import-mode-row {
   display: flex;
   gap: 18px;
@@ -944,6 +1020,22 @@ button {
 .import-field input:focus,
 .import-field select:focus {
   border-color: #2d73cf;
+}
+
+.import-field input[aria-invalid="true"],
+.import-field select[aria-invalid="true"] {
+  border-color: #cf5b6d;
+  background: #fff8fa;
+}
+
+.import-field-hint {
+  font-size: 12px;
+  color: #4b5f78;
+}
+
+.import-field-error {
+  font-size: 12px;
+  color: #8a2532;
 }
 
 .import-modal-actions {

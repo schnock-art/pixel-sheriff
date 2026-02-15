@@ -87,6 +87,17 @@ All notable changes to this project will be documented in this file.
   - upload destination validation before storage writes
   - upload relative-path behavior and dimension extraction
   - structured validation/error response payload shape
+- Workspace review-state visibility improvement:
+  - added explicit staged/dirty indicators in tree rows and pagination chips
+  - staged edits now surface as `staged` tags in file/folder tree and `S` page badges in viewer pagination
+- Import dialog UX improvement:
+  - added inline validation hints/errors for project and folder destination requirements
+  - import submit action now gates on dialog validation state before network work starts
+  - import defaults now persist between sessions (mode, target project, and per-project existing folder preference)
+- Web Testing block expansion:
+  - added integration-style import -> label -> submit workflow tests
+  - added regression coverage for edit-mode staged state persistence across asset switches
+  - extracted shared import/annotation selection helpers to keep workflow behavior testable without UI duplication
 - Documentation refreshed to reflect current architecture and remaining gaps:
   - `README.md`
   - `Architecture.md`

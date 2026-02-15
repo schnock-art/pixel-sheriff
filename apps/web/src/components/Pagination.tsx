@@ -6,9 +6,10 @@ interface PaginationProps {
   current: number;
   onSelect: (index: number) => void;
   statuses?: Array<"labeled" | "unlabeled">;
+  dirtyFlags?: boolean[];
 }
 
-export function Pagination({ total, current, onSelect, statuses }: PaginationProps) {
+export function Pagination({ total, current, onSelect, statuses, dirtyFlags }: PaginationProps) {
   const navRef = useRef<HTMLElement | null>(null);
   const [containerWidth, setContainerWidth] = useState(0);
 
@@ -53,13 +54,16 @@ export function Pagination({ total, current, onSelect, statuses }: PaginationPro
         const pageIndex = page - 1;
         const isActive = pageIndex === current;
         const statusClass = statuses?.[pageIndex] === "labeled" ? "is-labeled" : "is-unlabeled";
+        const isDirty = Boolean(dirtyFlags?.[pageIndex]);
+        const statusTitle = statuses?.[pageIndex] === "labeled" ? "Labeled" : "Unlabeled";
+        const title = isDirty ? `${statusTitle} (staged)` : statusTitle;
         return (
           <button
             key={page}
             type="button"
             onClick={() => onSelect(pageIndex)}
-            className={`page-chip ${statusClass}${isActive ? " active" : ""}`}
-            title={statuses?.[pageIndex] === "labeled" ? "Labeled" : "Unlabeled"}
+            className={`page-chip ${statusClass}${isDirty ? " is-dirty" : ""}${isActive ? " active" : ""}`}
+            title={title}
           >
             {page}
           </button>

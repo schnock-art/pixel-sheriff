@@ -1,9 +1,23 @@
 import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
 
 import { type Asset } from "../api";
+import {
+  getImportValidation,
+  resolveExistingProjectSelection,
+  resolveImportDialogDefaults,
+  resolveModeSelection,
+  type ImportDefaults,
+} from "../workspace/importDialog";
+import { buildTargetRelativePath as buildTargetRelativePathHelper, isImageCandidate as isImageCandidateHelper } from "../workspace/importFiles";
 import { collectFolderPaths } from "../workspace/tree";
 
-const IMAGE_EXTENSIONS = new Set(["jpg", "jpeg", "png", "gif", "bmp", "webp", "tif", "tiff"]);
+const IMPORT_DEFAULTS_STORAGE_KEY = "pixel-sheriff:import-defaults:v1";
+
+const DEFAULT_IMPORT_DEFAULTS: ImportDefaults = {
+  mode: "existing",
+  existingProjectId: "",
+  existingFolderByProject: {},
+};
 
 export interface ImportDialogState {
   open: boolean;
@@ -51,17 +65,11 @@ function formatDuration(seconds: number): string {
 }
 
 export function isImageCandidate(file: File): boolean {
-  if (file.type.toLowerCase().startsWith("image/")) return true;
-  const extension = file.name.split(".").pop()?.toLowerCase() ?? "";
-  return IMAGE_EXTENSIONS.has(extension);
+  return isImageCandidateHelper(file);
 }
 
 export function buildTargetRelativePath(file: File, targetFolder: string): string {
-  const normalizedFolder = targetFolder.replaceAll("\\", "/").replace(/^\/+|\/+$/g, "");
-  const relative = (file.webkitRelativePath || file.name).replaceAll("\\", "/");
-  const parts = relative.split("/").filter(Boolean);
-  const remainder = file.webkitRelativePath ? parts.slice(1).join("/") : file.name;
-  return `${normalizedFolder}/${remainder || file.name}`;
+  return buildTargetRelativePathHelper(file, targetFolder);
 }
 
 export function useImportWorkflow({ assets, selectedProjectId, isAssetsLoading, fetchProjectAssets }: UseImportWorkflowParams) {
@@ -75,6 +83,65 @@ export function useImportWorkflow({ assets, selectedProjectId, isAssetsLoading, 
   const [importFolderOptionsByProject, setImportFolderOptionsByProject] = useState<Record<string, string[]>>({});
   const [selectedImportExistingFolder, setSelectedImportExistingFolder] = useState<string>("");
   const [importProgress, setImportProgress] = useState<ImportProgressState | null>(null);
+  const [importDefaults, setImportDefaults] = useState<ImportDefaults>(DEFAULT_IMPORT_DEFAULTS);
+  const [hasLoadedImportDefaults, setHasLoadedImportDefaults] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    try {
+      const raw = window.localStorage.getItem(IMPORT_DEFAULTS_STORAGE_KEY);
+      if (!raw) return;
+      const parsed: unknown = JSON.parse(raw);
+      if (!parsed || typeof parsed !== "object") return;
+      const source = parsed as Partial<ImportDefaults> & { existingFolderByProject?: Record<string, unknown> };
+
+      const mode = source.mode === "new" ? "new" : "existing";
+      const existingProjectId = typeof source.existingProjectId === "string" ? source.existingProjectId : "";
+      const existingFolderByProject: Record<string, string> = {};
+      const sourceFolders = source.existingFolderByProject;
+      if (sourceFolders && typeof sourceFolders === "object") {
+        for (const [key, value] of Object.entries(sourceFolders)) {
+          if (typeof value === "string") existingFolderByProject[key] = value;
+        }
+      }
+      setImportDefaults({ mode, existingProjectId, existingFolderByProject });
+    } finally {
+      setHasLoadedImportDefaults(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!hasLoadedImportDefaults) return;
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(IMPORT_DEFAULTS_STORAGE_KEY, JSON.stringify(importDefaults));
+  }, [hasLoadedImportDefaults, importDefaults]);
+
+  useEffect(() => {
+    if (!hasLoadedImportDefaults) return;
+    if (importDefaults.mode === importMode) return;
+    setImportDefaults((previous) => ({ ...previous, mode: importMode }));
+  }, [hasLoadedImportDefaults, importDefaults.mode, importMode]);
+
+  useEffect(() => {
+    if (!hasLoadedImportDefaults) return;
+    if (importDefaults.existingProjectId === importExistingProjectId) return;
+    setImportDefaults((previous) => ({ ...previous, existingProjectId: importExistingProjectId }));
+  }, [hasLoadedImportDefaults, importDefaults.existingProjectId, importExistingProjectId]);
+
+  useEffect(() => {
+    if (!hasLoadedImportDefaults) return;
+    if (!importExistingProjectId) return;
+    setImportDefaults((previous) => {
+      const nextFolders = { ...previous.existingFolderByProject };
+      if (selectedImportExistingFolder) nextFolders[importExistingProjectId] = selectedImportExistingFolder;
+      else delete nextFolders[importExistingProjectId];
+      const existing = previous.existingFolderByProject[importExistingProjectId] ?? "";
+      const next = nextFolders[importExistingProjectId] ?? "";
+      if (existing === next) return previous;
+      return { ...previous, existingFolderByProject: nextFolders };
+    });
+  }, [hasLoadedImportDefaults, importExistingProjectId, selectedImportExistingFolder]);
 
   useEffect(() => {
     if (!importDialog.open) return;
@@ -127,6 +194,17 @@ export function useImportWorkflow({ assets, selectedProjectId, isAssetsLoading, 
   ]);
 
   const importExistingFolderOptions = importFolderOptionsByProject[importExistingProjectId] ?? [];
+  const importValidation = useMemo(
+    () =>
+      getImportValidation({
+        filesCount: importDialog.files.length,
+        importMode,
+        importExistingProjectId,
+        importNewProjectName,
+        importFolderName,
+      }),
+    [importDialog.files.length, importExistingProjectId, importFolderName, importMode, importNewProjectName],
+  );
   const importProgressView = useMemo(() => {
     if (!importProgress) return null;
 
@@ -152,13 +230,48 @@ export function useImportWorkflow({ assets, selectedProjectId, isAssetsLoading, 
   }, [importProgress]);
 
   function openImportDialog(files: File[], sourceFolderName: string, fallbackProjectId: string) {
-    setImportMode(fallbackProjectId ? "existing" : "new");
-    setImportExistingProjectId(fallbackProjectId);
-    setSelectedImportExistingFolder("");
-    setImportNewProjectName(sourceFolderName);
-    setImportFolderName(sourceFolderName);
+    const defaults = resolveImportDialogDefaults({
+      sourceFolderName,
+      fallbackProjectId,
+      defaults: hasLoadedImportDefaults ? importDefaults : DEFAULT_IMPORT_DEFAULTS,
+    });
+    setImportMode(defaults.mode);
+    setImportExistingProjectId(defaults.existingProjectId);
+    setSelectedImportExistingFolder(defaults.selectedExistingFolder);
+    setImportNewProjectName(defaults.newProjectName);
+    setImportFolderName(defaults.folderName);
     setImportProgress(null);
     setImportDialog({ open: true, sourceFolderName, files });
+  }
+
+  function setImportModeWithDefaults(mode: "existing" | "new") {
+    const resolved = resolveModeSelection({
+      mode,
+      currentProjectId: importExistingProjectId,
+      fallbackProjectId: selectedProjectId ?? "",
+      sourceFolderName: importDialog.sourceFolderName,
+      existingFolderByProject: importDefaults.existingFolderByProject,
+    });
+    setImportMode(resolved.mode);
+    setImportExistingProjectId(resolved.existingProjectId);
+    setSelectedImportExistingFolder(resolved.selectedExistingFolder);
+    setImportFolderName(resolved.folderName);
+  }
+
+  function setImportExistingProjectWithDefaults(projectId: string) {
+    setImportExistingProjectId(projectId);
+    const resolved = resolveExistingProjectSelection({
+      projectId,
+      sourceFolderName: importDialog.sourceFolderName,
+      existingFolderByProject: importDefaults.existingFolderByProject,
+    });
+    setSelectedImportExistingFolder(resolved.selectedExistingFolder);
+    setImportFolderName(resolved.folderName);
+  }
+
+  function setImportExistingFolderWithDefaults(folderPath: string) {
+    setSelectedImportExistingFolder(folderPath);
+    if (folderPath) setImportFolderName(folderPath);
   }
 
   function closeImportDialog() {
@@ -196,6 +309,9 @@ export function useImportWorkflow({ assets, selectedProjectId, isAssetsLoading, 
     setImportNewProjectName,
     importFolderName,
     setImportFolderName,
+    setImportModeWithDefaults,
+    setImportExistingProjectWithDefaults,
+    setImportExistingFolderWithDefaults,
     importFolderOptionsByProject,
     setImportFolderOptionsByProject,
     selectedImportExistingFolder,
@@ -203,6 +319,7 @@ export function useImportWorkflow({ assets, selectedProjectId, isAssetsLoading, 
     importProgress,
     setImportProgress,
     importExistingFolderOptions,
+    importValidation,
     importProgressView,
     openImportDialog,
     closeImportDialog,

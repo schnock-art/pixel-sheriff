@@ -10,12 +10,13 @@ interface ViewerProps {
   totalAssets: number;
   currentIndex: number;
   pageStatuses?: Array<"labeled" | "unlabeled">;
+  pageDirtyFlags?: boolean[];
   onSelectIndex: (index: number) => void;
   onPrev: () => void;
   onNext: () => void;
 }
 
-export function Viewer({ currentAsset, totalAssets, currentIndex, pageStatuses, onSelectIndex, onPrev, onNext }: ViewerProps) {
+export function Viewer({ currentAsset, totalAssets, currentIndex, pageStatuses, pageDirtyFlags, onSelectIndex, onPrev, onNext }: ViewerProps) {
   const hasImage = Boolean(currentAsset?.uri);
   const maxIndex = Math.max(totalAssets - 1, 0);
 
@@ -41,6 +42,7 @@ export function Viewer({ currentAsset, totalAssets, currentIndex, pageStatuses, 
           current={Math.max(currentIndex, 0)}
           onSelect={onSelectIndex}
           statuses={pageStatuses}
+          dirtyFlags={pageDirtyFlags}
         />
         <div className="viewer-nav">
           <button type="button" className="ghost-icon-button" aria-label="Back 10 frames" onClick={() => jump(-10)}>

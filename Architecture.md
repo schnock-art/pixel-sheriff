@@ -166,7 +166,7 @@ Custom hooks:
 - `useProject`: project listing
 - `useAssets`: assets + annotations for active project
 - `useLabels`: categories for active project
-- `useImportWorkflow`: import dialog, import progress, and folder-option loading
+- `useImportWorkflow`: import dialog, import progress, validation state, and remembered defaults/folder-option loading
 - `useDeleteWorkflow`: single/bulk/folder/project delete flows
 - `useAnnotationWorkflow`: staged vs direct submit, selection state, and submit gating
 
@@ -182,6 +182,9 @@ Workspace pure helpers (`apps/web/src/lib/workspace/*`):
 - `hotkeys.*`: keyboard shortcut parsing/routing for navigation and label selection
 - `deleteState.*`: pure selection/pruning helpers for bulk and folder-scope delete flows
 - `annotationSubmission.*`: payload construction helpers for single/staged annotation submit paths
+- `importDialog.*`: import form validation and default-resolution helpers for mode/project/folder destination
+- `importFiles.*`: image candidate filtering and import relative-path construction helpers
+- `annotationWorkflowSelection.*`: current-asset selection resolution across pending vs committed annotation state
 
 ### Implemented UX Behaviors
 
@@ -189,6 +192,8 @@ Workspace pure helpers (`apps/web/src/lib/workspace/*`):
   - existing vs new project target
   - optional existing folder/subfolder target
   - editable folder path
+  - inline field validation hints/errors
+  - remembered defaults across sessions for mode/project/folder destination
 - Import progress panel shows:
   - percent + completed/total files
   - bytes processed / total
@@ -200,6 +205,7 @@ Workspace pure helpers (`apps/web/src/lib/workspace/*`):
   - per-folder expand/collapse + global collapse/expand
   - folder-scope review queue filtering
   - labeled/unlabeled indicators for files and folders
+  - explicit staged/dirty badges for assets/folders with pending edits
   - folder/subfolder delete from tree
   - bulk delete mode (multi-select image removal within current scope)
 - Viewer behavior:
@@ -211,12 +217,15 @@ Workspace pure helpers (`apps/web/src/lib/workspace/*`):
   - width-adaptive page-token window
   - `First`/`Last` chips
   - labeled/unlabeled color status
+  - staged/dirty indicators for pages with pending edits
 - Label panel behavior:
   - manage mode for create/rename/reorder/activate/deactivate
   - project multi-label toggle only editable in manage mode
   - edit mode stages multi-asset changes
+  - staged edits persist when switching assets and restore when returning to an asset with pending state
   - submit commits staged changes in batch
   - number-key shortcuts (`1..9`, top row and numpad) map to active label order
+  - Bounding Boxes and Segmentation tabs are currently placeholders only
 - Feedback behavior:
   - auto-dismiss toast message for success/error summaries
   - delete summaries include removed image and annotation counts
@@ -239,7 +248,16 @@ Supported statuses:
 - `needs_review`
 - `approved`
 
-## 7. Known Gaps
+## 7. Test Coverage
+
+- Web test suite uses Node's built-in test runner (`apps/web/tests/*.test.js`).
+- Coverage includes:
+  - import -> label -> submit workflow composition checks
+  - edit-mode staged state persistence regression checks
+  - helper-level regressions for hotkeys, delete flows, tree/pagination, import defaults, and annotation state transitions
+- API test suite uses `pytest` with `httpx` ASGI client fixtures in `apps/api/tests`.
+
+## 8. Known Gaps
 
 - Review/QA moderation workflow not implemented
 - Bounding box and segmentation tooling not implemented

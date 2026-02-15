@@ -20,6 +20,11 @@ Local-first CV annotation platform.
   - `page.tsx` now focuses on composition/wiring
   - annotation, import, and delete workflows moved into dedicated hooks
   - tree/pagination/annotation-state logic moved into pure workspace helpers with unit tests
+- Review-state visibility improved with explicit staged/dirty indicators in tree rows and pagination chips.
+- Import dialog UX was upgraded with inline validation hints and remembered defaults for mode/project/folder destination.
+- Testing coverage expanded with integration/regression suites for:
+  - import -> label -> submit workflow
+  - edit-mode staged state persistence across asset switches
 - API upload now derives image `width`/`height` when detectable from uploaded bytes.
 - API error responses now use a structured shape (`error.code`, `error.message`, `error.details`) for better UI diagnostics.
 
@@ -38,6 +43,8 @@ Local-first CV annotation platform.
   - import into existing or new project
   - optional existing folder/subfolder target for existing projects
   - editable destination folder name
+  - inline validation hints/errors for project and folder fields
+  - remembered import defaults across sessions (mode + target project + per-project folder preference)
 - Import progress UI with:
   - completed/total count
   - uploaded/failed/remaining counts
@@ -60,6 +67,7 @@ Local-first CV annotation platform.
   - collapse all / expand all
   - folder-scope filtering (review a subtree only)
   - labeled/unlabeled status dots on folders and files
+  - explicit staged/dirty badges for pending annotation edits
   - folder/subfolder delete actions
   - bulk delete mode with in-scope multi-select
 - Viewer:
@@ -71,16 +79,19 @@ Local-first CV annotation platform.
   - dynamically sized page-chip window based on available width
   - `First` / `Last` chips
   - labeled/unlabeled chip coloring
+  - staged/dirty page badges for pending edits
 - Labels:
   - create labels
   - manage labels (rename/reorder/activate/deactivate)
   - project-scoped multi-label toggle (editable only in Manage Labels mode)
 - Annotation flow:
   - edit mode staging
+  - staged edits persist while navigating between assets until submitted or reset
   - batch submit staged annotations
   - direct single-submit path when not staging
   - status values: `unlabeled`, `labeled`, `skipped`, `needs_review`, `approved`
   - keyboard label selection by class index (`1..9`, top row and numpad)
+- Bounding Boxes and Segmentation tabs are currently UI placeholders (no drawing/submit tooling yet).
 - COCO-style export:
   - export record creation/listing
   - deterministic zip artifact with `manifest.json`, `annotations.json`, and `images/`

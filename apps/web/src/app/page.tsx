@@ -137,11 +137,15 @@ export default function HomePage() {
     setImportNewProjectName,
     importFolderName,
     setImportFolderName,
+    setImportModeWithDefaults,
+    setImportExistingProjectWithDefaults,
+    setImportExistingFolderWithDefaults,
     setImportFolderOptionsByProject,
     selectedImportExistingFolder,
     setSelectedImportExistingFolder,
     setImportProgress,
     importExistingFolderOptions,
+    importValidation,
     importProgressView,
     openImportDialog,
     closeImportDialog,
@@ -268,25 +272,29 @@ export default function HomePage() {
     resetDeleteWorkflow,
   } = deleteWorkflow;
 
-  const assetReviewStatusById = useMemo(() => {
-    const map = new Map<string, "labeled" | "unlabeled">();
+  const assetReviewStateById = useMemo(() => {
+    const map = new Map<string, { status: "labeled" | "unlabeled"; isDirty: boolean }>();
     for (const asset of orderedAssetRows) {
       const pending = pendingAnnotations[asset.id];
       if (pending) {
         const isLabeled = pending.status !== "unlabeled" && pending.labelIds.length > 0;
-        map.set(asset.id, isLabeled ? "labeled" : "unlabeled");
+        map.set(asset.id, { status: isLabeled ? "labeled" : "unlabeled", isDirty: true });
         continue;
       }
       const annotation = annotationByAssetId.get(asset.id);
       const isLabeled = Boolean(annotation && annotation.status !== "unlabeled");
-      map.set(asset.id, isLabeled ? "labeled" : "unlabeled");
+      map.set(asset.id, { status: isLabeled ? "labeled" : "unlabeled", isDirty: false });
     }
     return map;
   }, [annotationByAssetId, orderedAssetRows, pendingAnnotations]);
 
   const pageStatuses = useMemo(
-    () => assetRows.map((asset) => assetReviewStatusById.get(asset.id) ?? "unlabeled"),
-    [assetReviewStatusById, assetRows],
+    () => assetRows.map((asset) => assetReviewStateById.get(asset.id)?.status ?? "unlabeled"),
+    [assetReviewStateById, assetRows],
+  );
+  const pageDirtyFlags = useMemo(
+    () => assetRows.map((asset) => Boolean(assetReviewStateById.get(asset.id)?.isDirty)),
+    [assetReviewStateById, assetRows],
   );
   const selectedFolderAssetCount = useMemo(() => {
     if (!selectedTreeFolderPath) return 0;
@@ -306,11 +314,18 @@ export default function HomePage() {
         status[folderPath] = "empty";
         continue;
       }
-      const hasUnlabeled = assetIds.some((assetId) => (assetReviewStatusById.get(assetId) ?? "unlabeled") === "unlabeled");
+      const hasUnlabeled = assetIds.some((assetId) => (assetReviewStateById.get(assetId)?.status ?? "unlabeled") === "unlabeled");
       status[folderPath] = hasUnlabeled ? "has_unlabeled" : "all_labeled";
     }
     return status;
-  }, [assetReviewStatusById, treeBuild.folderAssetIds]);
+  }, [assetReviewStateById, treeBuild.folderAssetIds]);
+  const folderDirtyByPath = useMemo(() => {
+    const flags: Record<string, boolean> = {};
+    for (const [folderPath, assetIds] of Object.entries(treeBuild.folderAssetIds)) {
+      flags[folderPath] = assetIds.some((assetId) => Boolean(assetReviewStateById.get(assetId)?.isDirty));
+    }
+    return flags;
+  }, [assetReviewStateById, treeBuild.folderAssetIds]);
 
   useEffect(() => {
     setAssetIndex((previous) => Math.min(previous, Math.max(assetRows.length - 1, 0)));
@@ -420,15 +435,10 @@ export default function HomePage() {
 
   async function confirmImportFromDialog() {
     const files = importDialog.files;
-    const sourceFolderName = importDialog.sourceFolderName;
     const folderName = importFolderName.trim();
-    if (files.length === 0) {
-      setMessage("Import cancelled: no files selected.");
-      closeImportDialog();
-      return;
-    }
-    if (!folderName) {
-      setMessage("Folder name is required.");
+    if (!importValidation.canSubmit) {
+      setMessage(importValidation.filesError ?? importValidation.projectError ?? importValidation.folderError ?? "Import is not ready.");
+      if (importValidation.filesError) closeImportDialog();
       return;
     }
 
@@ -756,8 +766,9 @@ export default function HomePage() {
                               : folderReviewStatusByPath[entry.path] === "has_unlabeled"
                                 ? "has-unlabeled"
                                 : "is-empty"
-                          }`}
+                          }${folderDirtyByPath[entry.path] ? " is-dirty" : ""}`}
                           onClick={() => handleSelectFolderScope(entry.path)}
+                          title={folderDirtyByPath[entry.path] ? `Folder "${entry.path}" has staged edits` : undefined}
                         >
                           {entry.name}
                         </button>
@@ -788,12 +799,15 @@ export default function HomePage() {
                         <button
                           type="button"
                           className={`tree-file${entry.assetId === currentAsset?.id ? " active" : ""} ${
-                            entry.assetId && assetReviewStatusById.get(entry.assetId) === "labeled" ? "is-labeled" : "is-unlabeled"
-                          }${entry.assetId && selectedDeleteAssets[entry.assetId] ? " delete-selected" : ""}`}
+                            entry.assetId && assetReviewStateById.get(entry.assetId)?.status === "labeled" ? "is-labeled" : "is-unlabeled"
+                          }${entry.assetId && selectedDeleteAssets[entry.assetId] ? " delete-selected" : ""}${
+                            entry.assetId && assetReviewStateById.get(entry.assetId)?.isDirty ? " is-dirty" : ""
+                          }`}
                           onClick={() =>
                             entry.assetId &&
                             (bulkDeleteMode ? handleToggleDeleteSelection(entry.assetId) : handleSelectTreeAsset(entry.assetId, entry.folderPath))
                           }
+                          title={entry.assetId && assetReviewStateById.get(entry.assetId)?.isDirty ? `${entry.name} has staged edits` : undefined}
                         >
                           {entry.name}
                         </button>
@@ -810,6 +824,7 @@ export default function HomePage() {
             totalAssets={assetRows.length}
             currentIndex={safeAssetIndex}
             pageStatuses={pageStatuses}
+            pageDirtyFlags={pageDirtyFlags}
             onSelectIndex={setAssetIndex}
             onPrev={handlePrevAsset}
             onNext={handleNextAsset}
@@ -904,16 +919,15 @@ export default function HomePage() {
         <div className="import-modal-backdrop">
           <div className="import-modal">
             <h3>Import Images</h3>
+            <p className="import-selection-summary">
+              {importDialog.files.length} file{importDialog.files.length === 1 ? "" : "s"} selected
+            </p>
             <div className="import-mode-row">
               <label>
                 <input
                   type="radio"
                   checked={importMode === "existing"}
-                  onChange={() => {
-                    setImportMode("existing");
-                    setSelectedImportExistingFolder("");
-                    setImportFolderName(importDialog.sourceFolderName);
-                  }}
+                  onChange={() => setImportModeWithDefaults("existing")}
                   disabled={projects.length === 0}
                 />
                 Existing Project
@@ -922,11 +936,7 @@ export default function HomePage() {
                 <input
                   type="radio"
                   checked={importMode === "new"}
-                  onChange={() => {
-                    setImportMode("new");
-                    setSelectedImportExistingFolder("");
-                    setImportFolderName(importDialog.sourceFolderName);
-                  }}
+                  onChange={() => setImportModeWithDefaults("new")}
                 />
                 New Project
               </label>
@@ -934,15 +944,17 @@ export default function HomePage() {
             <label className="import-field">
               <span>Project</span>
               {importMode === "new" ? (
-                <input value={importNewProjectName} onChange={(event) => setImportNewProjectName(event.target.value)} placeholder="Project name" />
+                <input
+                  value={importNewProjectName}
+                  onChange={(event) => setImportNewProjectName(event.target.value)}
+                  placeholder="Project name"
+                  aria-invalid={Boolean(importValidation.projectError)}
+                />
               ) : (
                 <select
                   value={importExistingProjectId}
-                  onChange={(event) => {
-                    setImportExistingProjectId(event.target.value);
-                    setSelectedImportExistingFolder("");
-                    setImportFolderName(importDialog.sourceFolderName);
-                  }}
+                  onChange={(event) => setImportExistingProjectWithDefaults(event.target.value)}
+                  aria-invalid={Boolean(importValidation.projectError)}
                 >
                   <option value="">Select project</option>
                   {projects.map((project) => (
@@ -952,17 +964,20 @@ export default function HomePage() {
                   ))}
                 </select>
               )}
+              {importValidation.projectError ? (
+                <span className="import-field-error">{importValidation.projectError}</span>
+              ) : (
+                <span className="import-field-hint">
+                  {importMode === "new" ? "Create a new dataset for this import." : "Choose the dataset to receive these files."}
+                </span>
+              )}
             </label>
             {importMode === "existing" ? (
               <label className="import-field">
                 <span>Existing Folder/Subfolder (optional)</span>
                 <select
                   value={selectedImportExistingFolder}
-                  onChange={(event) => {
-                    const value = event.target.value;
-                    setSelectedImportExistingFolder(value);
-                    if (value) setImportFolderName(value);
-                  }}
+                  onChange={(event) => setImportExistingFolderWithDefaults(event.target.value)}
                 >
                   <option value="">Create new / custom</option>
                   {importExistingFolderOptions.map((folderPath) => (
@@ -971,11 +986,22 @@ export default function HomePage() {
                     </option>
                   ))}
                 </select>
+                <span className="import-field-hint">Defaults remember your last selected destination folder per project.</span>
               </label>
             ) : null}
             <label className="import-field">
               <span>Folder Name</span>
-              <input value={importFolderName} onChange={(event) => setImportFolderName(event.target.value)} placeholder={importDialog.sourceFolderName} />
+              <input
+                value={importFolderName}
+                onChange={(event) => setImportFolderName(event.target.value)}
+                placeholder={importDialog.sourceFolderName}
+                aria-invalid={Boolean(importValidation.folderError)}
+              />
+              {importValidation.folderError ? (
+                <span className="import-field-error">{importValidation.folderError}</span>
+              ) : (
+                <span className="import-field-hint">You can use nested paths like train/cats.</span>
+              )}
             </label>
             {isImporting && importProgressView ? (
               <section className="import-progress" aria-live="polite">
@@ -1004,15 +1030,15 @@ export default function HomePage() {
               </section>
             ) : null}
             <div className="import-modal-actions">
-                <button
-                  type="button"
-                  className="ghost-button"
-                  onClick={closeImportDialog}
-                  disabled={isImporting}
+              <button
+                type="button"
+                className="ghost-button"
+                onClick={closeImportDialog}
+                disabled={isImporting}
                 >
                 Cancel
               </button>
-              <button type="button" className="primary-button" onClick={confirmImportFromDialog} disabled={isImporting}>
+              <button type="button" className="primary-button" onClick={confirmImportFromDialog} disabled={isImporting || !importValidation.canSubmit}>
                 {isImporting ? "Importing..." : "Import"}
               </button>
             </div>

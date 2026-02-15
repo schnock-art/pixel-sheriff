@@ -5,12 +5,12 @@ import {
   buildAnnotationUpsertInput,
   resolveActiveSelection,
 } from "../workspace/annotationSubmission";
+import { resolveSelectionForAsset } from "../workspace/annotationWorkflowSelection";
 import {
   canSubmitWithStates,
   deriveNextAnnotationStatus,
   getCommittedSelectionState,
   normalizeLabelIds,
-  readAnnotationLabelIds,
   resolvePendingAnnotation,
 } from "../workspace/annotationState";
 
@@ -53,28 +53,13 @@ export function useAnnotationWorkflow({
   const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
-    if (!currentAsset) {
-      setCurrentStatus("unlabeled");
-      setSelectedLabelIds([]);
-      return;
-    }
-
-    const pending = pendingAnnotations[currentAsset.id];
-    if (pending) {
-      setCurrentStatus(pending.status);
-      setSelectedLabelIds(pending.labelIds);
-      return;
-    }
-
-    const annotation = annotationByAssetId.get(currentAsset.id);
-    if (!annotation) {
-      setCurrentStatus("unlabeled");
-      setSelectedLabelIds([]);
-      return;
-    }
-
-    setCurrentStatus(annotation.status);
-    setSelectedLabelIds(readAnnotationLabelIds(annotation.payload_json));
+    const nextSelection = resolveSelectionForAsset({
+      currentAssetId: currentAsset?.id ?? null,
+      pendingAnnotations,
+      annotationByAssetId,
+    });
+    setCurrentStatus(nextSelection.status);
+    setSelectedLabelIds(nextSelection.labelIds);
   }, [annotationByAssetId, currentAsset, pendingAnnotations]);
 
   useEffect(() => {
