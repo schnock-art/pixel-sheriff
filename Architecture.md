@@ -138,7 +138,7 @@ MAL placeholders:
 
 Main workspace:
 
-- `apps/web/src/app/page.tsx`
+- `apps/web/src/app/page.tsx` (composition/wiring)
 
 UI structure:
 
@@ -153,10 +153,19 @@ Custom hooks:
 - `useProject`: project listing
 - `useAssets`: assets + annotations for active project
 - `useLabels`: categories for active project
+- `useImportWorkflow`: import dialog, import progress, and folder-option loading
+- `useDeleteWorkflow`: single/bulk/folder/project delete flows
+- `useAnnotationWorkflow`: staged vs direct submit, selection state, and submit gating
 
 Local persisted setting:
 
 - project multi-label map in `localStorage` (`pixel-sheriff:project-multilabel:v1`)
+
+Workspace pure helpers (`apps/web/src/lib/workspace/*`):
+
+- `tree.*`: relative-path normalization, folder tree construction, folder chain helpers
+- `pagination.*`: width-aware chip capacity and page-token window generation
+- `annotationState.*`: draft vs committed selection-state comparison and submit eligibility rules
 
 ### Implemented UX Behaviors
 
@@ -216,7 +225,6 @@ Supported statuses:
 
 ## 7. Known Gaps
 
-- Upload endpoint still does not validate project existence before writing bytes
 - Image metadata extraction (`width`/`height`) is not populated on upload
 - Review/QA moderation workflow not implemented
 - Bounding box and segmentation tooling not implemented

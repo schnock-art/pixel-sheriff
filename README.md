@@ -16,6 +16,10 @@ Local-first CV annotation platform.
   - folder/subfolder delete (tree subtree scope)
 - Delete actions now show confirmation summaries in an auto-dismiss toast with counts.
 - Keyboard labeling shortcuts now support number keys (`1..9`) including numpad keys.
+- Workspace internals were refactored:
+  - `page.tsx` now focuses on composition/wiring
+  - annotation, import, and delete workflows moved into dedicated hooks
+  - tree/pagination/annotation-state logic moved into pure workspace helpers with unit tests
 
 ## Stack
 
@@ -100,6 +104,8 @@ docker compose up --build
 - Stop: `docker compose down`
 - Logs: `docker compose logs -f web api`
 - Status: `docker compose ps`
+- Web tests: `cd apps/web && npm test`
+- Web build check: `cd apps/web && npm run build`
 
 `docker compose logs ...` only reads logs; it does not start containers.
 
@@ -135,9 +141,8 @@ docker compose up --build
 - MAL implementation beyond placeholder endpoints
 - Shared-asset reference mode (upload-once/link-many)
 - Refactor/maintainability workstream in progress (tracked in `IMPLEMENTATION_TASKS.md`):
-  - API integrity hardening
-  - workspace page decomposition
-  - expanded regression testing
+  - hook cleanup (`useAssets` fetch dedupe + standardized hook error shape)
+  - expanded web interaction/regression testing
 
 ## Troubleshooting
 

@@ -67,6 +67,14 @@ All notable changes to this project will be documented in this file.
 - API async test harness now uses shared `conftest.py` fixtures with explicit FastAPI lifespan handling and deterministic asyncio loop-scope settings.
 - Web annotation transitions now use explicit draft-vs-committed selection state logic, including non-edit clear-label submit eligibility.
 - Web test script now runs focused state-transition tests via Node's built-in test runner.
+- Workspace frontend structure refactor:
+  - extracted `useImportWorkflow`, `useDeleteWorkflow`, and `useAnnotationWorkflow`
+  - moved tree and pagination pure helpers to `apps/web/src/lib/workspace/*`
+  - rewired `page.tsx` toward composition/wiring over inline workflow logic
+- Added unit tests for extracted tree/pagination helpers (`apps/web/tests/workspaceHelpers.test.js`).
+- Documentation refreshed to reflect current architecture and remaining gaps:
+  - `README.md`
+  - `Architecture.md`
 
 ### Fixed
 - Root route prerender conflict caused by duplicate `/` page definitions.

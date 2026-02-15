@@ -92,13 +92,13 @@ Status reflects current repository behavior.
 - [x] Keep staged/selected label state transitions explicit and test-covered
 
 #### P2 - Frontend Structure Refactor
-- [ ] Split `apps/web/src/app/page.tsx` into focused hooks/modules:
-  - [ ] `useImportWorkflow`
-  - [ ] `useDeleteWorkflow`
-  - [ ] `useAnnotationWorkflow`
-  - [ ] tree/pagination pure helpers in `apps/web/src/lib/workspace/*`
-- [ ] Keep `page.tsx` primarily composition/render wiring
-- [ ] Add unit tests for extracted pure tree/pagination helpers
+- [x] Split `apps/web/src/app/page.tsx` into focused hooks/modules:
+  - [x] `useImportWorkflow`
+  - [x] `useDeleteWorkflow`
+  - [x] `useAnnotationWorkflow`
+  - [x] tree/pagination pure helpers in `apps/web/src/lib/workspace/*`
+- [x] Keep `page.tsx` primarily composition/render wiring
+- [x] Add unit tests for extracted pure tree/pagination helpers
 
 #### P3 - Hook Cleanup
 - [ ] Remove duplicated fetch logic in `useAssets` by centralizing loader function
