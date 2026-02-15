@@ -101,16 +101,16 @@ Status reflects current repository behavior.
 - [x] Add unit tests for extracted pure tree/pagination helpers
 
 #### P3 - Hook Cleanup
-- [ ] Remove duplicated fetch logic in `useAssets` by centralizing loader function
-- [ ] Standardize error handling shape across hooks (`useProject`, `useLabels`, `useAssets`)
+- [x] Remove duplicated fetch logic in `useAssets` by centralizing loader function
+- [x] Standardize error handling shape across hooks (`useProject`, `useLabels`, `useAssets`)
 
 #### P4 - Regression Coverage
-- [ ] Replace placeholder hotkey test with real interaction tests
-- [ ] Add web integration tests for:
-  - [ ] number-key labeling (`1..9`, numpad)
-  - [ ] multi-delete selection/delete
-  - [ ] folder/subfolder delete behavior
-  - [ ] edit-mode stage/submit/clear flows
+- [x] Replace placeholder hotkey test with real interaction tests
+- [x] Add web integration tests for:
+  - [x] number-key labeling (`1..9`, numpad)
+  - [x] multi-delete selection/delete
+  - [x] folder/subfolder delete behavior
+  - [x] edit-mode stage/submit/clear flows
 
 ### API
 - [ ] Validate upload target project exists before persisting file

@@ -2,6 +2,10 @@ import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from
 
 import { upsertAnnotation, type Annotation, type AnnotationStatus } from "../api";
 import {
+  buildAnnotationUpsertInput,
+  resolveActiveSelection,
+} from "../workspace/annotationSubmission";
+import {
   canSubmitWithStates,
   deriveNextAnnotationStatus,
   getCommittedSelectionState,
@@ -101,8 +105,7 @@ export function useAnnotationWorkflow({
     [annotationByAssetId, currentAsset],
   );
   const currentDraftSelectionState = useMemo(() => {
-    const activeLabelIds = new Set(activeLabelRows.map((label) => label.id));
-    const resolvedLabelIds = normalizeLabelIds(selectedLabelIds.filter((id) => activeLabelIds.has(id)));
+    const resolvedLabelIds = resolveActiveSelection(selectedLabelIds, activeLabelRows);
     return {
       labelIds: resolvedLabelIds,
       status: deriveNextAnnotationStatus(currentStatus, resolvedLabelIds),
@@ -157,33 +160,21 @@ export function useAnnotationWorkflow({
       return;
     }
 
-    const activeLabelIds = new Set(activeLabelRows.map((label) => label.id));
-    const resolvedLabelIds = normalizeLabelIds(selectedLabelIds.filter((id) => activeLabelIds.has(id)));
-    const selectedLabel = activeLabelRows.find((label) => label.id === resolvedLabelIds[0]);
-    const isUnlabeledSelection = resolvedLabelIds.length === 0;
-    if (!isUnlabeledSelection && !selectedLabel) {
+    const upsertInput = buildAnnotationUpsertInput({
+      assetId: currentAsset.id,
+      currentStatus,
+      selectedLabelIds,
+      activeLabelRows,
+    });
+    if (!upsertInput) {
       setMessage("Selected label could not be resolved.");
       return;
     }
 
     const annotation = await upsertAnnotation(selectedProjectId, {
       asset_id: currentAsset.id,
-      status: deriveNextAnnotationStatus(currentStatus, resolvedLabelIds),
-      payload_json: isUnlabeledSelection
-        ? {
-            type: "classification",
-            category_ids: [],
-            coco: { image_id: currentAsset.id, category_id: null },
-            source: "web-ui",
-          }
-        : {
-            type: "classification",
-            category_id: selectedLabel.id,
-            category_ids: resolvedLabelIds,
-            category_name: selectedLabel.name,
-            coco: { image_id: currentAsset.id, category_id: selectedLabel.id },
-            source: "web-ui",
-          },
+      status: upsertInput.status,
+      payload_json: upsertInput.payload_json,
     });
 
     setAnnotations((previous) => {
@@ -196,7 +187,7 @@ export function useAnnotationWorkflow({
       return next;
     });
     setCurrentStatus(annotation.status);
-    setMessage(isUnlabeledSelection ? "Cleared annotation labels." : "Saved annotation.");
+    setMessage(upsertInput.isUnlabeledSelection ? "Cleared annotation labels." : "Saved annotation.");
   }
 
   async function submitPendingAnnotations() {
@@ -212,31 +203,19 @@ export function useAnnotationWorkflow({
     }
 
     const saved: Annotation[] = [];
-    const activeLabelIds = new Set(activeLabelRows.map((label) => label.id));
     for (const [assetId, pending] of entries) {
-      const selectedIds = normalizeLabelIds(pending.labelIds.filter((id) => activeLabelIds.has(id)));
-      const label = activeLabelRows.find((item) => item.id === selectedIds[0]);
-      const isUnlabeledSelection = selectedIds.length === 0;
-      if (!isUnlabeledSelection && !label) continue;
+      const upsertInput = buildAnnotationUpsertInput({
+        assetId,
+        currentStatus: pending.status,
+        selectedLabelIds: pending.labelIds,
+        activeLabelRows,
+      });
+      if (!upsertInput) continue;
 
       const annotation = await upsertAnnotation(selectedProjectId, {
         asset_id: assetId,
-        status: deriveNextAnnotationStatus(pending.status, selectedIds),
-        payload_json: isUnlabeledSelection
-          ? {
-              type: "classification",
-              category_ids: [],
-              coco: { image_id: assetId, category_id: null },
-              source: "web-ui",
-            }
-          : {
-              type: "classification",
-              category_id: label.id,
-              category_ids: selectedIds,
-              category_name: label.name,
-              coco: { image_id: assetId, category_id: label.id },
-              source: "web-ui",
-            },
+        status: upsertInput.status,
+        payload_json: upsertInput.payload_json,
       });
       saved.push(annotation);
     }

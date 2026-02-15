@@ -1,6 +1,14 @@
 import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
 
 import { deleteAsset, deleteProject, type Annotation } from "../api";
+import {
+  clearSelectedDeleteAssets,
+  pruneCollapsedFoldersForDeletedPath,
+  pruneSelectedDeleteAssets,
+  selectScopeDeleteAssets,
+  shouldResetSelectedFolderAfterDeletion,
+  toggleSelectedDeleteAsset,
+} from "../workspace/deleteState";
 import { asRelativePath } from "../workspace/tree";
 import type { PendingAnnotation } from "./useAnnotationWorkflow";
 
@@ -70,16 +78,7 @@ export function useDeleteWorkflow({
   );
 
   useEffect(() => {
-    setSelectedDeleteAssets((previous) => {
-      const next: Record<string, boolean> = {};
-      for (const assetId of Object.keys(previous)) {
-        if (assetById.has(assetId) && previous[assetId]) next[assetId] = true;
-      }
-      const previousKeys = Object.keys(previous);
-      const nextKeys = Object.keys(next);
-      if (previousKeys.length === nextKeys.length && previousKeys.every((key) => next[key] === previous[key])) return previous;
-      return next;
-    });
+    setSelectedDeleteAssets((previous) => pruneSelectedDeleteAssets(previous, (assetId) => assetById.has(assetId)));
   }, [assetById]);
 
   async function deleteAssetsWithSummary(assetIds: string[], contextLabel: string) {
@@ -135,9 +134,7 @@ export function useDeleteWorkflow({
         setMessage(`Deleted 0/${uniqueIds.length} images from ${contextLabel}${failed > 0 ? ` (failed: ${failed}).` : "."}`);
       }
       setSelectedDeleteAssets((previous) => {
-        const next = { ...previous };
-        for (const assetId of uniqueIds) delete next[assetId];
-        return next;
+        return clearSelectedDeleteAssets(previous, uniqueIds);
       });
       return { removed, failed };
     } finally {
@@ -168,12 +165,7 @@ export function useDeleteWorkflow({
 
   function handleToggleDeleteSelection(assetId: string) {
     if (!bulkDeleteMode) return;
-    setSelectedDeleteAssets((previous) => {
-      const next = { ...previous };
-      if (next[assetId]) delete next[assetId];
-      else next[assetId] = true;
-      return next;
-    });
+    setSelectedDeleteAssets((previous) => toggleSelectedDeleteAsset(previous, assetId));
   }
 
   function handleSelectAllDeleteScope() {
@@ -182,7 +174,7 @@ export function useDeleteWorkflow({
       setMessage("No images in current scope.");
       return;
     }
-    setSelectedDeleteAssets(Object.fromEntries(inScopeIds.map((assetId) => [assetId, true])));
+    setSelectedDeleteAssets(selectScopeDeleteAssets(assetRows));
   }
 
   function handleClearDeleteSelection() {
@@ -235,19 +227,11 @@ export function useDeleteWorkflow({
 
     const result = await deleteAssetsWithSummary(folderAssetIds, `folder "${folderPath}"`);
     if (result.removed > 0) {
-      if (selectedTreeFolderPath === folderPath || selectedTreeFolderPath?.startsWith(`${folderPath}/`)) {
+      if (shouldResetSelectedFolderAfterDeletion(selectedTreeFolderPath, folderPath)) {
         setSelectedTreeFolderPath(null);
         setAssetIndex(0);
       }
-      setCollapsedFolders((previous) => {
-        const next = { ...previous };
-        for (const key of Object.keys(next)) {
-          if (key === folderPath || key.startsWith(`${folderPath}/`)) {
-            delete next[key];
-          }
-        }
-        return next;
-      });
+      setCollapsedFolders((previous) => pruneCollapsedFoldersForDeletedPath(previous, folderPath));
     }
   }
 

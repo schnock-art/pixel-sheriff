@@ -1,15 +1,18 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { listCategories, type Category } from "../api";
+import { toHookError, type HookError } from "./hookError";
 
 export function useLabels(projectId: string | null) {
   const [data, setData] = useState<Category[]>([]);
   const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<HookError | null>(null);
 
   const refetch = useCallback(async () => {
     if (!projectId) {
       setData([]);
+      setError(null);
+      setIsLoading(false);
       return;
     }
 
@@ -19,7 +22,7 @@ export function useLabels(projectId: string | null) {
       const categories = await listCategories(projectId);
       setData(categories);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load labels");
+      setError(toHookError(err, "Failed to load labels"));
       setData([]);
     } finally {
       setIsLoading(false);
@@ -32,6 +35,8 @@ export function useLabels(projectId: string | null) {
     async function load() {
       if (!projectId) {
         setData([]);
+        setError(null);
+        setIsLoading(false);
         return;
       }
 
@@ -42,7 +47,7 @@ export function useLabels(projectId: string | null) {
         if (isActive) setData(categories);
       } catch (err) {
         if (isActive) {
-          setError(err instanceof Error ? err.message : "Failed to load labels");
+          setError(toHookError(err, "Failed to load labels"));
           setData([]);
         }
       } finally {

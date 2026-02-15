@@ -23,20 +23,13 @@ import { useDeleteWorkflow } from "../lib/hooks/useDeleteWorkflow";
 import { buildTargetRelativePath, isImageCandidate, useImportWorkflow } from "../lib/hooks/useImportWorkflow";
 import { useLabels } from "../lib/hooks/useLabels";
 import { useProject } from "../lib/hooks/useProject";
+import { resolveWorkspaceHotkeyAction } from "../lib/workspace/hotkeys";
 import { asRelativePath, buildTreeEntries, collectFolderPathsFromRelativePaths, folderChain, type TreeEntry } from "../lib/workspace/tree";
 
 const PROJECT_MULTILABEL_STORAGE_KEY = "pixel-sheriff:project-multilabel:v1";
 const LAST_PROJECT_STORAGE_KEY = "pixel-sheriff:last-project-id:v1";
 
 type FolderReviewStatus = "all_labeled" | "has_unlabeled" | "empty";
-
-function parseLabelShortcutDigit(event: KeyboardEvent): number | null {
-  const digitCodeMatch = event.code.match(/^(Digit|Numpad)([1-9])$/);
-  if (digitCodeMatch) return Number(digitCodeMatch[2]);
-  if (/^[1-9]$/.test(event.key)) return Number(event.key);
-  return null;
-}
-
 
 export default function HomePage() {
   const { data: projects, refetch: refetchProjects } = useProject();
@@ -331,25 +324,21 @@ export default function HomePage() {
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
-      const target = event.target as HTMLElement | null;
-      const tag = target?.tagName?.toLowerCase();
-      if (tag === "input" || tag === "textarea" || target?.isContentEditable) return;
-      if (event.altKey || event.ctrlKey || event.metaKey) return;
+      const action = resolveWorkspaceHotkeyAction(event, { activeLabelCount: activeLabelRows.length });
+      if (!action) return;
 
-      if (event.key === "ArrowLeft") {
+      if (action.type === "navigate_prev") {
         event.preventDefault();
         setAssetIndex((previous) => (previous <= 0 ? 0 : previous - 1));
         return;
       }
-      if (event.key === "ArrowRight") {
+      if (action.type === "navigate_next") {
         event.preventDefault();
         setAssetIndex((previous) => (previous >= assetRows.length - 1 ? previous : previous + 1));
         return;
       }
 
-      const digit = parseLabelShortcutDigit(event);
-      if (digit === null || digit > activeLabelRows.length) return;
-      const label = activeLabelRows[digit - 1];
+      const label = activeLabelRows[action.labelIndex];
       if (!label) return;
 
       event.preventDefault();

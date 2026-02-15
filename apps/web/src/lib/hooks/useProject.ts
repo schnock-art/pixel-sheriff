@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { listProjects, type Project } from "../api";
+import { toHookError, type HookError } from "./hookError";
 
 export function useProject() {
   const [data, setData] = useState<Project[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<HookError | null>(null);
 
   const refetch = useCallback(async () => {
     try {
@@ -14,7 +15,7 @@ export function useProject() {
       const projects = await listProjects();
       setData(projects);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load projects");
+      setError(toHookError(err, "Failed to load projects"));
       setData([]);
     } finally {
       setIsLoading(false);
@@ -32,7 +33,7 @@ export function useProject() {
         if (isActive) setData(projects);
       } catch (err) {
         if (isActive) {
-          setError(err instanceof Error ? err.message : "Failed to load projects");
+          setError(toHookError(err, "Failed to load projects"));
           setData([]);
         }
       } finally {

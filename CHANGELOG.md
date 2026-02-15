@@ -72,6 +72,13 @@ All notable changes to this project will be documented in this file.
   - moved tree and pagination pure helpers to `apps/web/src/lib/workspace/*`
   - rewired `page.tsx` toward composition/wiring over inline workflow logic
 - Added unit tests for extracted tree/pagination helpers (`apps/web/tests/workspaceHelpers.test.js`).
+- Hook cleanup refactor in `apps/web/src/lib/hooks/*`:
+  - centralized `useAssets` loading logic into a shared loader path used by both initial load and `refetch`
+  - standardized hook error shape across `useProject`, `useLabels`, and `useAssets` via shared `hookError` helper
+- Web regression coverage and interaction helper refactor:
+  - replaced placeholder hotkey test with real keyboard interaction tests (`apps/web/tests/hotkeys.test.js`)
+  - added integration-style tests for multi-delete selection/delete, folder-subtree delete behavior, and edit-mode stage/submit/clear flows
+  - extracted reusable workspace helpers for hotkeys, delete selection state, and annotation submission payload construction
 - Documentation refreshed to reflect current architecture and remaining gaps:
   - `README.md`
   - `Architecture.md`
