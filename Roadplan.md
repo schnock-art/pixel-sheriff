@@ -104,12 +104,21 @@ Remaining:
 - bulk moderation actions
 - QA metrics panels
 
-### M5 - Export v1 (Mostly implemented)
+### M5 - Export v1.2 (Mostly implemented)
 
 Implemented:
 - export metadata record creation/list
 - manifest hash generation
-- zip artifact creation (`images/`, `annotations.json`, `manifest.json`)
+- zip artifact creation (`assets/`, `coco_instances.json`, `manifest.json`)
+- manifest schema v1.2 contract with explicit:
+  - `tasks`
+  - `label_schema` (stable `class_order`)
+  - `splits`
+  - `training_defaults`
+  - `stats`
+- canonical UUID identity mapping across manifest + COCO (`asset_id` / `image_id`)
+- configurable detection/segmentation negative-image policy (`include_negative_images`)
+- export-time geometry and join integrity validation
 - download endpoint
 - web export trigger (one-click from workspace)
 

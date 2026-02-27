@@ -16,7 +16,7 @@ Primary workflow:
 4. Annotate in classification, bounding-box, or polygon-segmentation mode.
    - active mode is locked per project by `project.task_type`
 5. Submit staged edits (or submit single-image edits directly).
-6. Generate and download a COCO-style export zip.
+6. Generate and download a deterministic dataset export zip (manifest v1.2 + COCO companion).
 
 ## 2. Runtime Topology
 
@@ -92,8 +92,18 @@ Additional upload-enriched fields persisted on `assets` rows:
 `apps/api/src/sheriff_api/services/exporter_coco.py` builds deterministic export artifacts:
 
 - `manifest.json`
-- `annotations.json`
-- `images/...` (for assets with local bytes available)
+- `coco_instances.json`
+- `assets/...` (packaged asset files)
+
+Current export contract highlights:
+
+- canonical join key is UUID `asset_id` across manifest and COCO (`coco.image_id == asset_id`)
+- manifest schema is `1.2` with explicit `tasks`, `label_schema`, `splits`, `training_defaults`, and `stats`
+- label names are normalized to lowercase slug for export/model-facing fields (`label_schema.rules.names_normalized = lowercase_slug`)
+- detection/segmentation exports support explicit negative-image policy via `selection_criteria_json.include_negative_images` (default `true`)
+- classification exports emit empty COCO instance annotations by design
+- detection COCO omits `segmentation` fields on bbox-only annotations
+- join and geometry integrity checks run at export time (asset/class references, bbox/polygon validity, positive area)
 
 Export files are persisted at:
 

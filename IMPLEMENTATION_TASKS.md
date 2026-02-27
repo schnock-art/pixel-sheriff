@@ -23,7 +23,7 @@ Status reflects current repository behavior.
   - [x] delete single asset
 - [x] Annotation endpoints (upsert/list)
 - [x] Export metadata endpoints (create/list)
-- [x] Export zip build (`manifest.json`, `annotations.json`, `images/`)
+- [x] Export zip build (`manifest.json`, `coco_instances.json`, `assets/`)
 - [x] Export download endpoint
 - [x] MAL placeholder endpoints (models/suggestions)
 - [x] Local storage safety checks (path containment)
@@ -84,13 +84,13 @@ Status reflects current repository behavior.
   - [ ] identify stale project/asset context transitions that can leave invalid staged entries
   - [ ] harden submit path with stale-entry pruning and clearer user-facing error recovery
   - [ ] add regression coverage around project/asset churn + staged submit
-- [ ] Fix label assignment persistence across all annotation modes:
-  - [ ] classification labels sometimes fail to persist after submit
-  - [ ] bounding-box object class/category assignment sometimes fails to persist
-  - [ ] segmentation object class/category assignment sometimes fails to persist
-  - [ ] add reproducible regression tests covering import -> assign label/class -> submit -> reload
-  - [ ] document exact repro cases and resolution notes in `CHANGELOG.md`
-  - [ ] Bugfix execution steps:
+- [x] Fix label assignment persistence across all annotation modes:
+  - [x] classification labels persist after submit
+  - [x] bounding-box object class/category assignment persists
+  - [x] segmentation object class/category assignment persists
+  - [x] add reproducible regression tests covering import -> assign label/class -> submit -> reload
+  - [x] document exact repro cases and resolution notes in `CHANGELOG.md`
+  - [x] Bugfix execution steps:
     - [x] Step 1: add failing end-to-end regression tests first (classification, bbox, segmentation)
       - [x] Added API regressions in `apps/api/tests/test_api.py`:
         - [x] `test_regression_classification_preserves_label_when_classification_block_empty`
@@ -107,9 +107,9 @@ Status reflects current repository behavior.
       - [x] UI symptom amplification confirmed:
         - [x] committed selection reader prioritizes `classification` block first (`apps/web/src/lib/workspace/annotationState.js:16`)
         - [x] once API persists empty `classification`, labels appear to flicker/disappear on reload
-    - [ ] Step 3: make web payload building task-type-aware and deterministic for class/category fields
-    - [ ] Step 4: add server-side normalization fallback/guardrails for class/category persistence
-    - [ ] Step 5: run full API/web test suites + manual docker smoke checks before closing
+    - [x] Step 3: make web payload building task-type-aware and deterministic for class/category fields
+    - [x] Step 4: add server-side normalization fallback/guardrails for class/category persistence
+    - [x] Step 5: run full API/web test suites + manual docker smoke checks before closing
 
 ### Refactor Workstream (Lean + Readable, No Behavior Loss)
 - [x] Baseline code review completed with prioritized findings

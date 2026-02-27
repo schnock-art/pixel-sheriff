@@ -34,6 +34,13 @@ Local-first CV annotation platform.
 - Bounding-box interaction now supports move + resize (corner and edge-midpoint handles), plus inline draft warnings.
 - Polygon closing is now more forgiving (`near-start`, double-click, or `Enter`) with draft-status guidance.
 - Classification mode now includes explicit "Clear Selected Labels" and an assigned-label summary line.
+- Export contract upgraded to v1.2:
+  - `manifest.json` now includes explicit `tasks`, `label_schema`, `splits`, `training_defaults`, and `stats`
+  - COCO companion file is now `coco_instances.json`
+  - COCO and manifest now use the same canonical UUID asset IDs (`image_id == asset_id`)
+  - class names are normalized to lowercase slug in model-facing/export fields
+  - detection/segmentation exports now support explicit negative-image policy (`include_negative_images`)
+  - detection COCO annotations now omit `segmentation` instead of emitting empty lists
 
 ## Stack
 
@@ -109,11 +116,14 @@ Local-first CV annotation platform.
   - Geometry class assignment uses the same project label set
   - Geometry edits participate in the same pending/edit-mode submit workflow as classification edits
   - Inline draft warnings clarify when geometry is not committed yet
-- COCO-style export:
+- Dataset export (manifest v1.2 + COCO companion):
   - export record creation/listing
-  - deterministic zip artifact with `manifest.json`, `annotations.json`, and `images/`
+  - deterministic zip artifact with `manifest.json`, `coco_instances.json`, and `assets/`
   - one-click download from web UI
-  - geometry export records include `bbox`, `segmentation`, and computed `area`
+  - canonical join key is UUID `asset_id` across manifest and COCO
+  - classification exports keep `coco_instances.json` with empty `annotations`
+  - detection/segmentation exports include geometry records with validated `bbox`/`segmentation` and computed `area`
+  - configurable detection/segmentation negative-image policy through `selection_criteria_json.include_negative_images` (`true` by default)
 
 ## Run Locally
 
@@ -143,7 +153,9 @@ docker compose up --build
 - Status: `docker compose ps`
 - Web tests: `cd apps/web && npm test`
 - Web build check: `cd apps/web && npm run build`
-- API tests (container): `docker compose exec api python -m pytest /app/tests -q`
+- API tests (container):
+  - `docker compose cp apps/api/tests api:/app/tests`
+  - `docker compose exec api python -m pytest /app/tests -q`
 
 `docker compose logs ...` only reads logs; it does not start containers.
 

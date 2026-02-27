@@ -139,6 +139,18 @@ All notable changes to this project will be documented in this file.
 - Geometry submit payload building now attempts fallback category resolution from object categories when explicit selected-label state is empty.
 - Segmentation close affordances expanded: close by near-start click, double-click, or `Enter`.
 - Classification active-chip styling strengthened for clearer selected-state visibility.
+- Export contract upgraded to manifest schema `1.2`:
+  - zip now contains `manifest.json`, `coco_instances.json`, and `assets/`
+  - canonical ID mapping uses UUID `asset_id` across manifest and COCO
+  - class names are normalized to lowercase slug in export/model-facing fields
+  - detection/segmentation support explicit negative-image policy (`include_negative_images`, default `true`)
+  - detection COCO now omits `segmentation` field for bbox-only annotations
+  - COCO metadata now uses tool-oriented versioning (`pixel-sheriff-1.2`)
+- Export validation hardening:
+  - stricter polygon validation (minimum unique points + bounds + positive area)
+  - manifest/COCO join integrity checks (`image_id`/`annotation_ids`)
+  - split integrity checks against exported assets
+- Annotation payload normalization now preserves class/category assignments when `classification` block is empty but top-level/object category data exists.
 
 ### Fixed
 - Root route prerender conflict caused by duplicate `/` page definitions.
