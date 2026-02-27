@@ -226,6 +226,11 @@ def normalize_annotation_payload(
     payload = _as_payload_dict(payload_json)
     image_basis = _normalize_image_basis(payload, asset_width, asset_height)
 
+    fallback_category_ids = _normalize_label_ids(payload.get("category_ids"))
+    fallback_category_id = payload.get("category_id")
+    if isinstance(fallback_category_id, int) and fallback_category_id not in fallback_category_ids:
+        fallback_category_ids = [fallback_category_id, *fallback_category_ids]
+
     classification = payload.get("classification")
     if isinstance(classification, dict):
         category_ids = _normalize_label_ids(classification.get("category_ids"))
@@ -235,26 +240,36 @@ def normalize_annotation_payload(
                 code="annotation_payload_invalid",
                 message="classification.primary_category_id must be an integer when provided",
             )
+        if not category_ids:
+            category_ids = fallback_category_ids
+        if primary_category_id is None and isinstance(fallback_category_id, int):
+            primary_category_id = fallback_category_id
     else:
-        category_ids = _normalize_label_ids(payload.get("category_ids"))
-        category_id = payload.get("category_id")
-        if isinstance(category_id, int) and category_id not in category_ids:
-            category_ids = [category_id, *category_ids]
-        primary_category_id = category_id if isinstance(category_id, int) else None
+        category_ids = fallback_category_ids
+        primary_category_id = fallback_category_id if isinstance(fallback_category_id, int) else None
+
+    objects = _normalize_geometry_objects(payload.get("objects"), allowed_category_ids=allowed_category_ids, image_basis=image_basis)
+    if not category_ids and objects:
+        category_ids = sorted(
+            dict.fromkeys(
+                [
+                    object_value["category_id"]
+                    for object_value in objects
+                    if isinstance(object_value.get("category_id"), int)
+                ]
+            )
+        )
+    if primary_category_id is None and category_ids:
+        primary_category_id = category_ids[0]
+    if primary_category_id is not None and primary_category_id not in category_ids:
+        category_ids = [primary_category_id, *category_ids]
 
     for category_id in category_ids:
         _validate_category(category_id, allowed_category_ids)
-
     category_ids = sorted(dict.fromkeys(category_ids))
-
-    if primary_category_id is None and category_ids:
-        primary_category_id = category_ids[0]
     if primary_category_id is not None:
         _validate_category(primary_category_id, allowed_category_ids)
-        if primary_category_id not in category_ids:
-            category_ids = [primary_category_id, *category_ids]
 
-    objects = _normalize_geometry_objects(payload.get("objects"), allowed_category_ids=allowed_category_ids, image_basis=image_basis)
     if task_type in {TaskType.classification, TaskType.classification_single} and objects:
         raise PayloadValidationError(
             code="annotation_task_mode_mismatch",

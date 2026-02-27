@@ -61,7 +61,7 @@ async def test_crud_and_export_flow(client: AsyncClient) -> None:
     export = await client.post(f"/api/v1/projects/{project_id}/exports", json={"selection_criteria_json": {"status": "approved"}})
     assert export.status_code == 200
     assert "manifest_json" in export.json()
-    assert export.json()["manifest_json"]["categories"][0]["name"] == "kitty"
+    assert export.json()["manifest_json"]["label_schema"]["classes"][0]["name"] == "kitty"
     assert export.json()["export_uri"].startswith(f"/api/v1/projects/{project_id}/exports/")
 
     archive = await client.get(export.json()["export_uri"])
@@ -71,14 +71,15 @@ async def test_crud_and_export_flow(client: AsyncClient) -> None:
     with zipfile.ZipFile(BytesIO(archive.content), "r") as bundle:
         names = set(bundle.namelist())
         assert "manifest.json" in names
-        assert "annotations.json" in names
-        assert any(name.startswith("images/") for name in names)
+        assert "coco_instances.json" in names
+        assert any(name.startswith("assets/") for name in names)
 
         manifest = json.loads(bundle.read("manifest.json").decode("utf-8"))
-        assert manifest["counts"]["assets"] == 1
+        assert len(manifest["assets"]) == 1
 
-        annotations = json.loads(bundle.read("annotations.json").decode("utf-8"))
-        assert annotations["categories"][0]["name"] == "kitty"
+        coco = json.loads(bundle.read("coco_instances.json").decode("utf-8"))
+        assert coco["categories"][0]["name"] == "kitty"
+        assert coco["annotations"] == []
 
 
 @pytest.mark.asyncio
@@ -515,12 +516,12 @@ async def test_export_includes_bbox_geometry_records(client: AsyncClient) -> Non
     archive = await client.get(export.json()["export_uri"])
     assert archive.status_code == 200
     with zipfile.ZipFile(BytesIO(archive.content), "r") as bundle:
-        annotations = json.loads(bundle.read("annotations.json").decode("utf-8"))
-        geometry_rows = [row for row in annotations["annotations"] if row.get("sheriff_object_id") == "bbox-1"]
-        assert len(geometry_rows) == 1
-        bbox_row = geometry_rows[0]
+        coco = json.loads(bundle.read("coco_instances.json").decode("utf-8"))
+        assert len(coco["annotations"]) == 1
+        bbox_row = coco["annotations"][0]
         assert bbox_row["bbox"] == [10.0, 10.0, 30.0, 40.0]
         assert bbox_row["area"] == 1200.0
+        assert "segmentation" not in bbox_row
 
 
 @pytest.mark.asyncio
@@ -559,12 +560,184 @@ async def test_export_includes_segmentation_geometry_records(client: AsyncClient
     archive = await client.get(export.json()["export_uri"])
     assert archive.status_code == 200
     with zipfile.ZipFile(BytesIO(archive.content), "r") as bundle:
-        annotations = json.loads(bundle.read("annotations.json").decode("utf-8"))
-        geometry_rows = [row for row in annotations["annotations"] if row.get("sheriff_object_id") == "poly-1"]
-        assert len(geometry_rows) == 1
-        poly_row = geometry_rows[0]
+        coco = json.loads(bundle.read("coco_instances.json").decode("utf-8"))
+        assert len(coco["annotations"]) == 1
+        poly_row = coco["annotations"][0]
         assert poly_row["segmentation"] == [[10.0, 10.0, 40.0, 10.0, 40.0, 30.0, 10.0, 30.0]]
         assert poly_row["area"] > 0
+
+
+@pytest.mark.asyncio
+async def test_export_detection_includes_negative_images_by_default(client: AsyncClient) -> None:
+    project = (await client.post("/api/v1/projects", json={"name": "detection-negatives-default", "task_type": "bbox"})).json()
+    project_id = project["id"]
+    category = (await client.post(f"/api/v1/projects/{project_id}/categories", json={"name": "Road Sign"})).json()
+
+    positive = await client.post(
+        f"/api/v1/projects/{project_id}/assets/upload",
+        files={"file": ("positive.jpg", b"fake-image-bytes", "image/jpeg")},
+    )
+    assert positive.status_code == 200
+    positive_asset = positive.json()
+
+    negative = await client.post(
+        f"/api/v1/projects/{project_id}/assets/upload",
+        files={"file": ("negative.jpg", b"fake-image-bytes", "image/jpeg")},
+    )
+    assert negative.status_code == 200
+    negative_asset = negative.json()
+
+    positive_annotation = await client.post(
+        f"/api/v1/projects/{project_id}/annotations",
+        json={
+            "asset_id": positive_asset["id"],
+            "status": "approved",
+            "payload_json": {
+                "version": "2.0",
+                "classification": {"category_ids": [category["id"]], "primary_category_id": category["id"]},
+                "image_basis": {"width": 100, "height": 100},
+                "objects": [{"id": "bbox-1", "kind": "bbox", "category_id": category["id"], "bbox": [10, 10, 20, 15]}],
+            },
+        },
+    )
+    assert positive_annotation.status_code == 200
+
+    negative_annotation = await client.post(
+        f"/api/v1/projects/{project_id}/annotations",
+        json={
+            "asset_id": negative_asset["id"],
+            "status": "approved",
+            "payload_json": {
+                "version": "2.0",
+                "classification": {"category_ids": [category["id"]], "primary_category_id": category["id"]},
+                "image_basis": {"width": 100, "height": 100},
+                "objects": [],
+            },
+        },
+    )
+    assert negative_annotation.status_code == 200
+
+    export = await client.post(f"/api/v1/projects/{project_id}/exports", json={"selection_criteria_json": {"status": "approved"}})
+    assert export.status_code == 200
+
+    archive = await client.get(export.json()["export_uri"])
+    assert archive.status_code == 200
+    with zipfile.ZipFile(BytesIO(archive.content), "r") as bundle:
+        manifest = json.loads(bundle.read("manifest.json").decode("utf-8"))
+        coco = json.loads(bundle.read("coco_instances.json").decode("utf-8"))
+
+        assert manifest["splits"]["generation"]["notes"] == "include_negative_images=true"
+        assert len(manifest["assets"]) == 2
+        assert {image["id"] for image in coco["images"]} == {positive_asset["id"], negative_asset["id"]}
+        assert len(coco["annotations"]) == 1
+        assert coco["annotations"][0]["image_id"] == positive_asset["id"]
+
+
+@pytest.mark.asyncio
+async def test_export_detection_excludes_negative_images_when_disabled(client: AsyncClient) -> None:
+    project = (await client.post("/api/v1/projects", json={"name": "detection-negatives-off", "task_type": "bbox"})).json()
+    project_id = project["id"]
+    category = (await client.post(f"/api/v1/projects/{project_id}/categories", json={"name": "Road Sign"})).json()
+
+    positive = await client.post(
+        f"/api/v1/projects/{project_id}/assets/upload",
+        files={"file": ("positive.jpg", b"fake-image-bytes", "image/jpeg")},
+    )
+    assert positive.status_code == 200
+    positive_asset = positive.json()
+
+    negative = await client.post(
+        f"/api/v1/projects/{project_id}/assets/upload",
+        files={"file": ("negative.jpg", b"fake-image-bytes", "image/jpeg")},
+    )
+    assert negative.status_code == 200
+    negative_asset = negative.json()
+
+    positive_annotation = await client.post(
+        f"/api/v1/projects/{project_id}/annotations",
+        json={
+            "asset_id": positive_asset["id"],
+            "status": "approved",
+            "payload_json": {
+                "version": "2.0",
+                "classification": {"category_ids": [category["id"]], "primary_category_id": category["id"]},
+                "image_basis": {"width": 100, "height": 100},
+                "objects": [{"id": "bbox-1", "kind": "bbox", "category_id": category["id"], "bbox": [10, 10, 20, 15]}],
+            },
+        },
+    )
+    assert positive_annotation.status_code == 200
+
+    negative_annotation = await client.post(
+        f"/api/v1/projects/{project_id}/annotations",
+        json={
+            "asset_id": negative_asset["id"],
+            "status": "approved",
+            "payload_json": {
+                "version": "2.0",
+                "classification": {"category_ids": [category["id"]], "primary_category_id": category["id"]},
+                "image_basis": {"width": 100, "height": 100},
+                "objects": [],
+            },
+        },
+    )
+    assert negative_annotation.status_code == 200
+
+    export = await client.post(
+        f"/api/v1/projects/{project_id}/exports",
+        json={"selection_criteria_json": {"status": "approved", "include_negative_images": False}},
+    )
+    assert export.status_code == 200
+
+    archive = await client.get(export.json()["export_uri"])
+    assert archive.status_code == 200
+    with zipfile.ZipFile(BytesIO(archive.content), "r") as bundle:
+        manifest = json.loads(bundle.read("manifest.json").decode("utf-8"))
+        coco = json.loads(bundle.read("coco_instances.json").decode("utf-8"))
+
+        assert manifest["splits"]["generation"]["notes"] == "include_negative_images=false"
+        assert len(manifest["assets"]) == 1
+        assert manifest["assets"][0]["asset_id"] == positive_asset["id"]
+        assert {image["id"] for image in coco["images"]} == {positive_asset["id"]}
+        assert len(coco["annotations"]) == 1
+        assert coco["annotations"][0]["image_id"] == positive_asset["id"]
+
+
+@pytest.mark.asyncio
+async def test_export_normalizes_category_names_to_lowercase_slug(client: AsyncClient) -> None:
+    project = (await client.post("/api/v1/projects", json={"name": "slug-classes"})).json()
+    project_id = project["id"]
+    category = (
+        await client.post(f"/api/v1/projects/{project_id}/categories", json={"name": "Rock Face", "display_order": 1})
+    ).json()
+
+    upload = await client.post(
+        f"/api/v1/projects/{project_id}/assets/upload",
+        files={"file": ("sample.jpg", b"fake-image-bytes", "image/jpeg")},
+    )
+    assert upload.status_code == 200
+    asset = upload.json()
+
+    annotation = await client.post(
+        f"/api/v1/projects/{project_id}/annotations",
+        json={"asset_id": asset["id"], "status": "approved", "payload_json": {"category_ids": [category["id"]]}},
+    )
+    assert annotation.status_code == 200
+
+    export = await client.post(f"/api/v1/projects/{project_id}/exports", json={"selection_criteria_json": {"status": "approved"}})
+    assert export.status_code == 200
+
+    archive = await client.get(export.json()["export_uri"])
+    assert archive.status_code == 200
+    with zipfile.ZipFile(BytesIO(archive.content), "r") as bundle:
+        manifest = json.loads(bundle.read("manifest.json").decode("utf-8"))
+        coco = json.loads(bundle.read("coco_instances.json").decode("utf-8"))
+
+        cls = manifest["label_schema"]["classes"][0]
+        assert manifest["label_schema"]["rules"]["names_normalized"] == "lowercase_slug"
+        assert cls["name"] == "rock_face"
+        assert cls["display_name"] == "Rock Face"
+        assert coco["categories"][0]["name"] == "rock_face"
 
 
 @pytest.mark.asyncio
