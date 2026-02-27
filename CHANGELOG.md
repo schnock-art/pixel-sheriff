@@ -56,6 +56,32 @@ All notable changes to this project will be documented in this file.
   - `Architecture.md`
   - `Roadplan.md`
   - `IMPLEMENTATION_TASKS.md`
+- Bounding-box and polygon segmentation authoring in web workspace:
+  - mode tabs wired (`Labels`, `Bounding Boxes`, `Segmentation`)
+  - bbox draw/select/delete flow
+  - polygon draw/close/select/delete flow (`Enter` close, `Esc` cancel draft, `Delete` remove selected)
+  - geometry class assignment via existing project labels
+- Geometry helper module for viewer overlays (`apps/web/src/lib/workspace/geometry.*`) with coordinate transforms, area/bounds math, and hit-testing.
+- API geometry payload validation and normalization:
+  - typed annotation payload models for legacy + v2 contracts
+  - geometry object validation (bounds/category/kind/point-shape guards) with stable structured error codes
+- COCO export geometry support:
+  - bbox records emitted with computed `area`
+  - polygon segmentation records emitted with derived `bbox` and `area`
+- API tests expanded for geometry validation and export geometry payload assertions.
+- Web tests expanded for geometry helper math and geometry-inclusive submission payload construction.
+- Project task-mode support end to end:
+  - per-project modes (`classification_single`, `bbox`, `segmentation`) exposed in import/create flow
+  - API task-mode mismatch validation tests for classification vs bbox vs segmentation payloads
+  - bbox-only and segmentation-only export regression tests
+- Class-color utility module (`apps/web/src/lib/workspace/classColors.*`) and determinism/range tests.
+- Bounding-box edit handles in viewer overlays:
+  - 4 corner handles and 4 edge-midpoint handles for one-axis/two-axis resize
+  - drag-to-move for existing selected boxes
+- Classification label visibility/controls:
+  - explicit `Clear Selected Labels` action in label mode
+  - assigned-label summary line (`Assigned: ...`) and per-chip assigned badge
+- Inline geometry draft warnings in viewer for uncommitted bbox/polygon drafts.
 
 ### Changed
 - Viewer image behavior now preserves aspect ratio with letterbox rendering (`object-fit: contain`) on black background.
@@ -101,9 +127,29 @@ All notable changes to this project will be documented in this file.
 - Documentation refreshed to reflect current architecture and remaining gaps:
   - `README.md`
   - `Architecture.md`
+- Added end-to-end implementation plan for bounding box + segmentation support in `IMPLEMENTATION_TASKS.md`, including API/web/export phases, test milestones, and required doc updates.
+- README/Architecture/Roadplan updated to reflect implemented bbox/segmentation workflows and remaining geometry-tooling polish gaps.
+- Geometry payload normalization now canonicalizes object/category ordering so equivalent geometry payloads yield stable export hashes.
+- API test harness now defaults to isolated SQLite/storage paths in `apps/api/tests/conftest.py` to avoid leaking test projects into the working runtime database.
+- Geometry panel now includes a per-image object list (bbox/segment) with click-to-select and hover-to-highlight synchronization with viewer overlays.
+- Workspace annotation mode is now hard-locked by project task type, including disabled tab actions and mode-safe keyboard behavior.
+- New-project import flow now includes explicit task-mode selection and creates projects with the chosen mode.
+- Class-aware visual tokens now drive label chips, geometry list rows, and overlay rendering colors.
+- API task type compatibility now supports legacy `classification` projects while enforcing strict mode checks for new `classification_single`/`bbox`/`segmentation` projects.
+- Geometry submit payload building now attempts fallback category resolution from object categories when explicit selected-label state is empty.
+- Segmentation close affordances expanded: close by near-start click, double-click, or `Enter`.
+- Classification active-chip styling strengthened for clearer selected-state visibility.
 
 ### Fixed
 - Root route prerender conflict caused by duplicate `/` page definitions.
 - Import flow failures caused by weak file-type assumptions and missing diagnostics.
 - Submit/edit-mode inconsistencies in annotation flow.
 - Folder tree display ordering (hierarchy now preserved).
+- Geometry mode class selection no longer no-ops when no object is selected; selected class now applies to newly drawn objects.
+- Removed residual `geometry-hash` test dataset from the working runtime DB and hardened tests to prevent future leakage.
+- Fixed project-mode drift where UI mode and project task mode could diverge, causing unstable class selection behavior for geometry projects.
+- BBox draft finalization reliability improved by retaining pointer interaction until pointer-up/cancel completes.
+- Classification selection flicker regression reduced by avoiding geometry restaging on image-basis updates when no geometry objects exist.
+
+### Known Issues
+- Intermittent annotation submit `404` can still occur in stale project/asset contexts during some project/asset churn scenarios.

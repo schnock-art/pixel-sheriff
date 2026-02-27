@@ -16,6 +16,7 @@ import {
   resolveAssetUri,
   uploadAsset,
   type Annotation,
+  type ProjectTaskType,
 } from "../lib/api";
 import { useAnnotationWorkflow } from "../lib/hooks/useAnnotationWorkflow";
 import { useAssets } from "../lib/hooks/useAssets";
@@ -30,6 +31,20 @@ const PROJECT_MULTILABEL_STORAGE_KEY = "pixel-sheriff:project-multilabel:v1";
 const LAST_PROJECT_STORAGE_KEY = "pixel-sheriff:last-project-id:v1";
 
 type FolderReviewStatus = "all_labeled" | "has_unlabeled" | "empty";
+type WorkspaceAnnotationMode = "labels" | "bbox" | "segmentation";
+type NewProjectTaskType = "classification_single" | "bbox" | "segmentation";
+
+function projectTaskTypeToAnnotationMode(taskType: ProjectTaskType | null | undefined): WorkspaceAnnotationMode {
+  if (taskType === "bbox") return "bbox";
+  if (taskType === "segmentation") return "segmentation";
+  return "labels";
+}
+
+function annotationModeToNewProjectTaskType(mode: WorkspaceAnnotationMode): NewProjectTaskType {
+  if (mode === "bbox") return "bbox";
+  if (mode === "segmentation") return "segmentation";
+  return "classification_single";
+}
 
 export default function HomePage() {
   const { data: projects, refetch: refetchProjects } = useProject();
@@ -42,6 +57,10 @@ export default function HomePage() {
   const [editMode, setEditMode] = useState(false);
   const [projectMultiLabelSettings, setProjectMultiLabelSettings] = useState<Record<string, boolean>>({});
   const [message, setMessage] = useState<string | null>(null);
+  const [annotationMode, setAnnotationMode] = useState<WorkspaceAnnotationMode>("labels");
+  const [importNewProjectTaskType, setImportNewProjectTaskType] = useState<NewProjectTaskType>("classification_single");
+  const [geometryCategoryId, setGeometryCategoryId] = useState<number | null>(null);
+  const [hoveredGeometryObjectId, setHoveredGeometryObjectId] = useState<string | null>(null);
   const [selectedTreeFolderPath, setSelectedTreeFolderPath] = useState<string | null>(null);
   const [collapsedFolders, setCollapsedFolders] = useState<Record<string, boolean>>({});
   const [preferredProjectId, setPreferredProjectId] = useState<string | null>(null);
@@ -112,11 +131,23 @@ export default function HomePage() {
   const datasets = projects.map((project) => ({ id: project.id, name: project.name }));
   const filteredDatasets = datasets.filter((dataset) => dataset.name.toLowerCase().includes(query.trim().toLowerCase()));
   const activeDatasetId = selectedProjectId;
+  const selectedProject = useMemo(
+    () => projects.find((project) => project.id === selectedProjectId) ?? null,
+    [projects, selectedProjectId],
+  );
+  const projectAnnotationMode = useMemo(
+    () => projectTaskTypeToAnnotationMode(selectedProject?.task_type),
+    [selectedProject?.task_type],
+  );
+  useEffect(() => {
+    if (annotationMode === projectAnnotationMode) return;
+    setAnnotationMode(projectAnnotationMode);
+  }, [annotationMode, projectAnnotationMode]);
   const multiLabelEnabled = selectedProjectId ? Boolean(projectMultiLabelSettings[selectedProjectId]) : false;
 
   const { data: assets, annotations, setAnnotations, refetch: refetchAssets, isLoading: isAssetsLoading } = useAssets(selectedProjectId);
   const { data: labels, refetch: refetchLabels } = useLabels(selectedProjectId);
-  const selectedDatasetName = datasets.find((dataset) => dataset.id === activeDatasetId)?.name ?? "No dataset selected";
+  const selectedDatasetName = selectedProject?.name ?? "No dataset selected";
   const importWorkflow = useImportWorkflow({
     assets,
     selectedProjectId,
@@ -193,10 +224,22 @@ export default function HomePage() {
     displayOrder: label.display_order,
   }));
   const activeLabelRows = allLabelRows.filter((label) => label.isActive).sort((a, b) => a.displayOrder - b.displayOrder);
+  const labelNameById = useMemo(() => {
+    const map = new Map<number, string>();
+    for (const label of allLabelRows) map.set(label.id, label.name);
+    return map;
+  }, [allLabelRows]);
 
   const safeAssetIndex = Math.min(assetIndex, Math.max(assetRows.length - 1, 0));
   const currentAsset = assetRows[safeAssetIndex] ?? null;
-  const viewerAsset = currentAsset ? { id: currentAsset.id, uri: resolveAssetUri(currentAsset.uri) } : null;
+  const viewerAsset = currentAsset
+    ? {
+        id: currentAsset.id,
+        uri: resolveAssetUri(currentAsset.uri),
+        width: currentAsset.width,
+        height: currentAsset.height,
+      }
+    : null;
 
   const annotationByAssetId = useMemo(() => {
     const map = new Map<string, Annotation>();
@@ -223,10 +266,28 @@ export default function HomePage() {
     pendingCount,
     canSubmit,
     isSaving,
+    currentObjects,
+    selectedObjectId,
+    setSelectedObjectId,
+    setCurrentImageBasis,
     handleToggleLabel,
+    clearSelectedLabels,
+    assignSelectedGeometryCategory,
+    upsertGeometryObject,
+    deleteSelectedGeometryObject,
     handleSubmit,
     resetAnnotationWorkflow,
   } = annotationWorkflow;
+  const geometryObjectRows = useMemo(
+    () =>
+      currentObjects.map((object) => ({
+        id: object.id,
+        kind: object.kind,
+        categoryId: object.category_id,
+        categoryName: labelNameById.get(object.category_id) ?? `#${object.category_id}`,
+      })),
+    [currentObjects, labelNameById],
+  );
   const deleteWorkflow = useDeleteWorkflow({
     selectedProjectId,
     selectedDatasetName,
@@ -277,7 +338,7 @@ export default function HomePage() {
     for (const asset of orderedAssetRows) {
       const pending = pendingAnnotations[asset.id];
       if (pending) {
-        const isLabeled = pending.status !== "unlabeled" && pending.labelIds.length > 0;
+        const isLabeled = pending.status !== "unlabeled" || pending.objects.length > 0;
         map.set(asset.id, { status: isLabeled ? "labeled" : "unlabeled", isDirty: true });
         continue;
       }
@@ -357,15 +418,45 @@ export default function HomePage() {
       if (!label) return;
 
       event.preventDefault();
-      handleToggleLabel(label.id);
+      if (annotationMode === "labels") {
+        handleToggleLabel(label.id);
+      } else {
+        setGeometryCategoryId(label.id);
+        if (selectedObjectId) {
+          assignSelectedGeometryCategory(label.id);
+        }
+      }
     }
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [activeLabelRows, assetRows.length, handleToggleLabel]);
+  }, [activeLabelRows, annotationMode, assetRows.length, assignSelectedGeometryCategory, handleToggleLabel, selectedObjectId]);
+
+  useEffect(() => {
+    if (annotationMode === "labels") return;
+    if (selectedObjectId) {
+      const selectedObject = currentObjects.find((item) => item.id === selectedObjectId);
+      if (selectedObject) {
+        setGeometryCategoryId(selectedObject.category_id);
+        return;
+      }
+    }
+    if (geometryCategoryId && activeLabelRows.some((label) => label.id === geometryCategoryId)) {
+      return;
+    }
+    setGeometryCategoryId(activeLabelRows[0]?.id ?? null);
+  }, [activeLabelRows, annotationMode, currentObjects, geometryCategoryId, selectedObjectId]);
+
+  useEffect(() => {
+    setHoveredGeometryObjectId(null);
+  }, [currentAsset?.id, annotationMode]);
 
   function handleSelectDataset(id: string) {
+    const nextProject = projects.find((project) => project.id === id);
     setSelectedProjectId(id);
+    setAnnotationMode(projectTaskTypeToAnnotationMode(nextProject?.task_type));
+    setGeometryCategoryId(null);
+    setHoveredGeometryObjectId(null);
     setSelectedTreeFolderPath(null);
     setCollapsedFolders({});
     resetDeleteWorkflow();
@@ -385,10 +476,41 @@ export default function HomePage() {
 
   function handleToggleProjectMultiLabel() {
     if (!selectedProjectId) return;
+    if (projectAnnotationMode !== "labels") return;
     setProjectMultiLabelSettings((previous) => ({
       ...previous,
       [selectedProjectId]: !Boolean(previous[selectedProjectId]),
     }));
+  }
+
+  function handleChangeAnnotationMode(nextMode: WorkspaceAnnotationMode) {
+    if (nextMode !== projectAnnotationMode) return;
+    setAnnotationMode(nextMode);
+  }
+
+  const defaultGeometryCategoryId = geometryCategoryId ?? activeLabelRows[0]?.id ?? null;
+  const effectiveSelectedLabelIds =
+    annotationMode === "labels" ? selectedLabelIds : defaultGeometryCategoryId ? [defaultGeometryCategoryId] : [];
+
+  function handleToggleLabelForCurrentMode(labelId: number) {
+    if (annotationMode === "labels") {
+      handleToggleLabel(labelId);
+      return;
+    }
+    setGeometryCategoryId(labelId);
+    if (selectedObjectId) {
+      assignSelectedGeometryCategory(labelId);
+      return;
+    }
+  }
+
+  function handleSelectGeometryObject(objectId: string | null) {
+    setSelectedObjectId(objectId);
+    if (!objectId) return;
+    const selectedObject = currentObjects.find((item) => item.id === objectId);
+    if (!selectedObject) return;
+    setGeometryCategoryId(selectedObject.category_id);
+    setSelectedLabelIds([selectedObject.category_id]);
   }
 
   async function handleCreateLabel(name: string) {
@@ -402,6 +524,7 @@ export default function HomePage() {
       setMessage(null);
       const created = await createCategory(selectedProjectId, { name, display_order: allLabelRows.length });
       await refetchLabels();
+      if (annotationMode !== "labels") setGeometryCategoryId(created.id);
       setSelectedLabelIds([created.id]);
       setMessage(`Created label "${created.name}".`);
     } catch (error) {
@@ -467,7 +590,7 @@ export default function HomePage() {
           setMessage("Project name is required for new project imports.");
           return;
         }
-        const project = await createProject({ name: projectName, task_type: "classification_single" });
+        const project = await createProject({ name: projectName, task_type: importNewProjectTaskType });
         targetProjectId = project.id;
         targetProjectName = project.name;
       } else {
@@ -523,7 +646,9 @@ export default function HomePage() {
 
       await refetchProjects();
       await refetchAssets(targetProjectId);
+      const targetProject = importMode === "new" ? null : projects.find((item) => item.id === targetProjectId) ?? null;
       setSelectedProjectId(targetProjectId);
+      setAnnotationMode(projectTaskTypeToAnnotationMode(targetProject?.task_type ?? importNewProjectTaskType));
       setSelectedTreeFolderPath(null);
       setCollapsedFolders({});
       setAssetIndex(0);
@@ -572,6 +697,7 @@ export default function HomePage() {
       }
       const rootName = files[0].webkitRelativePath.split("/")[0] || `Dataset ${new Date().toLocaleString()}`;
       const defaultProject = projects.find((project) => project.id === selectedProjectId) ?? projects[0];
+      setImportNewProjectTaskType(annotationModeToNewProjectTaskType(projectTaskTypeToAnnotationMode(defaultProject?.task_type)));
       openImportDialog(files, rootName, defaultProject?.id ?? "");
     };
 
@@ -825,6 +951,16 @@ export default function HomePage() {
             currentIndex={safeAssetIndex}
             pageStatuses={pageStatuses}
             pageDirtyFlags={pageDirtyFlags}
+            annotationMode={annotationMode}
+            geometryObjects={currentObjects}
+            selectedObjectId={selectedObjectId}
+            hoveredObjectId={hoveredGeometryObjectId}
+            defaultCategoryId={defaultGeometryCategoryId}
+            onSelectObject={handleSelectGeometryObject}
+            onHoverObject={setHoveredGeometryObjectId}
+            onUpsertObject={upsertGeometryObject}
+            onDeleteSelectedObject={deleteSelectedGeometryObject}
+            onImageBasisChange={setCurrentImageBasis}
             onSelectIndex={setAssetIndex}
             onPrev={handlePrevAsset}
             onNext={handleNextAsset}
@@ -832,8 +968,9 @@ export default function HomePage() {
           <LabelPanel
             labels={activeLabelRows}
             allLabels={allLabelRows}
-            selectedLabelIds={selectedLabelIds}
-            onToggleLabel={handleToggleLabel}
+            selectedLabelIds={effectiveSelectedLabelIds}
+            onToggleLabel={handleToggleLabelForCurrentMode}
+            onClearLabels={clearSelectedLabels}
             onSubmit={handleSubmit}
             isSaving={isSaving}
             onCreateLabel={handleCreateLabel}
@@ -846,6 +983,16 @@ export default function HomePage() {
             canSubmit={canSubmit}
             multiLabelEnabled={multiLabelEnabled}
             onToggleMultiLabel={handleToggleProjectMultiLabel}
+            annotationMode={annotationMode}
+            projectMode={projectAnnotationMode}
+            onChangeAnnotationMode={handleChangeAnnotationMode}
+            selectedObjectId={selectedObjectId}
+            geometryObjectCount={currentObjects.length}
+            geometryObjects={geometryObjectRows}
+            hoveredObjectId={hoveredGeometryObjectId}
+            onHoverObject={setHoveredGeometryObjectId}
+            onSelectObject={handleSelectGeometryObject}
+            onDeleteSelectedObject={deleteSelectedGeometryObject}
           />
         </div>
 
@@ -972,6 +1119,20 @@ export default function HomePage() {
                 </span>
               )}
             </label>
+            {importMode === "new" ? (
+              <label className="import-field">
+                <span>Project Task Mode</span>
+                <select
+                  value={importNewProjectTaskType}
+                  onChange={(event) => setImportNewProjectTaskType(event.target.value as NewProjectTaskType)}
+                >
+                  <option value="classification_single">Labels (single-label classification)</option>
+                  <option value="bbox">Bounding Boxes</option>
+                  <option value="segmentation">Segmentation</option>
+                </select>
+                <span className="import-field-hint">This mode is locked per project and controls available annotation tools.</span>
+              </label>
+            ) : null}
             {importMode === "existing" ? (
               <label className="import-field">
                 <span>Existing Folder/Subfolder (optional)</span>

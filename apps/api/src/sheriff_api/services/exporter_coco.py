@@ -1,5 +1,6 @@
 import json
 from io import BytesIO
+import math
 from pathlib import PurePosixPath
 from typing import Callable
 import zipfile
@@ -21,6 +22,18 @@ def _safe_relative_path(value: str, fallback_filename: str) -> str:
 
 
 def _annotation_category_ids(payload: dict) -> list[int]:
+    classification = payload.get("classification")
+    if isinstance(classification, dict):
+        raw_ids = classification.get("category_ids")
+        if isinstance(raw_ids, list):
+            values = [value for value in raw_ids if isinstance(value, int)]
+            if values:
+                return values
+
+        raw_primary = classification.get("primary_category_id")
+        if isinstance(raw_primary, int):
+            return [raw_primary]
+
     raw_ids = payload.get("category_ids")
     if isinstance(raw_ids, list):
         values = [value for value in raw_ids if isinstance(value, int)]
@@ -31,6 +44,54 @@ def _annotation_category_ids(payload: dict) -> list[int]:
     if isinstance(raw_id, int):
         return [raw_id]
     return []
+
+
+def _annotation_objects(payload: dict) -> list[dict]:
+    raw_objects = payload.get("objects")
+    if not isinstance(raw_objects, list):
+        return []
+    objects = [item for item in raw_objects if isinstance(item, dict)]
+    return sorted(objects, key=lambda item: str(item.get("id", "")))
+
+
+def _polygon_bounds_and_area(segmentation: list[list[float]]) -> tuple[list[float], float]:
+    x_values: list[float] = []
+    y_values: list[float] = []
+    total_area = 0.0
+
+    for points in segmentation:
+        if not points or len(points) < 6:
+            continue
+        local_x = points[0::2]
+        local_y = points[1::2]
+        if not local_x or not local_y:
+            continue
+        x_values.extend(local_x)
+        y_values.extend(local_y)
+
+        ring_area = 0.0
+        point_count = len(local_x)
+        for index in range(point_count):
+            next_index = (index + 1) % point_count
+            ring_area += local_x[index] * local_y[next_index] - local_x[next_index] * local_y[index]
+        total_area += abs(ring_area) / 2.0
+
+    if not x_values or not y_values:
+        return [0.0, 0.0, 0.0, 0.0], 0.0
+
+    min_x = min(x_values)
+    max_x = max(x_values)
+    min_y = min(y_values)
+    max_y = max(y_values)
+    return [min_x, min_y, max(0.0, max_x - min_x), max(0.0, max_y - min_y)], total_area
+
+
+def _number_list(values: list[float]) -> list[float]:
+    result: list[float] = []
+    for value in values:
+        if isinstance(value, (int, float)) and math.isfinite(float(value)):
+            result.append(float(value))
+    return result
 
 
 def build_manifest(
@@ -117,21 +178,87 @@ def build_export_result(
         image_id = image_id_by_asset_id.get(annotation["asset_id"])
         if image_id is None:
             continue
-        category_ids = _annotation_category_ids(annotation.get("payload", {}))
-        for category_id in category_ids:
-            annotation_records.append(
-                {
-                    "id": annotation_id,
-                    "image_id": image_id,
-                    "category_id": category_id,
-                    "bbox": [],
-                    "area": 0,
-                    "iscrowd": 0,
-                    "sheriff_annotation_id": annotation["id"],
-                    "status": annotation["status"],
-                }
-            )
-            annotation_id += 1
+        payload = annotation.get("payload", {})
+        objects = _annotation_objects(payload)
+        if not objects:
+            category_ids = _annotation_category_ids(payload)
+            for category_id in category_ids:
+                annotation_records.append(
+                    {
+                        "id": annotation_id,
+                        "image_id": image_id,
+                        "category_id": category_id,
+                        "bbox": [],
+                        "segmentation": [],
+                        "area": 0,
+                        "iscrowd": 0,
+                        "sheriff_annotation_id": annotation["id"],
+                        "status": annotation["status"],
+                    }
+                )
+                annotation_id += 1
+
+        for obj in objects:
+            kind = obj.get("kind")
+            category_id = obj.get("category_id")
+            if not isinstance(category_id, int):
+                continue
+
+            if kind == "bbox":
+                raw_bbox = obj.get("bbox")
+                if not isinstance(raw_bbox, list) or len(raw_bbox) != 4:
+                    continue
+                bbox = _number_list(raw_bbox)
+                if len(bbox) != 4:
+                    continue
+                area = max(0.0, bbox[2]) * max(0.0, bbox[3])
+                annotation_records.append(
+                    {
+                        "id": annotation_id,
+                        "image_id": image_id,
+                        "category_id": category_id,
+                        "bbox": bbox,
+                        "segmentation": [],
+                        "area": area,
+                        "iscrowd": 0,
+                        "sheriff_annotation_id": annotation["id"],
+                        "sheriff_object_id": obj.get("id"),
+                        "status": annotation["status"],
+                    }
+                )
+                annotation_id += 1
+                continue
+
+            if kind == "polygon":
+                raw_segmentation = obj.get("segmentation")
+                if not isinstance(raw_segmentation, list):
+                    continue
+                segmentation: list[list[float]] = []
+                for segment in raw_segmentation:
+                    if not isinstance(segment, list):
+                        continue
+                    numbers = _number_list(segment)
+                    if len(numbers) >= 6 and len(numbers) % 2 == 0:
+                        segmentation.append(numbers)
+                if not segmentation:
+                    continue
+
+                bbox, area = _polygon_bounds_and_area(segmentation)
+                annotation_records.append(
+                    {
+                        "id": annotation_id,
+                        "image_id": image_id,
+                        "category_id": category_id,
+                        "bbox": bbox,
+                        "segmentation": segmentation,
+                        "area": area,
+                        "iscrowd": 0,
+                        "sheriff_annotation_id": annotation["id"],
+                        "sheriff_object_id": obj.get("id"),
+                        "status": annotation["status"],
+                    }
+                )
+                annotation_id += 1
 
     coco_payload = {
         "info": {"description": "Pixel Sheriff COCO export", "version": "1.0"},

@@ -5,6 +5,7 @@ const {
   areSelectionStatesEqual,
   canSubmitWithStates,
   deriveNextAnnotationStatus,
+  readAnnotationObjects,
   getCommittedSelectionState,
   readAnnotationLabelIds,
   resolvePendingAnnotation,
@@ -19,6 +20,7 @@ test("deriveNextAnnotationStatus keeps status explicit for selection transitions
 test("readAnnotationLabelIds resolves category_ids first and falls back to category_id", () => {
   assert.deepEqual(readAnnotationLabelIds({ category_ids: [3, 1, 3] }), [3, 1]);
   assert.deepEqual(readAnnotationLabelIds({ category_id: 7 }), [7]);
+  assert.deepEqual(readAnnotationLabelIds({ classification: { category_ids: [8, 8, 3] } }), [8, 3]);
   assert.deepEqual(readAnnotationLabelIds({}), []);
 });
 
@@ -35,7 +37,12 @@ test("resolvePendingAnnotation keeps pending entry when draft and committed stat
   const committedState = { labelIds: [9], status: "labeled" };
 
   assert.equal(areSelectionStatesEqual(draftState, committedState), false);
-  assert.deepEqual(resolvePendingAnnotation(draftState, committedState), draftState);
+  assert.deepEqual(resolvePendingAnnotation(draftState, committedState), {
+    labelIds: [],
+    status: "unlabeled",
+    objects: [],
+    imageBasis: null,
+  });
 });
 
 test("canSubmitWithStates allows non-edit clear-label submission", () => {
@@ -87,4 +94,14 @@ test("canSubmitWithStates allows submit whenever staged edits exist", () => {
     }),
     true,
   );
+});
+
+test("readAnnotationObjects resolves bbox and polygon objects", () => {
+  const objects = readAnnotationObjects({
+    objects: [
+      { id: "bbox-1", kind: "bbox", category_id: 3, bbox: [1, 2, 3, 4] },
+      { id: "poly-1", kind: "polygon", category_id: 4, segmentation: [[0, 0, 4, 0, 2, 2]] },
+    ],
+  });
+  assert.equal(objects.length, 2);
 });

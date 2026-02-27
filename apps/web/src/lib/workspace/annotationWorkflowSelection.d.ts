@@ -1,8 +1,11 @@
 import type { AnnotationStatus } from "../api";
+import type { GeometryObject, ImageBasis } from "./annotationState";
 
 export interface PendingAnnotationLike {
   labelIds: number[];
   status: AnnotationStatus;
+  objects?: GeometryObject[];
+  imageBasis?: ImageBasis | null;
 }
 
 export interface AnnotationLike {

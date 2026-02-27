@@ -11,7 +11,10 @@ class Base(DeclarativeBase):
 
 
 class TaskType(str, enum.Enum):
+    classification = "classification"
     classification_single = "classification_single"
+    bbox = "bbox"
+    segmentation = "segmentation"
 
 
 class AnnotationStatus(str, enum.Enum):
@@ -33,7 +36,7 @@ class Project(Base):
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     name: Mapped[str] = mapped_column(String, nullable=False)
-    task_type: Mapped[TaskType] = mapped_column(Enum(TaskType), default=TaskType.classification_single)
+    task_type: Mapped[TaskType] = mapped_column(Enum(TaskType, name="tasktype"), default=TaskType.classification_single)
     schema_version: Mapped[str] = mapped_column(String, default="1.0.0")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

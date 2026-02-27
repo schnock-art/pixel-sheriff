@@ -27,6 +27,13 @@ Local-first CV annotation platform.
   - edit-mode staged state persistence across asset switches
 - API upload now derives image `width`/`height` when detectable from uploaded bytes.
 - API error responses now use a structured shape (`error.code`, `error.message`, `error.details`) for better UI diagnostics.
+- Bounding box and polygon segmentation annotation tools are now wired end-to-end (draw/select/delete/submit/export).
+- COCO export now includes geometry records (`bbox`, `segmentation`, `area`) for object annotations.
+- Project-level task mode is now enforced (`classification_single`, `bbox`, `segmentation`) and selected during new-project import.
+- Labels and geometry overlays now use deterministic class-based colors.
+- Bounding-box interaction now supports move + resize (corner and edge-midpoint handles), plus inline draft warnings.
+- Polygon closing is now more forgiving (`near-start`, double-click, or `Enter`) with draft-status guidance.
+- Classification mode now includes explicit "Clear Selected Labels" and an assigned-label summary line.
 
 ## Stack
 
@@ -41,6 +48,7 @@ Local-first CV annotation platform.
 - Dataset/project browsing with search
 - Local folder import with one modal:
   - import into existing or new project
+  - select task mode when creating a new project (`classification_single`, `bbox`, `segmentation`)
   - optional existing folder/subfolder target for existing projects
   - editable destination folder name
   - inline validation hints/errors for project and folder fields
@@ -84,6 +92,9 @@ Local-first CV annotation platform.
   - create labels
   - manage labels (rename/reorder/activate/deactivate)
   - project-scoped multi-label toggle (editable only in Manage Labels mode)
+  - deterministic class-based colors for label rows/chips
+  - clear selected labels action in classification mode
+  - assigned-label summary (`Assigned: ...`) for immediate visual confirmation
 - Annotation flow:
   - edit mode staging
   - staged edits persist while navigating between assets until submitted or reset
@@ -91,11 +102,18 @@ Local-first CV annotation platform.
   - direct single-submit path when not staging
   - status values: `unlabeled`, `labeled`, `skipped`, `needs_review`, `approved`
   - keyboard label selection by class index (`1..9`, top row and numpad)
-- Bounding Boxes and Segmentation tabs are currently UI placeholders (no drawing/submit tooling yet).
+- Geometry tools:
+  - Bounding box mode: draw by drag, select existing boxes, move by drag, resize via 8 handles (corners + edge midpoints), delete selected (`Delete`), cancel draft (`Esc`)
+  - Segmentation mode (polygon v1): click to add vertices, close polygon near start-point, by double-click, or with `Enter`; delete selected and cancel draft (`Esc`)
+  - project task mode locks available annotation tabs/actions
+  - Geometry class assignment uses the same project label set
+  - Geometry edits participate in the same pending/edit-mode submit workflow as classification edits
+  - Inline draft warnings clarify when geometry is not committed yet
 - COCO-style export:
   - export record creation/listing
   - deterministic zip artifact with `manifest.json`, `annotations.json`, and `images/`
   - one-click download from web UI
+  - geometry export records include `bbox`, `segmentation`, and computed `area`
 
 ## Run Locally
 
@@ -157,9 +175,13 @@ docker compose up --build
 ## Known Gaps
 
 - Review/QA workflow
-- Bounding boxes and segmentation tools
+- Geometry tooling polish (no polygon vertex dragging/edit yet)
 - MAL implementation beyond placeholder endpoints
 - Shared-asset reference mode (upload-once/link-many)
+
+## Active Known Issue
+
+- Intermittent annotation submit `404` can still occur in stale project/asset contexts (for example after project/asset churn while staged state exists). Investigation is ongoing.
 
 ## Troubleshooting
 
@@ -171,3 +193,7 @@ docker compose up --build
 - Local read failures (`AbortError`/`NotReadableError`):
   - Files are often cloud placeholders (for example OneDrive "online-only")
   - Move/sync images to a true local directory and re-import
+
+- Annotation submit `404`:
+  - Usually means the selected project/asset pair no longer matches server state.
+  - Refresh the page, reselect the dataset, and verify the asset is still present in the tree before submitting again.

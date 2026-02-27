@@ -94,17 +94,18 @@ export async function apiPostForm<T>(path: string, formData: FormData): Promise<
 }
 
 export type AnnotationStatus = "unlabeled" | "labeled" | "skipped" | "needs_review" | "approved";
+export type ProjectTaskType = "classification" | "classification_single" | "bbox" | "segmentation";
 
 export interface Project {
   id: string;
   name: string;
-  task_type: string;
+  task_type: ProjectTaskType;
   schema_version: string;
 }
 
 export interface ProjectCreatePayload {
   name: string;
-  task_type?: "classification_single";
+  task_type?: ProjectTaskType;
 }
 
 export interface Category {

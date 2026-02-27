@@ -1,5 +1,10 @@
+import os
+
 from httpx import ASGITransport, AsyncClient
 import pytest_asyncio
+
+os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:////tmp/pixel_sheriff_test.db")
+os.environ.setdefault("STORAGE_ROOT", "/tmp/pixel_sheriff_test_data")
 
 from sheriff_api.db.models import Base
 from sheriff_api.db.session import engine

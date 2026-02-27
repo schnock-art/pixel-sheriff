@@ -55,10 +55,13 @@ Status reflects current repository behavior.
   - [x] manage labels (rename/reorder/activate/deactivate)
   - [x] project-scoped multi-label toggle (managed in label manage mode)
   - [x] add-label input visible only in manage mode
+  - [x] clear selected labels action (classification mode)
+  - [x] assigned-label summary visibility (`Assigned: ...`) for current image
 - [x] Annotation UX:
   - [x] edit mode staging
   - [x] batch submit staged changes
   - [x] non-edit single submit path
+  - [x] inline draft warnings for uncommitted bbox/polygon geometry
 - [x] Keyboard navigation with arrow keys
 - [x] Keyboard labeling shortcuts (`1..9`, top-row and numpad)
 - [x] Delete UX:
@@ -75,6 +78,38 @@ Status reflects current repository behavior.
 - [x] Changelog maintained for major feature increments
 
 ## In Progress / Next
+
+### Open Bugfixes
+- [ ] Investigate intermittent `POST /projects/{project_id}/annotations` `404` in some submit flows:
+  - [ ] identify stale project/asset context transitions that can leave invalid staged entries
+  - [ ] harden submit path with stale-entry pruning and clearer user-facing error recovery
+  - [ ] add regression coverage around project/asset churn + staged submit
+- [ ] Fix label assignment persistence across all annotation modes:
+  - [ ] classification labels sometimes fail to persist after submit
+  - [ ] bounding-box object class/category assignment sometimes fails to persist
+  - [ ] segmentation object class/category assignment sometimes fails to persist
+  - [ ] add reproducible regression tests covering import -> assign label/class -> submit -> reload
+  - [ ] document exact repro cases and resolution notes in `CHANGELOG.md`
+  - [ ] Bugfix execution steps:
+    - [x] Step 1: add failing end-to-end regression tests first (classification, bbox, segmentation)
+      - [x] Added API regressions in `apps/api/tests/test_api.py`:
+        - [x] `test_regression_classification_preserves_label_when_classification_block_empty`
+        - [x] `test_regression_bbox_preserves_class_from_object_when_classification_block_empty`
+        - [x] `test_regression_segmentation_preserves_class_from_object_when_classification_block_empty`
+      - [x] Baseline captured: all three regressions currently fail (label/class dropped to empty on persist)
+    - [x] Step 2: capture/compare submit payload vs persisted payload to isolate drop point
+      - [x] Confirmed drop happens in API normalization path (`apps/api/src/sheriff_api/services/annotation_payload.py:229`):
+        - [x] when `classification` object exists, server reads only `classification.category_ids` / `classification.primary_category_id`
+        - [x] top-level `category_ids`/`category_id` and geometry object categories are not used as fallback in that branch
+      - [x] Regression evidence:
+        - [x] submit payload includes top-level class (`category_ids=[id]`) while `classification` is empty
+        - [x] persisted payload returns `category_ids=[]` (and null primary), causing apparent label loss after save/reload
+      - [x] UI symptom amplification confirmed:
+        - [x] committed selection reader prioritizes `classification` block first (`apps/web/src/lib/workspace/annotationState.js:16`)
+        - [x] once API persists empty `classification`, labels appear to flicker/disappear on reload
+    - [ ] Step 3: make web payload building task-type-aware and deterministic for class/category fields
+    - [ ] Step 4: add server-side normalization fallback/guardrails for class/category persistence
+    - [ ] Step 5: run full API/web test suites + manual docker smoke checks before closing
 
 ### Refactor Workstream (Lean + Readable, No Behavior Loss)
 - [x] Baseline code review completed with prioritized findings
@@ -128,6 +163,75 @@ Status reflects current repository behavior.
 - [x] Add API tests for upload destination + relative path behavior
 - [x] Add web integration tests for import -> label -> submit workflow
 - [x] Add regression tests for edit mode + staged persistence
+
+### Bounding Boxes + Segmentation (Design-First, End-to-End)
+- [x] Lock annotation contract v2 (backward-compatible with current classification payloads):
+  - [x] Keep current classification fields readable (`category_id`, `category_ids`, status flow)
+  - [x] Add object-level entries for geometry with stable IDs per object
+  - [x] Store geometry in image-pixel coordinates (`bbox` as `[x, y, width, height]`, polygons as flat point arrays)
+  - [x] Persist per-asset canvas basis (`image_width`, `image_height`) for deterministic export math
+- [x] API schema + validation hardening for geometry payloads:
+  - [x] Add typed Pydantic models/unions for bbox and segmentation objects
+  - [x] Validate project/asset/category consistency for every geometry object
+  - [x] Validate geometry integrity (`>= 0`, within image bounds, valid polygon point count, non-empty instances)
+  - [x] Return stable structured error codes for geometry validation failures
+- [x] Web annotation-mode architecture:
+  - [x] Replace static tab buttons with real mode state (`labels`, `bbox`, `segmentation`)
+  - [x] Add viewer overlay layer with image-space <-> client-space transforms
+  - [x] Add reusable geometry draft/selection state helpers under `apps/web/src/lib/workspace/*`
+  - [x] Preserve existing classification edit-mode and staged-submit behavior unchanged
+- [x] Bounding box workflow:
+  - [x] Draw new box (drag gesture), select existing box, delete selected box
+  - [x] Move existing box by drag
+  - [x] Resize existing box using corner + edge-midpoint handles
+  - [x] Assign/edit class per box using existing project labels
+  - [x] Support multiple boxes per asset with clear active-object affordance
+  - [x] Include keyboard affordances (`Esc` cancel draft, `Delete` remove selected object)
+- [x] Segmentation workflow (polygon v1):
+  - [x] Create polygon by click-to-add points, close by click-near-start, double-click, or `Enter`
+  - [x] Select polygon and delete selected polygon
+  - [x] Assign/edit class per polygon using existing project labels
+  - [x] Include draft-cancel flow (`Esc`) and minimum-point guardrails
+- [x] Annotation submit integration:
+  - [x] Extend annotation submission helpers to emit classification/bbox/segmentation payloads
+  - [x] Keep pending/staged behavior explicit across asset switches for geometry edits
+  - [x] Extend tree/pagination dirty indicators to include geometry pending edits
+  - [x] Ensure non-edit single submit and edit-mode batch submit both support geometry
+- [x] COCO export upgrade:
+  - [x] Export bbox instances into COCO `annotations[*].bbox`
+  - [x] Export polygon instances into COCO `annotations[*].segmentation`
+  - [x] Compute/populate COCO `area`, `bbox`, and `iscrowd` consistently for geometry records
+  - [x] Keep deterministic hash/ordering guarantees for mixed classification + geometry exports
+- [x] Testing block expansion:
+  - [x] API tests:
+    - [x] geometry upsert acceptance/rejection cases (invalid bounds, invalid polygons, wrong category/project)
+    - [x] export payload correctness for bbox-only, seg-only, and mixed assets
+    - [x] deterministic export hash stability for equivalent geometry payloads
+  - [x] Web tests:
+    - [x] unit tests for geometry math helpers (normalization, bbox/polygon area, hit-testing)
+    - [x] integration tests for bbox draw -> label -> submit -> persisted reload
+    - [x] integration tests for polygon draw -> label -> submit -> persisted reload
+    - [x] regression tests confirming classification-only flows remain unchanged
+- [x] Docs + release notes:
+  - [x] Update `Architecture.md` (data contract, UI flows, export semantics)
+  - [x] Update `README.md` (user workflow + known limitations)
+  - [x] Update `Roadplan.md` milestone state for bbox/segmentation progress
+  - [x] Add `CHANGELOG.md` entries for API, web, exporter, and test coverage increments
+
+### Project Task Mode + Class Color System
+- [x] Enforce per-project annotation task mode at API level:
+  - [x] support explicit project task types for `classification`, `bbox`, and `segmentation`
+  - [x] reject incompatible annotation payloads for project task mode with stable error codes
+  - [x] add API tests for task-mode enforcement
+- [x] Enforce per-project task mode at UI level:
+  - [x] lock available annotation tabs/actions to the selected project task mode
+  - [x] set task mode during new-project import flow
+  - [x] keep existing projects backward-compatible
+- [x] Class color mapping:
+  - [x] deterministic per-class color assignment
+  - [x] colorized label buttons/list rows by class
+  - [x] colorized bbox/polygon overlays and geometry object list by class
+  - [x] add tests for class-color helper determinism/range
 
 ## Deferred (Roadmap-aligned)
 - [ ] Review/QA mode

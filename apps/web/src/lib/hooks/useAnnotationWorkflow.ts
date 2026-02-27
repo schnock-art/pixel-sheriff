@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
+import { useCallback, useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
 
 import { upsertAnnotation, type Annotation, type AnnotationStatus } from "../api";
 import {
@@ -10,13 +10,38 @@ import {
   canSubmitWithStates,
   deriveNextAnnotationStatus,
   getCommittedSelectionState,
+  normalizeAnnotationObjects,
+  normalizeImageBasis,
   normalizeLabelIds,
   resolvePendingAnnotation,
 } from "../workspace/annotationState";
 
+export interface GeometryBBoxObject {
+  id: string;
+  kind: "bbox";
+  category_id: number;
+  bbox: number[];
+}
+
+export interface GeometryPolygonObject {
+  id: string;
+  kind: "polygon";
+  category_id: number;
+  segmentation: number[][];
+}
+
+export type GeometryObject = GeometryBBoxObject | GeometryPolygonObject;
+
+export interface ImageBasis {
+  width: number;
+  height: number;
+}
+
 export interface PendingAnnotation {
   labelIds: number[];
   status: AnnotationStatus;
+  objects: GeometryObject[];
+  imageBasis: ImageBasis | null;
 }
 
 interface LabelRow {
@@ -26,7 +51,7 @@ interface LabelRow {
 
 interface UseAnnotationWorkflowParams {
   selectedProjectId: string | null;
-  currentAsset: { id: string } | null;
+  currentAsset: { id: string; width: number | null; height: number | null } | null;
   annotationByAssetId: Map<string, Annotation>;
   activeLabelRows: LabelRow[];
   multiLabelEnabled: boolean;
@@ -34,6 +59,17 @@ interface UseAnnotationWorkflowParams {
   setEditMode: Dispatch<SetStateAction<boolean>>;
   setAnnotations: Dispatch<SetStateAction<Annotation[]>>;
   setMessage: Dispatch<SetStateAction<string | null>>;
+}
+
+function resolveFallbackImageBasis(currentAsset: UseAnnotationWorkflowParams["currentAsset"]): ImageBasis | null {
+  if (!currentAsset) return null;
+  if (typeof currentAsset.width !== "number" || currentAsset.width <= 0) return null;
+  if (typeof currentAsset.height !== "number" || currentAsset.height <= 0) return null;
+  return { width: Math.round(currentAsset.width), height: Math.round(currentAsset.height) };
+}
+
+function normalizeGeometryObjectInput(objects: GeometryObject[] | undefined): GeometryObject[] {
+  return normalizeAnnotationObjects(objects ?? []) as GeometryObject[];
 }
 
 export function useAnnotationWorkflow({
@@ -51,6 +87,30 @@ export function useAnnotationWorkflow({
   const [currentStatus, setCurrentStatus] = useState<AnnotationStatus>("unlabeled");
   const [pendingAnnotations, setPendingAnnotations] = useState<Record<string, PendingAnnotation>>({});
   const [isSaving, setIsSaving] = useState(false);
+  const [selectedObjectId, setSelectedObjectId] = useState<string | null>(null);
+  const [currentImageBasis, setCurrentImageBasis] = useState<ImageBasis | null>(null);
+
+  const currentCommittedSelectionState = useMemo(
+    () => getCommittedSelectionState(currentAsset ? annotationByAssetId.get(currentAsset.id) : null),
+    [annotationByAssetId, currentAsset],
+  );
+  const currentPendingAnnotation = currentAsset ? pendingAnnotations[currentAsset.id] ?? null : null;
+  const fallbackImageBasis = useMemo(() => resolveFallbackImageBasis(currentAsset), [currentAsset]);
+
+  const currentObjects = useMemo(
+    () =>
+      normalizeGeometryObjectInput(
+        currentPendingAnnotation?.objects ?? (currentCommittedSelectionState.objects as GeometryObject[]) ?? [],
+      ),
+    [currentCommittedSelectionState.objects, currentPendingAnnotation],
+  );
+  const currentResolvedImageBasis = useMemo(
+    () =>
+      normalizeImageBasis(
+        currentImageBasis ?? currentPendingAnnotation?.imageBasis ?? currentCommittedSelectionState.imageBasis ?? fallbackImageBasis,
+      ) as ImageBasis | null,
+    [currentCommittedSelectionState.imageBasis, currentImageBasis, currentPendingAnnotation, fallbackImageBasis],
+  );
 
   useEffect(() => {
     const nextSelection = resolveSelectionForAsset({
@@ -61,6 +121,18 @@ export function useAnnotationWorkflow({
     setCurrentStatus(nextSelection.status);
     setSelectedLabelIds(nextSelection.labelIds);
   }, [annotationByAssetId, currentAsset, pendingAnnotations]);
+
+  useEffect(() => {
+    setCurrentImageBasis(null);
+    setSelectedObjectId(null);
+  }, [currentAsset?.id]);
+
+  useEffect(() => {
+    if (!selectedObjectId) return;
+    if (!currentObjects.some((item) => item.id === selectedObjectId)) {
+      setSelectedObjectId(null);
+    }
+  }, [currentObjects, selectedObjectId]);
 
   useEffect(() => {
     if (multiLabelEnabled) return;
@@ -85,17 +157,15 @@ export function useAnnotationWorkflow({
   }, [multiLabelEnabled, selectedLabelIds]);
 
   const pendingCount = Object.keys(pendingAnnotations).length;
-  const currentCommittedSelectionState = useMemo(
-    () => getCommittedSelectionState(currentAsset ? annotationByAssetId.get(currentAsset.id) : null),
-    [annotationByAssetId, currentAsset],
-  );
   const currentDraftSelectionState = useMemo(() => {
     const resolvedLabelIds = resolveActiveSelection(selectedLabelIds, activeLabelRows);
     return {
       labelIds: resolvedLabelIds,
-      status: deriveNextAnnotationStatus(currentStatus, resolvedLabelIds),
+      status: deriveNextAnnotationStatus(currentStatus, resolvedLabelIds, currentObjects.length),
+      objects: currentObjects,
+      imageBasis: currentResolvedImageBasis,
     };
-  }, [activeLabelRows, currentStatus, selectedLabelIds]);
+  }, [activeLabelRows, currentObjects, currentResolvedImageBasis, currentStatus, selectedLabelIds]);
 
   const canSubmit = canSubmitWithStates({
     pendingCount,
@@ -105,24 +175,39 @@ export function useAnnotationWorkflow({
     committedState: currentCommittedSelectionState,
   });
 
-  function stageLabelSelection(nextLabelIds: number[]) {
+  function stageCurrentDraft(nextDraft: PendingAnnotation) {
     if (!currentAsset) return;
-    const normalizedLabelIds = normalizeLabelIds(nextLabelIds);
-    const draftState: PendingAnnotation = {
-      labelIds: normalizedLabelIds,
-      status: deriveNextAnnotationStatus(currentStatus, normalizedLabelIds),
-    };
-    const committedState = getCommittedSelectionState(annotationByAssetId.get(currentAsset.id));
-    const nextPending = resolvePendingAnnotation(draftState, committedState);
 
-    setSelectedLabelIds(draftState.labelIds);
-    setCurrentStatus(draftState.status);
+    const committedRaw = getCommittedSelectionState(annotationByAssetId.get(currentAsset.id));
+    const committedState: PendingAnnotation = {
+      labelIds: committedRaw.labelIds,
+      status: committedRaw.status,
+      objects: normalizeGeometryObjectInput(committedRaw.objects as GeometryObject[]),
+      imageBasis: (normalizeImageBasis(committedRaw.imageBasis ?? fallbackImageBasis) as ImageBasis | null) ?? null,
+    };
+    const nextPending = resolvePendingAnnotation(nextDraft, committedState) as PendingAnnotation | null;
+
     setPendingAnnotations((previous) => {
       const next = { ...previous };
       if (nextPending) next[currentAsset.id] = nextPending;
       else delete next[currentAsset.id];
       return next;
     });
+  }
+
+  function stageLabelSelection(nextLabelIds: number[]) {
+    if (!currentAsset) return;
+    const normalizedLabelIds = normalizeLabelIds(nextLabelIds);
+    const draftState: PendingAnnotation = {
+      labelIds: normalizedLabelIds,
+      status: deriveNextAnnotationStatus(currentStatus, normalizedLabelIds, currentObjects.length),
+      objects: currentObjects,
+      imageBasis: currentResolvedImageBasis,
+    };
+
+    setSelectedLabelIds(draftState.labelIds);
+    setCurrentStatus(draftState.status);
+    stageCurrentDraft(draftState);
   }
 
   function getNextToggledLabels(labelId: number): number[] {
@@ -139,6 +224,55 @@ export function useAnnotationWorkflow({
     stageLabelSelection(getNextToggledLabels(id));
   }
 
+  function clearSelectedLabels() {
+    if (!currentAsset) return;
+    stageLabelSelection([]);
+  }
+
+  function stageGeometry(nextObjects: GeometryObject[], nextImageBasis: ImageBasis | null = currentResolvedImageBasis) {
+    if (!currentAsset) return;
+
+    const resolvedLabelIds = resolveActiveSelection(selectedLabelIds, activeLabelRows);
+    const normalizedObjects = normalizeGeometryObjectInput(nextObjects);
+    const normalizedBasis = (normalizeImageBasis(nextImageBasis) as ImageBasis | null) ?? null;
+    const draftState: PendingAnnotation = {
+      labelIds: resolvedLabelIds,
+      status: deriveNextAnnotationStatus(currentStatus, resolvedLabelIds, normalizedObjects.length),
+      objects: normalizedObjects,
+      imageBasis: normalizedBasis,
+    };
+
+    setSelectedLabelIds(resolvedLabelIds);
+    setCurrentStatus(draftState.status);
+    setCurrentImageBasis(normalizedBasis);
+    stageCurrentDraft(draftState);
+  }
+
+  function upsertGeometryObject(object: GeometryObject) {
+    const existingIndex = currentObjects.findIndex((item) => item.id === object.id);
+    const next = currentObjects.slice();
+    if (existingIndex >= 0) next[existingIndex] = object;
+    else next.push(object);
+    stageGeometry(next);
+    setSelectedObjectId(object.id);
+  }
+
+  function deleteSelectedGeometryObject() {
+    if (!selectedObjectId) return;
+    const next = currentObjects.filter((object) => object.id !== selectedObjectId);
+    stageGeometry(next);
+    setSelectedObjectId(null);
+  }
+
+  function assignSelectedGeometryCategory(categoryId: number) {
+    if (!selectedObjectId) return;
+    const next = currentObjects.map((object) =>
+      object.id === selectedObjectId ? { ...object, category_id: categoryId } : object,
+    );
+    stageGeometry(next);
+    setSelectedLabelIds([categoryId]);
+  }
+
   async function submitSingleAnnotation() {
     if (!selectedProjectId || !currentAsset) {
       setMessage("Select a dataset and asset before submitting.");
@@ -150,6 +284,8 @@ export function useAnnotationWorkflow({
       currentStatus,
       selectedLabelIds,
       activeLabelRows,
+      objects: currentObjects,
+      imageBasis: currentResolvedImageBasis,
     });
     if (!upsertInput) {
       setMessage("Selected label could not be resolved.");
@@ -194,6 +330,8 @@ export function useAnnotationWorkflow({
         currentStatus: pending.status,
         selectedLabelIds: pending.labelIds,
         activeLabelRows,
+        objects: pending.objects,
+        imageBasis: pending.imageBasis,
       });
       if (!upsertInput) continue;
 
@@ -212,6 +350,7 @@ export function useAnnotationWorkflow({
     });
     setPendingAnnotations({});
     setEditMode(false);
+    setSelectedObjectId(null);
     setMessage(`Submitted ${saved.length} staged annotations.`);
   }
 
@@ -231,10 +370,26 @@ export function useAnnotationWorkflow({
     }
   }
 
+  const updateCurrentImageBasis = useCallback(
+    (nextImageBasis: ImageBasis | null) => {
+      const normalizedBasis = (normalizeImageBasis(nextImageBasis) as ImageBasis | null) ?? null;
+      setCurrentImageBasis(normalizedBasis);
+
+      // Avoid restaging pure classification selections on image-basis updates.
+      // This prevents selection flicker/reset in label mode while keeping geometry basis synced.
+      if (!currentAsset) return;
+      if (currentObjects.length === 0) return;
+      stageGeometry(currentObjects, normalizedBasis);
+    },
+    [currentAsset, currentObjects, stageGeometry],
+  );
+
   function resetAnnotationWorkflow() {
     setSelectedLabelIds([]);
     setCurrentStatus("unlabeled");
     setPendingAnnotations({});
+    setSelectedObjectId(null);
+    setCurrentImageBasis(null);
   }
 
   return {
@@ -247,7 +402,16 @@ export function useAnnotationWorkflow({
     pendingCount,
     canSubmit,
     isSaving,
+    currentObjects,
+    selectedObjectId,
+    setSelectedObjectId,
+    currentImageBasis: currentResolvedImageBasis,
+    setCurrentImageBasis: updateCurrentImageBasis,
     handleToggleLabel,
+    clearSelectedLabels,
+    assignSelectedGeometryCategory,
+    upsertGeometryObject,
+    deleteSelectedGeometryObject,
     handleSubmit,
     resetAnnotationWorkflow,
   };

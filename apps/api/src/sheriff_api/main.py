@@ -4,9 +4,10 @@ from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 from fastapi import HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
 
 from sheriff_api.config import get_settings
-from sheriff_api.db.models import Base
+from sheriff_api.db.models import Base, TaskType
 from sheriff_api.db.session import engine
 from sheriff_api.errors import http_exception_handler, request_validation_exception_handler
 from sheriff_api.routers import annotations, assets, categories, exports, health, models, projects
@@ -23,6 +24,9 @@ def parse_cors_origins(raw: str) -> list[str]:
 async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        if engine.dialect.name == "postgresql":
+            for value in TaskType:
+                await conn.execute(text(f"ALTER TYPE tasktype ADD VALUE IF NOT EXISTS '{value.value}'"))
     yield
 
 

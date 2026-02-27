@@ -13,7 +13,8 @@ Primary workflow:
 1. Select or create a project.
 2. Import a local folder into a project/folder destination.
 3. API persists image bytes to local storage and records asset metadata in Postgres.
-4. Annotate in classification mode (single-label or project-wide multi-label).
+4. Annotate in classification, bounding-box, or polygon-segmentation mode.
+   - active mode is locked per project by `project.task_type`
 5. Submit staged edits (or submit single-image edits directly).
 6. Generate and download a COCO-style export zip.
 
@@ -57,6 +58,10 @@ Key invariants:
 
 - One annotation row per asset (`annotations.asset_id` unique)
 - Category IDs are stable identities; label edits mutate name/order/active only
+- Project task mode governs accepted annotation payload shape:
+  - `classification` / `classification_single`: no geometry objects
+  - `bbox`: bbox objects only
+  - `segmentation`: polygon objects only
 
 ### Storage
 
@@ -106,6 +111,13 @@ Projects:
 - `GET /api/v1/projects`
 - `GET /api/v1/projects/{project_id}`
 - `DELETE /api/v1/projects/{project_id}`
+
+Project `task_type` values supported by API:
+
+- `classification` (legacy compatibility)
+- `classification_single`
+- `bbox`
+- `segmentation`
 
 Categories:
 
@@ -182,14 +194,17 @@ Workspace pure helpers (`apps/web/src/lib/workspace/*`):
 - `hotkeys.*`: keyboard shortcut parsing/routing for navigation and label selection
 - `deleteState.*`: pure selection/pruning helpers for bulk and folder-scope delete flows
 - `annotationSubmission.*`: payload construction helpers for single/staged annotation submit paths
+- `geometry.*`: image/viewport coordinate transforms, geometry math, and hit-testing helpers
 - `importDialog.*`: import form validation and default-resolution helpers for mode/project/folder destination
 - `importFiles.*`: image candidate filtering and import relative-path construction helpers
 - `annotationWorkflowSelection.*`: current-asset selection resolution across pending vs committed annotation state
+- `classColors.*`: deterministic class-to-color mapping for label chips and geometry overlays
 
 ### Implemented UX Behaviors
 
 - Import dialog supports:
   - existing vs new project target
+  - task-type selection when creating a new project
   - optional existing folder/subfolder target
   - editable folder path
   - inline field validation hints/errors
@@ -213,6 +228,7 @@ Workspace pure helpers (`apps/web/src/lib/workspace/*`):
   - bounded responsive viewport height
   - keyboard `ArrowLeft`/`ArrowRight`
   - skip controls: `-10`, `-5`, `<`, `>`, `+5`, `+10`
+  - geometry overlay for bbox/polygon rendering and drawing interactions
 - Pagination behavior:
   - width-adaptive page-token window
   - `First`/`Last` chips
@@ -221,24 +237,44 @@ Workspace pure helpers (`apps/web/src/lib/workspace/*`):
 - Label panel behavior:
   - manage mode for create/rename/reorder/activate/deactivate
   - project multi-label toggle only editable in manage mode
+  - classification mode includes explicit `Clear Selected Labels`
+  - classification mode surfaces assigned-label summary for current image
   - edit mode stages multi-asset changes
   - staged edits persist when switching assets and restore when returning to an asset with pending state
   - submit commits staged changes in batch
   - number-key shortcuts (`1..9`, top row and numpad) map to active label order
-  - Bounding Boxes and Segmentation tabs are currently placeholders only
+  - mode tabs switch between `labels`, `bbox`, and `segmentation`
+  - mode tabs/actions are locked by project task mode
+  - in bbox/seg modes, class buttons assign the selected geometry object category
+  - selected geometry object can be deleted from panel or keyboard (`Delete`)
+- Geometry authoring behavior:
+  - bbox mode: drag to draw, click to select, drag selected box to move, drag corner/edge handles to resize, `Esc` to cancel draft
+  - segmentation mode (polygon v1): click to add points, close near start-point, by double-click, or with `Enter`; `Esc` to cancel draft
+  - geometry edits join existing pending/edit-mode submit workflow
+  - inline draft-status warnings are shown while geometry is uncommitted
 - Feedback behavior:
   - auto-dismiss toast message for success/error summaries
   - delete summaries include removed image and annotation counts
 
 ## 6. Annotation Payload Contract
 
-Classification payload includes:
+Annotation payload is normalized to a backward-compatible v2 shape:
 
-- `type: "classification"`
-- `category_id` (primary label)
-- `category_ids` (multi-label-compatible)
-- `category_name`
-- `coco` object with at least `image_id` and `category_id`
+- `version: "2.0"`
+- legacy-compatible classification fields:
+  - `type: "classification"`
+  - `category_id` (primary label)
+  - `category_ids` (multi-label-compatible)
+- v2 classification block:
+  - `classification.category_ids`
+  - `classification.primary_category_id`
+- geometry object list:
+  - bbox object: `{ id, kind: "bbox", category_id, bbox: [x, y, width, height] }`
+  - polygon object: `{ id, kind: "polygon", category_id, segmentation: [[x1, y1, ...]] }`
+- optional `image_basis` (`width`/`height`) for deterministic geometry bounds
+- `coco` compatibility block with `image_id` / `category_id`
+
+Annotation payload normalization enforces project task mode compatibility before persistence and returns stable structured error codes on mismatch.
 
 Supported statuses:
 
@@ -254,12 +290,14 @@ Supported statuses:
 - Coverage includes:
   - import -> label -> submit workflow composition checks
   - edit-mode staged state persistence regression checks
-  - helper-level regressions for hotkeys, delete flows, tree/pagination, import defaults, and annotation state transitions
+  - helper-level regressions for hotkeys, delete flows, tree/pagination, import defaults, annotation state transitions, and geometry math helpers
 - API test suite uses `pytest` with `httpx` ASGI client fixtures in `apps/api/tests`.
+- API coverage includes geometry validation and COCO export geometry record assertions.
 
 ## 8. Known Gaps
 
 - Review/QA moderation workflow not implemented
-- Bounding box and segmentation tooling not implemented
+- Geometry tooling polish pending (no polygon vertex dragging/editing yet)
 - Auth/multi-user permissions not implemented
 - MAL routes are placeholders only
+- Active bug investigation: intermittent annotation submit `404` can occur in stale project/asset submit contexts

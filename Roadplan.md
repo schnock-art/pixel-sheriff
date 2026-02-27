@@ -10,7 +10,7 @@ labeling -> training -> deployment.
 - `M0` foundation: done
 - `M1` project/category management: mostly done
 - `M2` image ingestion/storage: done for local workflow
-- `M3` labeling workstation: in progress (core loop implemented)
+- `M3` labeling workstation: in progress (core loop implemented, active submit-context `404` investigation)
 - `M4+` review/export hardening/video/MAL: pending
 
 ## Guiding Principles
@@ -62,7 +62,6 @@ Implemented:
   - per-file read/network/API error details
 
 Remaining:
-- image metadata extraction (`width/height`)
 - optional dedup strategy
 
 ### M3 - Labeling Workstation (In progress)
@@ -74,6 +73,7 @@ Implemented:
 - staged edit mode
 - batch submit staged edits
 - single-label and multi-label assignment
+- explicit clear-label action and assigned-label visibility summary in classification mode
 - hierarchical file tree navigation
 - folder-scoped review selection from tree
 - tree expand/collapse controls (single folder + collapse/expand all)
@@ -85,10 +85,17 @@ Implemented:
 - responsive bounded viewport with black letterbox rendering
 - adaptive pagination window sized to available width
 - COCO-style classification payload fields
+- bounding-box annotation workflow (draw/select/move/resize/delete + class assign)
+- polygon segmentation workflow (draw/close/select/delete + class assign; close by near-start, double-click, or `Enter`)
+- geometry-aware staged/pending submit workflow
+- project task mode enforcement (`classification_single`, `bbox`, `segmentation`) across API + UI
+- deterministic class-based color mapping for labels and geometry overlays
 - toast-style operation summaries including delete counts
+- inline geometry draft warnings in the viewer
 
 Remaining:
-- clearer dirty/staged indicators in queue/tree/pagination
+- investigate intermittent annotation submit `404` during stale project/asset submit contexts
+- geometry edit tooling polish (polygon vertex editing and advanced transforms)
 - stronger submission feedback/summary UX
 
 ### M4 - Review + QA (Planned)
@@ -123,15 +130,17 @@ Remaining:
 - improve multi-select UX and shortcuts
 - strengthen payload validation/rules
 
-### P2 - Bounding boxes
+### P2 - Bounding boxes (Core implemented)
 
-- geometry tools
-- bbox export integration
+- geometry tools (v1) implemented
+- bbox export integration implemented
+- remaining: rotation/advanced transform tooling polish
 
-### P3 - Segmentation/polygons
+### P3 - Segmentation/polygons (Core implemented)
 
-- polygon/mask tools
-- segmentation export support
+- polygon tools (v1) implemented
+- segmentation export support implemented
+- remaining: vertex editing and mask tooling
 
 ### P4 - Model-assisted labeling (MAL)
 
@@ -152,7 +161,8 @@ Support dual ingestion:
 
 ### P7 - Import UX evolution
 
-- improve validation/default memory in import dialog
+- task-type selection for new projects: implemented
+- validation/default memory in import dialog: implemented
 - optional import presets per project
 
 ### P8 - Shared asset library + project-specific labels (feature request)
