@@ -28,7 +28,6 @@ interface UseDeleteWorkflowParams {
   setPendingAnnotations: Dispatch<SetStateAction<Record<string, PendingAnnotation>>>;
   setAssetIndex: Dispatch<SetStateAction<number>>;
   setCollapsedFolders: Dispatch<SetStateAction<Record<string, boolean>>>;
-  setSelectedProjectId: Dispatch<SetStateAction<string | null>>;
   setProjectMultiLabelSettings: Dispatch<SetStateAction<Record<string, boolean>>>;
   setImportExistingProjectId: Dispatch<SetStateAction<string>>;
   setSelectedImportExistingFolder: Dispatch<SetStateAction<string>>;
@@ -38,6 +37,7 @@ interface UseDeleteWorkflowParams {
   setEditMode: Dispatch<SetStateAction<boolean>>;
   refetchAssets: (projectIdOverride?: string | null) => Promise<unknown>;
   refetchProjects: () => Promise<unknown>;
+  onProjectDeleted?: (projectId: string) => Promise<unknown> | unknown;
 }
 
 export function useDeleteWorkflow({
@@ -56,7 +56,6 @@ export function useDeleteWorkflow({
   setPendingAnnotations,
   setAssetIndex,
   setCollapsedFolders,
-  setSelectedProjectId,
   setProjectMultiLabelSettings,
   setImportExistingProjectId,
   setSelectedImportExistingFolder,
@@ -66,6 +65,7 @@ export function useDeleteWorkflow({
   setEditMode,
   refetchAssets,
   refetchProjects,
+  onProjectDeleted,
 }: UseDeleteWorkflowParams) {
   const [isDeletingAssets, setIsDeletingAssets] = useState(false);
   const [isDeletingProject, setIsDeletingProject] = useState(false);
@@ -274,9 +274,9 @@ export function useDeleteWorkflow({
         delete next[projectId];
         return next;
       });
-      setSelectedProjectId(null);
       await refetchProjects();
       await refetchAssets(null);
+      if (onProjectDeleted) await onProjectDeleted(projectId);
       setMessage(
         `Deleted project "${projectName}" (assets removed: ${projectAssetCount}, annotations removed: ${projectAnnotationCount}).`,
       );

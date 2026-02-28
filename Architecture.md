@@ -171,13 +171,21 @@ Error response contract:
 
 ## 5. Web Architecture (`apps/web`)
 
-Main workspace:
+App-router entry and project shell:
 
-- `apps/web/src/app/page.tsx` (composition/wiring)
+- `apps/web/src/app/page.tsx` redirects to `/projects`
+- `apps/web/src/app/projects/page.tsx` resolves last/first project or shows empty-state create flow
+- `apps/web/src/app/projects/[projectId]/layout.tsx` provides:
+  - project selector dropdown + create-project modal
+  - section tabs (`Datasets`, `Models`, `Experiments`, disabled `Deploy`)
+  - project status summary bar
+  - guarded navigation for unsaved drafts
+- `apps/web/src/app/projects/[projectId]/datasets/page.tsx` mounts the datasets workspace
+- models/experiments routes are currently placeholders for Phase 1 UI structure
 
 UI structure:
 
-- Left: project list + hierarchical file tree
+- Left: hierarchical file tree
 - Center: viewer canvas + adaptive pagination + skip/nav controls
 - Right: label panel (label selection + manage mode + edit/submit)
 
@@ -209,6 +217,15 @@ Workspace pure helpers (`apps/web/src/lib/workspace/*`):
 - `importFiles.*`: image candidate filtering and import relative-path construction helpers
 - `annotationWorkflowSelection.*`: current-asset selection resolution across pending vs committed annotation state
 - `classColors.*`: deterministic class-to-color mapping for label chips and geometry overlays
+- `projectRouting.*`: project route section parsing and project-target href generation
+- `navigationGuard.*`: pure unsaved-draft guard decision helper
+
+Workspace container components (`apps/web/src/components/workspace/*`):
+
+- `ProjectAssetsWorkspace.tsx`: datasets UI/workflow integration
+- `ProjectNavigationContext.tsx`: unsaved-draft guard context and guarded navigation wrapper
+- `ProjectCreateModal.tsx`: project creation modal used in shell and empty state
+- `ModelBuilderSkeleton.tsx`: placeholder builder layout for model routes
 
 ### Implemented UX Behaviors
 
@@ -265,6 +282,9 @@ Workspace pure helpers (`apps/web/src/lib/workspace/*`):
 - Feedback behavior:
   - auto-dismiss toast message for success/error summaries
   - delete summaries include removed image and annotation counts
+ - Navigation guard behavior:
+   - when staged/pending edits exist, switching project/section/model builder prompts for discard confirmation
+   - accepted navigation clears draft-guard state before transition
 
 ## 6. Annotation Payload Contract
 
@@ -310,4 +330,5 @@ Supported statuses:
 - Geometry tooling polish pending (no polygon vertex dragging/editing yet)
 - Auth/multi-user permissions not implemented
 - MAL routes are placeholders only
+- Models and Experiments pages are currently Phase 1 placeholders (project-scoped training/experiment backend not yet integrated)
 - Active bug investigation: intermittent annotation submit `404` can occur in stale project/asset submit contexts

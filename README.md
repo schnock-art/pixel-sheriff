@@ -17,8 +17,10 @@ Local-first CV annotation platform.
 - Delete actions now show confirmation summaries in an auto-dismiss toast with counts.
 - Keyboard labeling shortcuts now support number keys (`1..9`) including numpad keys.
 - Workspace internals were refactored:
-  - `page.tsx` now focuses on composition/wiring
-  - annotation, import, and delete workflows moved into dedicated hooks
+  - root route now redirects to project-scoped routes
+  - datasets workspace moved to `apps/web/src/components/workspace/ProjectAssetsWorkspace.tsx`
+  - project shell layout now handles project selector, top tabs, and project status bar
+  - annotation, import, and delete workflows remain in dedicated hooks
   - tree/pagination/annotation-state logic moved into pure workspace helpers with unit tests
 - Review-state visibility improved with explicit staged/dirty indicators in tree rows and pagination chips.
 - Import dialog UX was upgraded with inline validation hints and remembered defaults for mode/project/folder destination.
@@ -41,6 +43,12 @@ Local-first CV annotation platform.
   - class names are normalized to lowercase slug in model-facing/export fields
   - detection/segmentation exports now support explicit negative-image policy (`include_negative_images`)
   - detection COCO annotations now omit `segmentation` instead of emitting empty lists
+- Project-scoped Phase 1 UI refactor is now implemented:
+  - route structure under `/projects/{project_id}/...`
+  - top navigation tabs: `Datasets`, `Models`, `Experiments`, `Deploy` (disabled placeholder)
+  - project selector dropdown with `+ Create Project` modal
+  - datasets `Build Model` CTA routes to model-builder placeholder
+  - unsaved draft guard for project/tab/model navigation
 
 ## Stack
 
@@ -52,7 +60,19 @@ Local-first CV annotation platform.
 
 ## Current Features
 
-- Dataset/project browsing with search
+- Project-scoped workspace shell with route-based navigation:
+  - `/` redirects to `/projects`
+  - `/projects` resolves to the last/first project or shows create-project empty state
+  - project routes:
+    - `/projects/{project_id}/datasets`
+    - `/projects/{project_id}/models`
+    - `/projects/{project_id}/models/new`
+    - `/projects/{project_id}/models/{model_id}`
+    - `/projects/{project_id}/experiments`
+    - `/projects/{project_id}/experiments/{experiment_id}`
+  - top shell project selector + tabs (`Datasets`, `Models`, `Experiments`, disabled `Deploy`)
+  - workspace status line (`images labeled`, `classes`, `models`, `experiments`)
+- Models and Experiments pages are intentional Phase 1 placeholders (no project-scoped training backend yet)
 - Local folder import with one modal:
   - import into existing or new project
   - select task mode when creating a new project (`classification_single`, `bbox`, `segmentation`)
@@ -107,6 +127,7 @@ Local-first CV annotation platform.
   - staged edits persist while navigating between assets until submitted or reset
   - batch submit staged annotations
   - direct single-submit path when not staging
+  - unsaved-draft leave guard on project/tab/model navigation
   - status values: `unlabeled`, `labeled`, `skipped`, `needs_review`, `approved`
   - keyboard label selection by class index (`1..9`, top row and numpad)
 - Geometry tools:
@@ -188,6 +209,7 @@ docker compose up --build
 
 - Review/QA workflow
 - Geometry tooling polish (no polygon vertex dragging/edit yet)
+- Models/Experiments/Deploy are currently UI placeholders in the project shell
 - MAL implementation beyond placeholder endpoints
 - Shared-asset reference mode (upload-once/link-many)
 
@@ -208,4 +230,4 @@ docker compose up --build
 
 - Annotation submit `404`:
   - Usually means the selected project/asset pair no longer matches server state.
-  - Refresh the page, reselect the dataset, and verify the asset is still present in the tree before submitting again.
+  - Refresh the page, reselect the project, and verify the asset is still present in the tree before submitting again.

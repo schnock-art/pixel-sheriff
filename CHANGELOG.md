@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- Project-scoped App Router workspace shell:
+  - `/` -> `/projects` redirect
+  - `/projects` project entry resolver + empty-state create-project flow
+  - `/projects/{project_id}/datasets|models|experiments` route structure
+  - model builder skeleton routes (`/models/new`, `/models/{model_id}`)
+  - experiment detail skeleton route (`/experiments/{experiment_id}`)
+- Global project shell UI:
+  - project selector dropdown
+  - create-project modal
+  - top tabs (`Datasets`, `Models`, `Experiments`, disabled `Deploy`)
+  - project status bar (`images labeled`, `classes`, `models`, `experiments`)
+- Navigation guard utilities and tests:
+  - `apps/web/src/lib/workspace/projectRouting.*`
+  - `apps/web/src/lib/workspace/navigationGuard.*`
+  - `apps/web/tests/projectRouting.test.js`
+  - `apps/web/tests/navigationGuard.test.js`
 - Initial end-to-end labeling workspace UI in `apps/web`.
 - Persistent image upload pipeline:
   - `POST /api/v1/projects/{project_id}/assets/upload`
@@ -84,6 +100,9 @@ All notable changes to this project will be documented in this file.
 - Inline geometry draft warnings in viewer for uncommitted bbox/polygon drafts.
 
 ### Changed
+- Web datasets workspace was moved into `apps/web/src/components/workspace/ProjectAssetsWorkspace.tsx`.
+- Root `apps/web/src/app/page.tsx` is now redirect-only.
+- Project/tab navigation now uses guarded hard transitions to guarantee reliable project activation in shell interactions.
 - Viewer image behavior now preserves aspect ratio with letterbox rendering (`object-fit: contain`) on black background.
 - Viewer layout now keeps a bounded responsive viewport height to avoid pushing controls/panels off-screen.
 - API CORS handling improved for localhost/127.0.0.1 development origins.
@@ -153,6 +172,8 @@ All notable changes to this project will be documented in this file.
 - Annotation payload normalization now preserves class/category assignments when `classification` block is empty but top-level/object category data exists.
 
 ### Fixed
+- Fixed project switch activation bug where selecting another project in the shell dropdown could keep the previous project context.
+- Fixed status-bar labeled-image refresh lag after submit by adding shell status refresh synchronization from datasets workspace.
 - Root route prerender conflict caused by duplicate `/` page definitions.
 - Import flow failures caused by weak file-type assumptions and missing diagnostics.
 - Submit/edit-mode inconsistencies in annotation flow.

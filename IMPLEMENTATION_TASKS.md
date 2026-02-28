@@ -30,10 +30,26 @@ Status reflects current repository behavior.
 - [x] API packaging fixes for `src` layout Docker builds
 
 ### Web (`apps/web`)
-- [x] Main workspace UI integrated at `/`
+- [x] Root route now redirects to `/projects`
+- [x] Project-scoped shell routes implemented:
+  - [x] `/projects/{project_id}/datasets`
+  - [x] `/projects/{project_id}/models`
+  - [x] `/projects/{project_id}/models/new`
+  - [x] `/projects/{project_id}/models/{model_id}`
+  - [x] `/projects/{project_id}/experiments`
+  - [x] `/projects/{project_id}/experiments/{experiment_id}`
+- [x] Project shell UI:
+  - [x] project selector dropdown
+  - [x] create-project modal
+  - [x] section tabs (`Datasets`, `Models`, `Experiments`, disabled `Deploy`)
+  - [x] project status summary bar
+- [x] Datasets workspace extracted to `ProjectAssetsWorkspace`
+- [x] Unsaved-draft guard on project/tab/build-model navigation
+- [x] Build Model CTA routes to model-builder placeholder
+- [x] Models and experiments placeholder pages/skeletons
+- [x] Fixed project switch activation/navigation bug in shell
 - [x] Responsive styling + viewer letterbox rendering
 - [x] Bounded responsive viewport height (stable with large datasets)
-- [x] Dataset sidebar with search
 - [x] Hierarchical file tree with folder/file navigation
 - [x] Import dialog:
   - [x] existing vs new project
@@ -132,7 +148,7 @@ Status reflects current repository behavior.
   - [x] `useDeleteWorkflow`
   - [x] `useAnnotationWorkflow`
   - [x] tree/pagination pure helpers in `apps/web/src/lib/workspace/*`
-- [x] Keep `page.tsx` primarily composition/render wiring
+- [x] Move primary datasets workspace composition/render wiring to `ProjectAssetsWorkspace`
 - [x] Add unit tests for extracted pure tree/pagination helpers
 
 #### P3 - Hook Cleanup
