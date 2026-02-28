@@ -53,6 +53,9 @@ Defined in `apps/api/src/sheriff_api/db/models.py`:
 
 - Core: `Project`, `Category`, `Asset`, `Annotation`, `DatasetVersion`
 - Placeholder MAL domain: `Model`, `Suggestion`
+- Project-scoped model drafts (Phase 1 scaffold) are stored via file-backed records under storage root:
+  - `models/{project_id}/records.json`
+  - implementation: `apps/api/src/sheriff_api/services/model_store.py`
 
 Key invariants:
 
@@ -161,6 +164,13 @@ MAL placeholders:
 - `GET /api/v1/assets/{asset_id}/suggestions`
 - `POST /api/v1/projects/{project_id}/suggestions/batch`
 
+Project-scoped model scaffolding:
+
+- `GET /api/v1/projects/{project_id}/models`
+- `POST /api/v1/projects/{project_id}/models`
+- `GET /api/v1/projects/{project_id}/models/{model_id}`
+- model creation derives deterministic `ModelConfig v1.0` from latest `DatasetVersion.manifest_json` and validates against schema before persistence
+
 Error response contract:
 
 - non-2xx API responses use:
@@ -181,7 +191,9 @@ App-router entry and project shell:
   - project status summary bar
   - guarded navigation for unsaved drafts
 - `apps/web/src/app/projects/[projectId]/datasets/page.tsx` mounts the datasets workspace
-- models/experiments routes are currently placeholders for Phase 1 UI structure
+- `apps/web/src/app/projects/[projectId]/models/page.tsx` renders project-scoped model list/empty state + create flow
+- `apps/web/src/app/projects/[projectId]/models/[modelId]/page.tsx` renders builder scaffold with read-only config summary + back navigation
+- experiments routes are currently placeholders for Phase 1 UI structure
 
 UI structure:
 
@@ -225,7 +237,7 @@ Workspace container components (`apps/web/src/components/workspace/*`):
 - `ProjectAssetsWorkspace.tsx`: datasets UI/workflow integration
 - `ProjectNavigationContext.tsx`: unsaved-draft guard context and guarded navigation wrapper
 - `ProjectCreateModal.tsx`: project creation modal used in shell and empty state
-- `ModelBuilderSkeleton.tsx`: placeholder builder layout for model routes
+- `ModelBuilderSkeleton.tsx`: builder scaffold layout for model routes (stepper + summary + disabled action controls)
 
 ### Implemented UX Behaviors
 
@@ -330,5 +342,6 @@ Supported statuses:
 - Geometry tooling polish pending (no polygon vertex dragging/editing yet)
 - Auth/multi-user permissions not implemented
 - MAL routes are placeholders only
-- Models and Experiments pages are currently Phase 1 placeholders (project-scoped training/experiment backend not yet integrated)
+- Experiment routes are currently placeholders
+- Model routes are scaffolded only (no editable builder fields, no training execution yet)
 - Active bug investigation: intermittent annotation submit `404` can occur in stale project/asset submit contexts

@@ -70,7 +70,7 @@ Implemented:
 - project-scoped workspace navigation:
   - `/projects` entry flow (last/first project resolution or create-project empty state)
   - `/projects/{project_id}/datasets|models|experiments` routing
-  - model/experiment detail skeleton routes
+  - model/experiment detail routes
   - top project selector + section tabs (`Datasets`, `Models`, `Experiments`, disabled `Deploy`)
   - project status line (`images labeled`, `classes`, `models`, `experiments`)
 - viewer navigation (buttons + arrow keys)
@@ -99,12 +99,17 @@ Implemented:
 - toast-style operation summaries including delete counts
 - inline geometry draft warnings in the viewer
 - unsaved draft guard for project/tab/model-builder navigation
+- project-scoped model scaffold flow:
+  - datasets `Build Model` creates model draft and opens detail
+  - models page supports `+ New Model`, empty state, and summary table
+  - model detail shows stepper, read-only summary, and back navigation
 
 Remaining:
 - investigate intermittent annotation submit `404` during stale project/asset submit contexts
 - geometry edit tooling polish (polygon vertex editing and advanced transforms)
 - stronger submission feedback/summary UX
-- integrate real project-scoped data flows for Models/Experiments/Deploy (current pages are placeholders)
+- integrate editable model-builder controls and training execution
+- integrate real project-scoped data flows for Experiments/Deploy (current pages are placeholders)
 
 ### M4 - Review + QA (Planned)
 

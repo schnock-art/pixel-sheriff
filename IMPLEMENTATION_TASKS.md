@@ -26,6 +26,11 @@ Status reflects current repository behavior.
 - [x] Export zip build (`manifest.json`, `coco_instances.json`, `assets/`)
 - [x] Export download endpoint
 - [x] MAL placeholder endpoints (models/suggestions)
+- [x] Project-scoped model scaffold endpoints:
+  - [x] `GET /projects/{project_id}/models`
+  - [x] `POST /projects/{project_id}/models` (manifest-derived deterministic `ModelConfig` + schema validation)
+  - [x] `GET /projects/{project_id}/models/{model_id}`
+  - [x] temporary file-backed model persistence (`models/{project_id}/records.json`)
 - [x] Local storage safety checks (path containment)
 - [x] API packaging fixes for `src` layout Docker builds
 
@@ -45,8 +50,9 @@ Status reflects current repository behavior.
   - [x] project status summary bar
 - [x] Datasets workspace extracted to `ProjectAssetsWorkspace`
 - [x] Unsaved-draft guard on project/tab/build-model navigation
-- [x] Build Model CTA routes to model-builder placeholder
-- [x] Models and experiments placeholder pages/skeletons
+- [x] Build Model CTA creates a project-scoped model draft and opens model detail
+- [x] Models pages scaffolded with list/create/detail + read-only model summary
+- [x] Experiments placeholder pages/skeletons
 - [x] Fixed project switch activation/navigation bug in shell
 - [x] Responsive styling + viewer letterbox rendering
 - [x] Bounded responsive viewport height (stable with large datasets)

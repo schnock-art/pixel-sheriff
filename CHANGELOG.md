@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- Project-scoped model scaffolding flow:
+  - `POST /api/v1/projects/{project_id}/models` builds deterministic `ModelConfig v1.0` from latest dataset manifest and validates schema
+  - `GET /api/v1/projects/{project_id}/models` returns model summaries
+  - `GET /api/v1/projects/{project_id}/models/{model_id}` returns full model record/config
+  - temporary file-backed model persistence under `models/{project_id}/records.json` (explicit TODO to move to DB table)
+- Models UI wiring:
+  - datasets `Build Model` now creates model draft and navigates to model detail
+  - models list page now fetches real project-scoped model summaries and supports `+ New Model`
+  - model detail scaffold now loads read-only summary from `config_json`
+  - model detail header now includes `Back to Models` action
 - Project-scoped App Router workspace shell:
   - `/` -> `/projects` redirect
   - `/projects` project entry resolver + empty-state create-project flow
@@ -172,6 +182,7 @@ All notable changes to this project will be documented in this file.
 - Annotation payload normalization now preserves class/category assignments when `classification` block is empty but top-level/object category data exists.
 
 ### Fixed
+- Removed duplicate numeric prefixes in model builder step list (`1. 1. Dataset` -> `1. Dataset`).
 - Fixed project switch activation bug where selecting another project in the shell dropdown could keep the previous project context.
 - Fixed status-bar labeled-image refresh lag after submit by adding shell status refresh synchronization from datasets workspace.
 - Root route prerender conflict caused by duplicate `/` page definitions.

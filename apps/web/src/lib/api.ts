@@ -178,6 +178,35 @@ export interface ExportVersion {
   hash: string;
 }
 
+export interface ProjectModelSummary {
+  id: string;
+  name: string;
+  created_at: string;
+  updated_at: string;
+  task: string;
+  backbone_name: string;
+  num_classes: number;
+}
+
+export interface ProjectModelCreatePayload {
+  name?: string;
+}
+
+export interface ProjectModelCreateResponse {
+  id: string;
+  name: string;
+  config: Record<string, unknown>;
+}
+
+export interface ProjectModelRecord {
+  id: string;
+  project_id: string;
+  name: string;
+  config_json: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
 function inferMimeType(filename: string): string {
   const ext = filename.split(".").pop()?.toLowerCase() ?? "";
   if (ext === "jpg" || ext === "jpeg") return "image/jpeg";
@@ -258,6 +287,21 @@ export function createExport(projectId: string, payload: ExportCreatePayload = {
 
 export function listExports(projectId: string): Promise<ExportVersion[]> {
   return apiGet<ExportVersion[]>(`/projects/${projectId}/exports`);
+}
+
+export function listProjectModels(projectId: string): Promise<ProjectModelSummary[]> {
+  return apiGet<ProjectModelSummary[]>(`/projects/${projectId}/models`);
+}
+
+export function createProjectModel(
+  projectId: string,
+  payload: ProjectModelCreatePayload = {},
+): Promise<ProjectModelCreateResponse> {
+  return apiPost<ProjectModelCreateResponse, ProjectModelCreatePayload>(`/projects/${projectId}/models`, payload);
+}
+
+export function getProjectModel(projectId: string, modelId: string): Promise<ProjectModelRecord> {
+  return apiGet<ProjectModelRecord>(`/projects/${projectId}/models/${modelId}`);
 }
 
 export function uploadAsset(projectId: string, file: File, relativePath?: string): Promise<Asset> {

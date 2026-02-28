@@ -71,7 +71,7 @@ async def delete_project(project_id: str, db: AsyncSession = Depends(get_db)) ->
         except ValueError:
             continue
 
-    for relative_dir in (f"assets/{project_id}", f"exports/{project_id}"):
+    for relative_dir in (f"assets/{project_id}", f"exports/{project_id}", f"models/{project_id}"):
         try:
             storage.delete_tree(relative_dir)
         except ValueError:

@@ -7,6 +7,7 @@ import { LabelPanel } from "../LabelPanel";
 import { Viewer } from "../Viewer";
 import {
   ApiError,
+  createProjectModel,
   createExport,
   createCategory,
   createProject,
@@ -58,6 +59,7 @@ export default function ProjectAssetsWorkspace() {
   const [isCreatingLabel, setIsCreatingLabel] = useState(false);
   const [isSavingLabelChanges, setIsSavingLabelChanges] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  const [isCreatingModel, setIsCreatingModel] = useState(false);
   const [editMode, setEditMode] = useState(false);
   const [projectMultiLabelSettings, setProjectMultiLabelSettings] = useState<Record<string, boolean>>({});
   const [message, setMessage] = useState<string | null>(null);
@@ -732,7 +734,22 @@ export default function ProjectAssetsWorkspace() {
       return;
     }
     guardedNavigate(() => {
-      router.push(buildModelBuilderHref(selectedProjectId, null));
+      void (async () => {
+        try {
+          setIsCreatingModel(true);
+          setMessage("Creating model draft...");
+          const created = await createProjectModel(selectedProjectId, {});
+          router.push(buildModelBuilderHref(selectedProjectId, created.id));
+        } catch (error) {
+          if (error instanceof ApiError) {
+            setMessage(`Build model failed: ${error.responseBody ?? error.message}`);
+          } else {
+            setMessage(error instanceof Error ? `Build model failed: ${error.message}` : "Build model failed.");
+          }
+        } finally {
+          setIsCreatingModel(false);
+        }
+      })();
     });
   }
 
@@ -1040,8 +1057,8 @@ export default function ProjectAssetsWorkspace() {
             >
               {isDeletingProject ? "Deleting..." : "Delete Project"}
             </button>
-            <button type="button" className="primary-button" onClick={handleBuildModel} disabled={!selectedProjectId}>
-              Build Model
+            <button type="button" className="primary-button" onClick={handleBuildModel} disabled={!selectedProjectId || isCreatingModel}>
+              {isCreatingModel ? "Building..." : "Build Model"}
             </button>
           </div>
         </footer>

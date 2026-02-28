@@ -47,7 +47,7 @@ Local-first CV annotation platform.
   - route structure under `/projects/{project_id}/...`
   - top navigation tabs: `Datasets`, `Models`, `Experiments`, `Deploy` (disabled placeholder)
   - project selector dropdown with `+ Create Project` modal
-  - datasets `Build Model` CTA routes to model-builder placeholder
+  - datasets `Build Model` CTA creates a project-scoped model draft from latest manifest and opens model detail
   - unsaved draft guard for project/tab/model navigation
 
 ## Stack
@@ -72,7 +72,8 @@ Local-first CV annotation platform.
     - `/projects/{project_id}/experiments/{experiment_id}`
   - top shell project selector + tabs (`Datasets`, `Models`, `Experiments`, disabled `Deploy`)
   - workspace status line (`images labeled`, `classes`, `models`, `experiments`)
-- Models and Experiments pages are intentional Phase 1 placeholders (no project-scoped training backend yet)
+- Models pages are scaffolded with project-scoped create/list/detail and read-only summary from generated `ModelConfig`
+- Experiments pages remain placeholders (no project-scoped training backend yet)
 - Local folder import with one modal:
   - import into existing or new project
   - select task mode when creating a new project (`classification_single`, `bbox`, `segmentation`)
@@ -195,6 +196,8 @@ docker compose up --build
 - `GET/POST /api/v1/projects/{project_id}/annotations`
 - `GET/POST /api/v1/projects/{project_id}/exports`
 - `GET /api/v1/projects/{project_id}/exports/{content_hash}/download`
+- `GET/POST /api/v1/projects/{project_id}/models`
+- `GET /api/v1/projects/{project_id}/models/{model_id}`
 - `GET/POST /api/v1/models` (placeholder MAL surface)
 - `GET /api/v1/assets/{asset_id}/suggestions` (placeholder)
 - `POST /api/v1/projects/{project_id}/suggestions/batch` (placeholder)
@@ -209,7 +212,8 @@ docker compose up --build
 
 - Review/QA workflow
 - Geometry tooling polish (no polygon vertex dragging/edit yet)
-- Models/Experiments/Deploy are currently UI placeholders in the project shell
+- Experiment/Deploy sections are still UI placeholders in the project shell
+- Model builder editing/training actions (`Save`, `Train Model`) are still disabled placeholders
 - MAL implementation beyond placeholder endpoints
 - Shared-asset reference mode (upload-once/link-many)
 

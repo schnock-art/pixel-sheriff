@@ -895,3 +895,88 @@ async def test_regression_segmentation_preserves_class_from_object_when_classifi
     # Regression expectation: geometry class should backfill classification fields.
     assert payload["category_ids"] == [category["id"]]
     assert payload["classification"]["primary_category_id"] == category["id"]
+
+
+async def _create_detection_project_with_manifest(client: AsyncClient, *, project_name: str) -> tuple[str, dict]:
+    project = (await client.post("/api/v1/projects", json={"name": project_name, "task_type": "bbox"})).json()
+    project_id = project["id"]
+
+    category = (await client.post(f"/api/v1/projects/{project_id}/categories", json={"name": "boat"})).json()
+    upload = await client.post(
+        f"/api/v1/projects/{project_id}/assets/upload",
+        files={"file": ("sample.jpg", b"fake-image-bytes", "image/jpeg")},
+    )
+    assert upload.status_code == 200
+    asset = upload.json()
+
+    annotation = await client.post(
+        f"/api/v1/projects/{project_id}/annotations",
+        json={
+            "asset_id": asset["id"],
+            "status": "approved",
+            "payload_json": {
+                "version": "2.0",
+                "classification": {"category_ids": [category["id"]], "primary_category_id": category["id"]},
+                "image_basis": {"width": 100, "height": 80},
+                "objects": [
+                    {"id": "bbox-1", "kind": "bbox", "category_id": category["id"], "bbox": [10, 10, 20, 15]},
+                ],
+            },
+        },
+    )
+    assert annotation.status_code == 200
+
+    export = await client.post(f"/api/v1/projects/{project_id}/exports", json={"selection_criteria_json": {"status": "approved"}})
+    assert export.status_code == 200
+    return project_id, export.json()["manifest_json"]
+
+
+@pytest.mark.asyncio
+async def test_project_model_create_builds_schema_valid_config_from_manifest(client: AsyncClient) -> None:
+    project_id, manifest = await _create_detection_project_with_manifest(client, project_name="model-create")
+
+    created = await client.post(f"/api/v1/projects/{project_id}/models", json={})
+    assert created.status_code == 200
+    payload = created.json()
+    config = payload["config"]
+
+    assert payload["id"]
+    assert config["schema_version"] == "1.0"
+    assert config["source_dataset"]["task"] == "detection"
+    assert config["source_dataset"]["num_classes"] == len(manifest["label_schema"]["class_order"])
+    assert config["source_dataset"]["class_order"] == manifest["label_schema"]["class_order"]
+    assert config["architecture"]["family"] == "retinanet"
+    assert config["architecture"]["backbone"]["name"] == "resnet50"
+    assert config["architecture"]["head"]["num_classes"] == len(manifest["label_schema"]["class_order"])
+    assert config["outputs"]["primary"]["format"] == "coco_detections"
+    assert config["export"]["onnx"]["enabled"] is True
+    assert config["export"]["onnx"]["opset"] == 17
+    assert config["export"]["onnx"]["dynamic_shapes"] == {"enabled": True, "batch": True, "height_width": False}
+
+    detail = await client.get(f"/api/v1/projects/{project_id}/models/{payload['id']}")
+    assert detail.status_code == 200
+    detail_payload = detail.json()
+    assert detail_payload["project_id"] == project_id
+    assert detail_payload["config_json"]["source_dataset"]["num_classes"] == len(manifest["label_schema"]["class_order"])
+
+
+@pytest.mark.asyncio
+async def test_project_model_list_returns_summaries(client: AsyncClient) -> None:
+    project_id, _manifest = await _create_detection_project_with_manifest(client, project_name="model-list")
+
+    first = await client.post(f"/api/v1/projects/{project_id}/models", json={"name": "retina-a"})
+    second = await client.post(f"/api/v1/projects/{project_id}/models", json={"name": "retina-b"})
+    assert first.status_code == 200
+    assert second.status_code == 200
+
+    listed = await client.get(f"/api/v1/projects/{project_id}/models")
+    assert listed.status_code == 200
+    rows = listed.json()
+
+    assert len(rows) == 2
+    names = {row["name"] for row in rows}
+    assert names == {"retina-a", "retina-b"}
+    for row in rows:
+        assert row["task"] == "detection"
+        assert row["backbone_name"] == "resnet50"
+        assert row["num_classes"] == 1
