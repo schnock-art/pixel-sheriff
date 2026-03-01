@@ -112,6 +112,56 @@ Export files are persisted at:
 
 - `exports/{project_id}/{content_hash}.zip`
 
+### ML Model Building Layer (`apps/api/src/sheriff_api/ml`)
+
+Extensible model-building runtime is now implemented for `ModelConfig v1.0`:
+
+- Public entrypoint:
+  - `build_model(model_config: dict, verify_metadata: bool = False) -> BuiltModel`
+  - file: `apps/api/src/sheriff_api/ml/model_factory.py`
+- Family adapter registry:
+  - maps `architecture.family` -> adapter builder
+  - file: `apps/api/src/sheriff_api/ml/registry.py`
+- Adapter families implemented (v0):
+  - `resnet_classifier` (normalized primary output: `{"predictions": logits}`)
+  - `retinanet` (normalized primary output wraps native detection list under `predictions`)
+  - `deeplabv3` (normalized primary output uses segmentation `out` tensor under `predictions`)
+- Output composer:
+  - composes primary + aux outputs
+  - deterministic output tuple ordering from `export.onnx.output_names`
+  - supports v0 aux projections: `none`, `pool_linear`, `mlp`
+  - compatibility mapping: `projection.type = "linear"` -> `pool_linear` (avg pool)
+  - optional aux normalization: `none` / `l2`
+  - files: `apps/api/src/sheriff_api/ml/outputs/*`
+- Tap handling:
+  - `TapManager` supports module hooks and extractor-based taps
+  - file: `apps/api/src/sheriff_api/ml/taps/manager.py`
+
+Backbone metadata registry:
+
+- Python dict + dataclasses in `apps/api/src/sheriff_api/ml/metadata/backbones.py`
+- includes verified ResNet specs:
+  - `resnet18`, `resnet34`, `resnet50`, `resnet101`
+  - taps: `backbone.global_pool`, `backbone.c3`, `backbone.c4`, `backbone.c5`
+- backward-compatible tap alias:
+  - `backbone.avgpool` -> `backbone.global_pool`
+- metadata verification helper:
+  - `verify_backbone_meta(backbone_name)` performs lightweight forward-pass checks
+  - file: `apps/api/src/sheriff_api/ml/metadata/verify.py`
+
+Web-facing generated metadata:
+
+- generated JSON file:
+  - `apps/web/src/lib/metadata/backbones.v1.json`
+- generator entrypoint:
+  - `python -m sheriff_api.ml.metadata.generate_registry_json --out <path>`
+  - file: `apps/api/src/sheriff_api/ml/metadata/generate_registry_json.py`
+
+Current integration scope:
+
+- ML builder layer is backend-internal for now and not yet invoked by API routes.
+- Existing project model CRUD endpoints still manage `config_json` draft lifecycle and schema validation only.
+
 ## 4. Implemented API Surface
 
 Health:
@@ -352,6 +402,11 @@ Supported statuses:
   - model builder helper/validator regressions for draft transforms, dirty checks, and AJV schema validation
 - API test suite uses `pytest` with `httpx` ASGI client fixtures in `apps/api/tests`.
 - API coverage includes geometry validation/COCO export assertions and project model update validation/persistence checks.
+- ML-specific pytest coverage added under `apps/api/tests/ml`:
+  - metadata verification vs real torchvision backbones (`resnet18`, `resnet50`)
+  - registry JSON generation checks for expected structure/tap entries
+  - `ModelFactory` classifier build + aux embedding output checks
+  - compatibility/validation checks (`avgpool` alias, invalid taps, ONNX output-name mismatch)
 
 ## 8. Known Gaps
 
@@ -361,4 +416,5 @@ Supported statuses:
 - MAL routes are placeholders only
 - Experiment routes are currently placeholders
 - Model training/execution is not implemented yet (`Train Model` remains disabled)
+- ML `ModelFactory` is not yet wired into training/execution API flows (currently buildable as backend library only)
 - Active bug investigation: intermittent annotation submit `404` can occur in stale project/asset submit contexts

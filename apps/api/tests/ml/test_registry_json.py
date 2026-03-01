@@ -1,0 +1,21 @@
+import json
+
+from sheriff_api.ml.metadata.generate_registry_json import build_registry_payload, write_registry_json
+
+
+def test_registry_json_generation_snapshotish(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    payload = build_registry_payload()
+    assert payload["schema_version"] == "1"
+    assert isinstance(payload["backbones"], list)
+
+    resnet50 = next(row for row in payload["backbones"] if row["name"] == "resnet50")
+    taps = {tap["name"]: tap for tap in resnet50["taps"]}
+    assert "backbone.global_pool" in taps
+    assert taps["backbone.c4"]["channels"] == 1024
+    assert taps["backbone.c4"]["stride"] == 16
+
+    output_path = tmp_path / "backbones.v1.json"
+    write_registry_json(output_path, payload)
+    written = json.loads(output_path.read_text(encoding="utf-8"))
+    assert written["schema_version"] == "1"
+    assert any(backbone["name"] == "resnet18" for backbone in written["backbones"])

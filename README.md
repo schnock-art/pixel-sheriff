@@ -54,6 +54,11 @@ Local-first CV annotation platform.
   - AJV-based client-side schema validation on every draft edit
   - save gating by `isDirty && isValid`
   - `PUT /api/v1/projects/{project_id}/models/{model_id}` persists schema-valid config updates
+- Backend ML model-building layer (v0) is now implemented under `apps/api/src/sheriff_api/ml`:
+  - extensible `ModelFactory` + family adapter registry
+  - backbone metadata registry (`resnet18/34/50/101`) + verification utilities
+  - generated web metadata file at `apps/web/src/lib/metadata/backbones.v1.json`
+  - pytest coverage for metadata verification, registry generation, and classifier build behavior
 
 ## Stack
 
@@ -157,6 +162,12 @@ Local-first CV annotation platform.
   - classification exports keep `coco_instances.json` with empty `annotations`
   - detection/segmentation exports include geometry records with validated `bbox`/`segmentation` and computed `area`
   - configurable detection/segmentation negative-image policy through `selection_criteria_json.include_negative_images` (`true` by default)
+- Backend ML model runtime (library scope, not route-wired yet):
+  - `build_model(config, verify_metadata=False)` returns composed `nn.Module` + output names + label map
+  - adapter families available: `resnet_classifier`, `retinanet`, `deeplabv3`
+  - aux output composition supports deterministic ONNX output ordering and projections (`none`, `pool_linear`, `mlp`)
+  - tap compatibility alias maintained: `backbone.avgpool -> backbone.global_pool`
+  - metadata verification utility compares registry specs against real torchvision forward-pass outputs
 
 ## Run Locally
 
@@ -186,9 +197,28 @@ docker compose up --build
 - Status: `docker compose ps`
 - Web tests: `cd apps/web && npm test`
 - Web build check: `cd apps/web && npm run build`
+- API tests (local):
+  - `cd apps/api && python -m pytest tests -q`
+- ML tests only (local, avoids API async fixtures):
+  - `cd apps/api && python -m pytest tests/ml -q --confcutdir=tests/ml`
 - API tests (container):
   - `docker compose cp apps/api/tests api:/app/tests`
   - `docker compose exec api python -m pytest /app/tests -q`
+  - note: API container image installs runtime deps only; install pytest/httpx in-container if needed before running this command
+
+## ML Metadata Registry
+
+- Backend ML metadata registry lives in `apps/api/src/sheriff_api/ml/metadata/backbones.py`.
+- Web-consumable backbone registry JSON is generated at `apps/web/src/lib/metadata/backbones.v1.json`.
+- API optional dependency group for ML runtime:
+  - `cd apps/api && pip install -e ".[ml]"`
+- Regenerate from repo root:
+  - `cd apps/api`
+  - `python -m sheriff_api.ml.metadata.generate_registry_json --out ../web/src/lib/metadata/backbones.v1.json`
+- Add new backbones/families by:
+  - extending `BACKBONES` metadata in backend
+  - implementing a new adapter + family registry entry
+  - adding metadata verification tests under `apps/api/tests/ml`
 
 `docker compose logs ...` only reads logs; it does not start containers.
 
