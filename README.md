@@ -54,6 +54,14 @@ Local-first CV annotation platform.
   - AJV-based client-side schema validation on every draft edit
   - save gating by `isDirty && isValid`
   - `PUT /api/v1/projects/{project_id}/models/{model_id}` persists schema-valid config updates
+- Experiments training flow (Phase 1) is now implemented end-to-end:
+  - project-scoped experiments list + create + detail routes
+  - model detail `Train Model` CTA supports `Continue` or `New run`
+  - training config draft save/edit in `draft`/`failed` states
+  - `start`/`cancel` lifecycle APIs
+  - simulated async runner with persisted metrics/checkpoints
+  - live SSE stream consumed by web chart UI
+  - chart includes axes, legend, toggles, and hover value tooltip
 - Backend ML model-building layer (v0) is now implemented under `apps/api/src/sheriff_api/ml`:
   - extensible `ModelFactory` + family adapter registry
   - backbone metadata registry (`resnet18/34/50/101`) + verification utilities
@@ -79,6 +87,7 @@ Local-first CV annotation platform.
     - `/projects/{project_id}/models/new`
     - `/projects/{project_id}/models/{model_id}`
     - `/projects/{project_id}/experiments`
+    - `/projects/{project_id}/experiments/new`
     - `/projects/{project_id}/experiments/{experiment_id}`
   - top shell project selector + tabs (`Datasets`, `Models`, `Experiments`, disabled `Deploy`)
   - workspace status line (`images labeled`, `classes`, `models`, `experiments`)
@@ -89,7 +98,14 @@ Local-first CV annotation platform.
   - AJV (`ajv` + `ajv-formats`) validation against `ModelConfig v1.0`
   - Save enablement only when draft has changes and passes schema validation
   - unsaved changes indicator + guarded navigation integration
-- Experiments pages remain placeholders (no project-scoped training backend yet)
+- Experiments pages support project-scoped list/create/detail plus live training telemetry
+- Experiment detail page includes:
+  - editable training params (optimizer/lr/epochs/batch/augmentation/advanced)
+  - save gating based on light config validation
+  - checkpoint panel (`best_metric`, `best_loss`, `latest`) with selection placeholder action
+  - metrics chart with axis/ticks/legend/toggles
+  - hover crosshair + tooltip values per epoch
+  - refresh-safe history rehydration and SSE resume while running
 - Local folder import with one modal:
   - import into existing or new project
   - select task mode when creating a new project (`classification_single`, `bbox`, `segmentation`)
@@ -205,6 +221,8 @@ docker compose up --build
   - `docker compose cp apps/api/tests api:/app/tests`
   - `docker compose exec api python -m pytest /app/tests -q`
   - note: API container image installs runtime deps only; install pytest/httpx in-container if needed before running this command
+- Manual QA checklist for experiment SSE flow:
+  - `docu/experiments_sse_manual_qa.md`
 
 ## ML Metadata Registry
 
@@ -240,6 +258,11 @@ docker compose up --build
 - `GET/POST /api/v1/projects/{project_id}/models`
 - `GET /api/v1/projects/{project_id}/models/{model_id}`
 - `PUT /api/v1/projects/{project_id}/models/{model_id}`
+- `GET/POST /api/v1/projects/{project_id}/experiments`
+- `GET/PUT /api/v1/projects/{project_id}/experiments/{experiment_id}`
+- `POST /api/v1/projects/{project_id}/experiments/{experiment_id}/start`
+- `POST /api/v1/projects/{project_id}/experiments/{experiment_id}/cancel`
+- `GET /api/v1/projects/{project_id}/experiments/{experiment_id}/events` (SSE)
 - `GET/POST /api/v1/models` (placeholder MAL surface)
 - `GET /api/v1/assets/{asset_id}/suggestions` (placeholder)
 - `POST /api/v1/projects/{project_id}/suggestions/batch` (placeholder)
@@ -254,8 +277,8 @@ docker compose up --build
 
 - Review/QA workflow
 - Geometry tooling polish (no polygon vertex dragging/edit yet)
-- Experiment/Deploy sections are still UI placeholders in the project shell
-- Model training execution is not implemented yet (`Train Model` remains disabled)
+- Deploy section is still a placeholder in the project shell
+- Real training backend is not implemented yet (current experiment runner is simulated)
 - MAL implementation beyond placeholder endpoints
 - Shared-asset reference mode (upload-once/link-many)
 

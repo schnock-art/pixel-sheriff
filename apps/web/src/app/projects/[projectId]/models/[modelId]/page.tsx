@@ -1,10 +1,18 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 
 import { ModelBuilderSkeleton } from "../../../../../components/workspace/ModelBuilderSkeleton";
 import { useProjectNavigationGuard } from "../../../../../components/workspace/ProjectNavigationContext";
-import { ApiError, getProjectModel, updateProjectModel } from "../../../../../lib/api";
+import {
+  ApiError,
+  createExperiment,
+  getProjectModel,
+  listExperiments,
+  updateProjectModel,
+  type ProjectExperimentSummary,
+} from "../../../../../lib/api";
 import { validateModelConfigDraft } from "../../../../../lib/schema/validator";
 import {
   cloneModelConfig,
@@ -52,9 +60,10 @@ function parseApiErrorMessage(error: unknown, fallback: string): string {
 }
 
 export default function ModelDetailPage({ params }: ModelDetailPageProps) {
+  const router = useRouter();
   const projectId = useMemo(() => decodeURIComponent(params.projectId), [params.projectId]);
   const modelId = useMemo(() => decodeURIComponent(params.modelId), [params.modelId]);
-  const { setHasUnsavedDrafts } = useProjectNavigationGuard();
+  const { setHasUnsavedDrafts, guardedNavigate } = useProjectNavigationGuard();
 
   const [modelName, setModelName] = useState<string | null>(null);
   const [savedConfig, setSavedConfig] = useState<ModelConfig | null>(null);
@@ -65,6 +74,10 @@ export default function ModelDetailPage({ params }: ModelDetailPageProps) {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [toastTone, setToastTone] = useState<"success" | "error">("success");
+  const [trainError, setTrainError] = useState<string | null>(null);
+  const [isLaunchingTrain, setIsLaunchingTrain] = useState(false);
+  const [showTrainChoiceModal, setShowTrainChoiceModal] = useState(false);
+  const [latestExperiment, setLatestExperiment] = useState<ProjectExperimentSummary | null>(null);
 
   const validation = useMemo(() => validateModelConfigDraft(draftConfig ?? {}), [draftConfig]);
   const isValid = validation.isValid;
@@ -178,6 +191,53 @@ export default function ModelDetailPage({ params }: ModelDetailPageProps) {
       setToastMessage(`Save failed: ${message}`);
     } finally {
       setIsSaving(false);
+    }
+  }
+
+  async function handleTrainModel() {
+    setTrainError(null);
+    setIsLaunchingTrain(true);
+    try {
+      const listed = await listExperiments(projectId, { modelId });
+      const rows = listed.items ?? [];
+      if (rows.length === 0) {
+        const created = await createExperiment(projectId, { model_id: modelId });
+        guardedNavigate(() => {
+          router.push(`/projects/${encodeURIComponent(projectId)}/experiments/${encodeURIComponent(created.id)}`);
+        });
+        return;
+      }
+      const [latest] = rows;
+      setLatestExperiment(latest ?? null);
+      setShowTrainChoiceModal(true);
+    } catch (error) {
+      setTrainError(parseApiErrorMessage(error, "Failed to prepare train flow"));
+    } finally {
+      setIsLaunchingTrain(false);
+    }
+  }
+
+  function handleContinueExperiment() {
+    if (!latestExperiment) return;
+    setShowTrainChoiceModal(false);
+    guardedNavigate(() => {
+      router.push(`/projects/${encodeURIComponent(projectId)}/experiments/${encodeURIComponent(latestExperiment.id)}`);
+    });
+  }
+
+  async function handleNewRun() {
+    setIsLaunchingTrain(true);
+    setTrainError(null);
+    try {
+      const created = await createExperiment(projectId, { model_id: modelId });
+      setShowTrainChoiceModal(false);
+      guardedNavigate(() => {
+        router.push(`/projects/${encodeURIComponent(projectId)}/experiments/${encodeURIComponent(created.id)}`);
+      });
+    } catch (error) {
+      setTrainError(parseApiErrorMessage(error, "Failed to create experiment"));
+    } finally {
+      setIsLaunchingTrain(false);
     }
   }
 
@@ -455,13 +515,45 @@ export default function ModelDetailPage({ params }: ModelDetailPageProps) {
         saveDisabled={!isDirty || !isValid || isSaving || isLoading || !draftConfig}
         saveError={saveError}
         validationPanel={devValidationPanel}
+        onTrainModel={() => void handleTrainModel()}
+        trainDisabled={isLoading || !draftConfig || isLaunchingTrain}
+        trainButtonLabel={isLaunchingTrain ? "Preparing..." : "Train Model"}
       />
+      {trainError ? (
+        <div className={`status-toast is-error`} role="status" aria-live="polite">
+          <span>{trainError}</span>
+          <button type="button" aria-label="Dismiss message" onClick={() => setTrainError(null)}>
+            x
+          </button>
+        </div>
+      ) : null}
       {toastMessage ? (
         <div className={`status-toast ${toastTone === "error" ? "is-error" : "is-success"}`} role="status" aria-live="polite">
           <span>{toastMessage}</span>
           <button type="button" aria-label="Dismiss message" onClick={() => setToastMessage(null)}>
             x
           </button>
+        </div>
+      ) : null}
+      {showTrainChoiceModal ? (
+        <div className="project-modal-backdrop" role="presentation">
+          <div className="project-modal" role="dialog" aria-modal="true" aria-label="Choose train action">
+            <h3>Existing Experiment Found</h3>
+            <p className="import-selection-summary">
+              Latest run: <strong>{latestExperiment?.name ?? "-"}</strong>
+            </p>
+            <div className="project-modal-actions">
+              <button type="button" className="ghost-button" onClick={() => setShowTrainChoiceModal(false)}>
+                Close
+              </button>
+              <button type="button" className="ghost-button" disabled={!latestExperiment} onClick={handleContinueExperiment}>
+                Continue
+              </button>
+              <button type="button" className="primary-button" disabled={isLaunchingTrain} onClick={() => void handleNewRun()}>
+                {isLaunchingTrain ? "Creating..." : "New run"}
+              </button>
+            </div>
+          </div>
         </div>
       ) : null}
     </>

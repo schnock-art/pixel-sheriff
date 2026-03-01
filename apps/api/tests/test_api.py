@@ -1,11 +1,14 @@
+import asyncio
 import json
 from io import BytesIO
+from pathlib import Path
 import uuid
 import zipfile
 
 from httpx import AsyncClient
 import pytest
 import sheriff_api.routers.assets as assets_router
+from sheriff_api.config import get_settings
 
 
 def assert_api_error(response, *, status_code: int, code: str, message: str | None = None) -> dict:
@@ -1058,3 +1061,161 @@ async def test_project_model_update_returns_not_found_for_missing_model(client: 
         code="model_not_found",
         message="Model not found in project",
     )
+
+
+async def _create_project_model(client: AsyncClient, *, project_name: str) -> tuple[str, str]:
+    project_id, _manifest = await _create_detection_project_with_manifest(client, project_name=project_name)
+    created = await client.post(f"/api/v1/projects/{project_id}/models", json={})
+    assert created.status_code == 200
+    return project_id, created.json()["id"]
+
+
+@pytest.mark.asyncio
+async def test_experiment_create_from_model_returns_draft_record(client: AsyncClient) -> None:
+    project_id, model_id = await _create_project_model(client, project_name="exp-create")
+    response = await client.post(
+        f"/api/v1/projects/{project_id}/experiments",
+        json={"model_id": model_id, "name": "run-a"},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["project_id"] == project_id
+    assert payload["model_id"] == model_id
+    assert payload["status"] == "draft"
+    assert payload["name"] == "run-a"
+    assert payload["config_json"]["schema_version"] == "0.1"
+    assert payload["config_json"]["dataset_version_id"]
+    assert payload["checkpoints"]
+    assert payload["metrics"] == []
+
+
+@pytest.mark.asyncio
+async def test_experiment_update_persists_when_draft(client: AsyncClient) -> None:
+    project_id, model_id = await _create_project_model(client, project_name="exp-update")
+    created = await client.post(
+        f"/api/v1/projects/{project_id}/experiments",
+        json={"model_id": model_id},
+    )
+    assert created.status_code == 200
+    experiment = created.json()
+
+    updated_config = experiment["config_json"]
+    updated_config["epochs"] = 8
+    updated_config["batch_size"] = 4
+    updated_config["optimizer"]["lr"] = 0.0005
+    update = await client.put(
+        f"/api/v1/projects/{project_id}/experiments/{experiment['id']}",
+        json={"name": "run-updated", "config_json": updated_config, "selected_checkpoint_kind": "latest"},
+    )
+    assert update.status_code == 200
+    payload = update.json()
+    assert payload["name"] == "run-updated"
+    assert payload["config_json"]["epochs"] == 8
+    assert payload["config_json"]["batch_size"] == 4
+    assert payload["config_json"]["optimizer"]["lr"] == 0.0005
+    assert payload["artifacts_json"]["selected_checkpoint_kind"] == "latest"
+
+    detail = await client.get(f"/api/v1/projects/{project_id}/experiments/{experiment['id']}")
+    assert detail.status_code == 200
+    assert detail.json()["name"] == "run-updated"
+
+
+@pytest.mark.asyncio
+async def test_experiment_start_generates_metrics_and_checkpoints(client: AsyncClient) -> None:
+    project_id, model_id = await _create_project_model(client, project_name="exp-start")
+    created = await client.post(
+        f"/api/v1/projects/{project_id}/experiments",
+        json={"model_id": model_id, "config_overrides": {"epochs": 4}},
+    )
+    assert created.status_code == 200
+    experiment_id = created.json()["id"]
+
+    started = await client.post(f"/api/v1/projects/{project_id}/experiments/{experiment_id}/start")
+    assert started.status_code == 200
+    assert started.json()["ok"] is True
+
+    detail_payload = None
+    for _ in range(20):
+        await asyncio.sleep(0.2)
+        detail = await client.get(f"/api/v1/projects/{project_id}/experiments/{experiment_id}")
+        assert detail.status_code == 200
+        detail_payload = detail.json()
+        if len(detail_payload["metrics"]) > 0:
+            break
+
+    assert detail_payload is not None
+    assert len(detail_payload["metrics"]) > 0
+    assert any(row["kind"] == "latest" and row["epoch"] is not None for row in detail_payload["checkpoints"])
+    assert detail_payload["summary_json"]["last_epoch"] is not None
+
+
+@pytest.mark.asyncio
+async def test_experiment_events_sse_smoke(client: AsyncClient) -> None:
+    project_id, model_id = await _create_project_model(client, project_name="exp-events")
+    created = await client.post(
+        f"/api/v1/projects/{project_id}/experiments",
+        json={"model_id": model_id, "config_overrides": {"epochs": 3}},
+    )
+    assert created.status_code == 200
+    experiment_id = created.json()["id"]
+    start = await client.post(f"/api/v1/projects/{project_id}/experiments/{experiment_id}/start")
+    assert start.status_code == 200
+
+    saw_status = False
+    saw_metric = False
+    async with client.stream("GET", f"/api/v1/projects/{project_id}/experiments/{experiment_id}/events") as response:
+        assert response.status_code == 200
+        async for line in response.aiter_lines():
+            if not line.startswith("data: "):
+                continue
+            event = json.loads(line[6:])
+            event_type = event.get("type")
+            if event_type == "status":
+                saw_status = True
+            if event_type == "metric":
+                saw_metric = True
+                break
+
+    assert saw_status is True
+    assert saw_metric is True
+
+
+@pytest.mark.asyncio
+async def test_experiment_cancel_stops_run(client: AsyncClient) -> None:
+    project_id, model_id = await _create_project_model(client, project_name="exp-cancel")
+    created = await client.post(
+        f"/api/v1/projects/{project_id}/experiments",
+        json={"model_id": model_id, "config_overrides": {"epochs": 12}},
+    )
+    assert created.status_code == 200
+    experiment_id = created.json()["id"]
+
+    started = await client.post(f"/api/v1/projects/{project_id}/experiments/{experiment_id}/start")
+    assert started.status_code == 200
+
+    canceled = await client.post(f"/api/v1/projects/{project_id}/experiments/{experiment_id}/cancel")
+    assert canceled.status_code == 200
+    assert canceled.json()["ok"] is True
+
+    detail = await client.get(f"/api/v1/projects/{project_id}/experiments/{experiment_id}")
+    assert detail.status_code == 200
+    assert detail.json()["status"] == "canceled"
+
+
+@pytest.mark.asyncio
+async def test_project_delete_removes_experiment_storage(client: AsyncClient) -> None:
+    project_id, model_id = await _create_project_model(client, project_name="exp-delete-cleanup")
+    created = await client.post(
+        f"/api/v1/projects/{project_id}/experiments",
+        json={"model_id": model_id},
+    )
+    assert created.status_code == 200
+    experiment_id = created.json()["id"]
+
+    settings = get_settings()
+    experiment_dir = Path(settings.storage_root) / "experiments" / project_id / experiment_id
+    assert experiment_dir.exists()
+
+    deletion = await client.delete(f"/api/v1/projects/{project_id}")
+    assert deletion.status_code == 204
+    assert experiment_dir.exists() is False

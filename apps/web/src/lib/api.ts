@@ -211,6 +211,83 @@ export interface ProjectModelUpdatePayload {
   config_json: Record<string, unknown>;
 }
 
+export type ExperimentStatus = "draft" | "queued" | "running" | "completed" | "failed" | "canceled";
+export type ExperimentTask = "classification" | "detection" | "segmentation";
+
+export interface ExperimentSummaryJson {
+  best_metric_name: string | null;
+  best_metric_value: number | null;
+  best_epoch: number | null;
+  last_epoch: number | null;
+}
+
+export interface ExperimentCheckpoint {
+  kind: "best_loss" | "best_metric" | "latest";
+  epoch: number | null;
+  metric_name: string | null;
+  value: number | null;
+  updated_at: string | null;
+}
+
+export interface ExperimentMetricPoint {
+  epoch: number;
+  train_loss?: number;
+  val_loss?: number;
+  val_accuracy?: number;
+  val_map?: number;
+  val_iou?: number;
+  created_at?: string;
+}
+
+export interface ProjectExperimentSummary {
+  id: string;
+  project_id: string;
+  model_id: string;
+  name: string;
+  created_at: string;
+  updated_at: string;
+  status: ExperimentStatus;
+  summary_json: ExperimentSummaryJson;
+}
+
+export interface ProjectExperimentRecord extends ProjectExperimentSummary {
+  config_json: Record<string, unknown>;
+  artifacts_json: Record<string, unknown>;
+  checkpoints: ExperimentCheckpoint[];
+  metrics: ExperimentMetricPoint[];
+}
+
+export interface ProjectExperimentListResponse {
+  items: ProjectExperimentSummary[];
+}
+
+export interface ProjectExperimentCreatePayload {
+  model_id: string;
+  name?: string;
+  config_overrides?: Record<string, unknown>;
+}
+
+export interface ProjectExperimentUpdatePayload {
+  name?: string;
+  config_json?: Record<string, unknown>;
+  selected_checkpoint_kind?: "best_loss" | "best_metric" | "latest";
+}
+
+export interface ExperimentActionResponse {
+  ok: boolean;
+}
+
+export type ExperimentEvent =
+  | { type: "status"; status: ExperimentStatus }
+  | ({ type: "metric" } & ExperimentMetricPoint)
+  | ({ type: "checkpoint" } & ExperimentCheckpoint)
+  | { type: "done"; status: ExperimentStatus; message?: string };
+
+export interface StreamExperimentHandlers {
+  onEvent?: (event: ExperimentEvent) => void;
+  onError?: (event: Event) => void;
+}
+
 function inferMimeType(filename: string): string {
   const ext = filename.split(".").pop()?.toLowerCase() ?? "";
   if (ext === "jpg" || ext === "jpeg") return "image/jpeg";
@@ -318,6 +395,75 @@ export function updateProjectModel(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
+}
+
+export function listExperiments(projectId: string, options: { modelId?: string } = {}): Promise<ProjectExperimentListResponse> {
+  const params = new URLSearchParams();
+  if (options.modelId) params.set("model_id", options.modelId);
+  const query = params.toString();
+  const suffix = query ? `?${query}` : "";
+  return apiGet<ProjectExperimentListResponse>(`/projects/${projectId}/experiments${suffix}`);
+}
+
+export function createExperiment(
+  projectId: string,
+  payload: ProjectExperimentCreatePayload,
+): Promise<ProjectExperimentRecord> {
+  return apiPost<ProjectExperimentRecord, ProjectExperimentCreatePayload>(`/projects/${projectId}/experiments`, payload);
+}
+
+export function getExperiment(projectId: string, experimentId: string): Promise<ProjectExperimentRecord> {
+  return apiGet<ProjectExperimentRecord>(`/projects/${projectId}/experiments/${experimentId}`);
+}
+
+export function updateExperiment(
+  projectId: string,
+  experimentId: string,
+  payload: ProjectExperimentUpdatePayload,
+): Promise<ProjectExperimentRecord> {
+  return requestJson<ProjectExperimentRecord>(`/projects/${projectId}/experiments/${experimentId}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export function startExperiment(projectId: string, experimentId: string): Promise<ExperimentActionResponse> {
+  return apiPost<ExperimentActionResponse, Record<string, never>>(
+    `/projects/${projectId}/experiments/${experimentId}/start`,
+    {},
+  );
+}
+
+export function cancelExperiment(projectId: string, experimentId: string): Promise<ExperimentActionResponse> {
+  return apiPost<ExperimentActionResponse, Record<string, never>>(
+    `/projects/${projectId}/experiments/${experimentId}/cancel`,
+    {},
+  );
+}
+
+export function streamExperimentEvents(
+  projectId: string,
+  experimentId: string,
+  handlers: StreamExperimentHandlers,
+): () => void {
+  const urlBase = API_BASE.endsWith("/") ? API_BASE.slice(0, -1) : API_BASE;
+  const url = `${urlBase}/api/v1/projects/${encodeURIComponent(projectId)}/experiments/${encodeURIComponent(experimentId)}/events`;
+  const source = new EventSource(url);
+
+  source.onmessage = (event) => {
+    try {
+      const parsed = JSON.parse(event.data) as ExperimentEvent;
+      handlers.onEvent?.(parsed);
+    } catch {
+      return;
+    }
+  };
+  source.onerror = (event) => {
+    handlers.onError?.(event);
+  };
+
+  return () => source.close();
 }
 
 export function uploadAsset(projectId: string, file: File, relativePath?: string): Promise<Asset> {

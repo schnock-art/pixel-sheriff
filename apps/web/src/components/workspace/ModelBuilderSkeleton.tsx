@@ -19,6 +19,9 @@ interface ModelBuilderSkeletonProps {
   saveDisabled?: boolean;
   saveError?: string | null;
   validationPanel?: ReactNode;
+  onTrainModel?: (() => void) | null;
+  trainDisabled?: boolean;
+  trainButtonLabel?: string;
 }
 
 const STEPS = ["Dataset", "Input", "Backbone", "Neck", "Head", "Loss", "Outputs", "Export"];
@@ -39,6 +42,9 @@ export function ModelBuilderSkeleton({
   saveDisabled = true,
   saveError = null,
   validationPanel = null,
+  onTrainModel = null,
+  trainDisabled = true,
+  trainButtonLabel = "Train Model",
 }: ModelBuilderSkeletonProps) {
   const summary = readModelSummary(config ?? {});
 
@@ -147,8 +153,8 @@ export function ModelBuilderSkeleton({
           <button type="button" className="ghost-button" disabled={saveDisabled || !onSave} onClick={onSave ? () => onSave() : undefined}>
             {isSaving ? "Saving..." : "Save"}
           </button>
-          <button type="button" className="primary-button" disabled>
-            Train Model
+          <button type="button" className="primary-button" disabled={trainDisabled || !onTrainModel} onClick={onTrainModel ? () => onTrainModel() : undefined}>
+            {trainButtonLabel}
           </button>
         </footer>
       </section>

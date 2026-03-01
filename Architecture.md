@@ -17,6 +17,7 @@ Primary workflow:
    - active mode is locked per project by `project.task_type`
 5. Submit staged edits (or submit single-image edits directly).
 6. Generate and download a deterministic dataset export zip (manifest v1.2 + COCO companion).
+7. Create experiments from project models, tune training params, and run simulated training with live SSE metrics + checkpoints.
 
 ## 2. Runtime Topology
 
@@ -56,6 +57,13 @@ Defined in `apps/api/src/sheriff_api/db/models.py`:
 - Project-scoped model drafts (Phase 1 scaffold) are stored via file-backed records under storage root:
   - `models/{project_id}/records.json`
   - implementation: `apps/api/src/sheriff_api/services/model_store.py`
+- Project-scoped experiment runs (Phase 1) are stored via file-backed records under storage root:
+  - `experiments/{project_id}/records.json`
+  - `experiments/{project_id}/{experiment_id}/config.json`
+  - `experiments/{project_id}/{experiment_id}/status.json`
+  - `experiments/{project_id}/{experiment_id}/metrics.jsonl`
+  - `experiments/{project_id}/{experiment_id}/checkpoints.json`
+  - implementation: `apps/api/src/sheriff_api/services/experiment_store.py`
 
 Key invariants:
 
@@ -223,6 +231,18 @@ Project-scoped model scaffolding:
 - model creation derives deterministic `ModelConfig v1.0` from latest `DatasetVersion.manifest_json` and validates against schema before persistence
 - model updates validate incoming `config_json` against `ModelConfig v1.0` before persistence
 
+Project-scoped experiments:
+
+- `GET /api/v1/projects/{project_id}/experiments`
+- `POST /api/v1/projects/{project_id}/experiments`
+- `GET /api/v1/projects/{project_id}/experiments/{experiment_id}`
+- `PUT /api/v1/projects/{project_id}/experiments/{experiment_id}`
+- `POST /api/v1/projects/{project_id}/experiments/{experiment_id}/start`
+- `POST /api/v1/projects/{project_id}/experiments/{experiment_id}/cancel`
+- `GET /api/v1/projects/{project_id}/experiments/{experiment_id}/events` (SSE)
+- create flow derives default `TrainingConfig v0` from model + latest `DatasetVersion` and persists in `draft`
+- start flow launches async simulated runner and appends per-epoch metrics/checkpoints
+
 Error response contract:
 
 - non-2xx API responses use:
@@ -245,7 +265,9 @@ App-router entry and project shell:
 - `apps/web/src/app/projects/[projectId]/datasets/page.tsx` mounts the datasets workspace
 - `apps/web/src/app/projects/[projectId]/models/page.tsx` renders project-scoped model list/empty state + create flow
 - `apps/web/src/app/projects/[projectId]/models/[modelId]/page.tsx` renders editable Model Builder controls with draft/save state, AJV validation, and live summary updates
-- experiments routes are currently placeholders for Phase 1 UI structure
+- `apps/web/src/app/projects/[projectId]/experiments/page.tsx` renders experiment list with model filter and status/metric summaries
+- `apps/web/src/app/projects/[projectId]/experiments/new/page.tsx` creates experiment drafts (auto when `modelId` query is provided)
+- `apps/web/src/app/projects/[projectId]/experiments/[experimentId]/page.tsx` renders train workspace with editable params, checkpoints, live chart, and SSE updates
 
 UI structure:
 
@@ -357,6 +379,17 @@ Workspace container components (`apps/web/src/components/workspace/*`):
   - model summary updates live from draft edits
   - unsaved model edits integrate with project navigation guard behavior
   - successful save updates persisted config snapshot and shows toast feedback
+  - `Train Model` CTA now resolves model experiments:
+    - creates new run when none exists
+    - otherwise offers `Continue` latest vs `New run`
+- Experiment training behavior:
+  - experiments list shows status and best metric summary per run
+  - experiment detail supports editable training params in `draft`/`failed` states
+  - `Start Training` launches simulated runner and streams live updates via SSE
+  - `Cancel` stops running experiments and transitions to `canceled`
+  - checkpoints tracked as `best_metric`, `best_loss`, `latest` with selection placeholder (`Pick`)
+  - metrics chart supports axis/ticks, legend, series toggles, crosshair hover, and per-epoch tooltip values
+  - refresh-safe behavior: persisted history loads first, then live stream resumes for running experiments
 - Feedback behavior:
   - auto-dismiss toast message for success/error summaries
   - delete summaries include removed image and annotation counts
@@ -402,6 +435,7 @@ Supported statuses:
   - model builder helper/validator regressions for draft transforms, dirty checks, and AJV schema validation
 - API test suite uses `pytest` with `httpx` ASGI client fixtures in `apps/api/tests`.
 - API coverage includes geometry validation/COCO export assertions and project model update validation/persistence checks.
+- API coverage includes experiment create/update/start/cancel flows and SSE smoke validation.
 - ML-specific pytest coverage added under `apps/api/tests/ml`:
   - metadata verification vs real torchvision backbones (`resnet18`, `resnet50`)
   - registry JSON generation checks for expected structure/tap entries
@@ -414,7 +448,6 @@ Supported statuses:
 - Geometry tooling polish pending (no polygon vertex dragging/editing yet)
 - Auth/multi-user permissions not implemented
 - MAL routes are placeholders only
-- Experiment routes are currently placeholders
-- Model training/execution is not implemented yet (`Train Model` remains disabled)
+- Real trainer integration is not implemented yet (current experiment runner is simulated)
 - ML `ModelFactory` is not yet wired into training/execution API flows (currently buildable as backend library only)
 - Active bug investigation: intermittent annotation submit `404` can occur in stale project/asset submit contexts
