@@ -22,6 +22,10 @@ class ProjectModelCreate(BaseModel):
     name: str | None = None
 
 
+class ProjectModelUpdate(BaseModel):
+    config_json: dict[str, Any]
+
+
 class ProjectModelCreateResponse(BaseModel):
     id: str
     name: str

@@ -286,3 +286,14 @@ def validate_model_config(config: dict[str, Any]) -> None:
         path = ".".join(str(part) for part in error.absolute_path) or "$"
         rendered_errors.append(f"{path}: {error.message}")
     raise ModelConfigValidationError("; ".join(rendered_errors))
+
+
+def collect_model_config_issues(config: dict[str, Any]) -> list[dict[str, str]]:
+    schema = _load_schema()
+    validator = Draft7Validator(schema)
+    errors = sorted(validator.iter_errors(config), key=lambda err: list(err.absolute_path))
+    issues: list[dict[str, str]] = []
+    for error in errors:
+        path = ".".join(str(part) for part in error.absolute_path) or "$"
+        issues.append({"path": path, "message": error.message})
+    return issues

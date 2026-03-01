@@ -1,4 +1,5 @@
 import Link from "next/link";
+import type { ReactNode } from "react";
 
 import { readModelSummary } from "../../lib/workspace/modelSummary";
 
@@ -10,6 +11,14 @@ interface ModelBuilderSkeletonProps {
   config?: Record<string, unknown> | null;
   isLoading?: boolean;
   errorMessage?: string | null;
+  editorContent?: ReactNode;
+  isDirty?: boolean;
+  isValid?: boolean;
+  isSaving?: boolean;
+  onSave?: (() => void) | null;
+  saveDisabled?: boolean;
+  saveError?: string | null;
+  validationPanel?: ReactNode;
 }
 
 const STEPS = ["Dataset", "Input", "Backbone", "Neck", "Head", "Loss", "Outputs", "Export"];
@@ -22,6 +31,14 @@ export function ModelBuilderSkeleton({
   config,
   isLoading = false,
   errorMessage = null,
+  editorContent = null,
+  isDirty = false,
+  isValid = true,
+  isSaving = false,
+  onSave = null,
+  saveDisabled = true,
+  saveError = null,
+  validationPanel = null,
 }: ModelBuilderSkeletonProps) {
   const summary = readModelSummary(config ?? {});
 
@@ -46,12 +63,21 @@ export function ModelBuilderSkeleton({
             </ol>
           </aside>
           <section className="model-builder-center">
-            <h3>Configuration Area</h3>
-            <div className="placeholder-card">
-              <p>Model Builder coming soon.</p>
-              {isLoading ? <p>Loading model config...</p> : null}
-              {errorMessage ? <p className="project-field-error">{errorMessage}</p> : null}
+            <div className="model-builder-center-head">
+              <h3>Configuration Area</h3>
+              {isDirty ? <span className="model-builder-unsaved">Unsaved changes</span> : null}
             </div>
+            {isLoading ? (
+              <div className="placeholder-card">
+                <p>Loading model config...</p>
+              </div>
+            ) : (
+              <div className="model-builder-editor">{editorContent ?? <p className="labels-empty">No editable controls configured.</p>}</div>
+            )}
+            {errorMessage ? <p className="project-field-error">{errorMessage}</p> : null}
+            {saveError ? <p className="project-field-error">{saveError}</p> : null}
+            {!isValid ? <p className="project-field-error">Draft config is invalid. Fix validation issues before saving.</p> : null}
+            {validationPanel ? <div className="model-builder-validation-panel">{validationPanel}</div> : null}
           </section>
           <aside className="model-builder-summary">
             <h3>Model Summary</h3>
@@ -118,8 +144,8 @@ export function ModelBuilderSkeleton({
           </aside>
         </div>
         <footer className="model-builder-footer">
-          <button type="button" className="ghost-button" disabled>
-            Save
+          <button type="button" className="ghost-button" disabled={saveDisabled || !onSave} onClick={onSave ? () => onSave() : undefined}>
+            {isSaving ? "Saving..." : "Save"}
           </button>
           <button type="button" className="primary-button" disabled>
             Train Model

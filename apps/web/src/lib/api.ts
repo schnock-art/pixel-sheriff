@@ -207,6 +207,10 @@ export interface ProjectModelRecord {
   updated_at: string;
 }
 
+export interface ProjectModelUpdatePayload {
+  config_json: Record<string, unknown>;
+}
+
 function inferMimeType(filename: string): string {
   const ext = filename.split(".").pop()?.toLowerCase() ?? "";
   if (ext === "jpg" || ext === "jpeg") return "image/jpeg";
@@ -302,6 +306,18 @@ export function createProjectModel(
 
 export function getProjectModel(projectId: string, modelId: string): Promise<ProjectModelRecord> {
   return apiGet<ProjectModelRecord>(`/projects/${projectId}/models/${modelId}`);
+}
+
+export function updateProjectModel(
+  projectId: string,
+  modelId: string,
+  payload: ProjectModelUpdatePayload,
+): Promise<ProjectModelRecord> {
+  return requestJson<ProjectModelRecord>(`/projects/${projectId}/models/${modelId}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
 }
 
 export function uploadAsset(projectId: string, file: File, relativePath?: string): Promise<Asset> {

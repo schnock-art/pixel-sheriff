@@ -49,6 +49,11 @@ Local-first CV annotation platform.
   - project selector dropdown with `+ Create Project` modal
   - datasets `Build Model` CTA creates a project-scoped model draft from latest manifest and opens model detail
   - unsaved draft guard for project/tab/model navigation
+- Model Builder v1.0 edit flow is now implemented:
+  - editable steps for Input, Backbone, Outputs (embedding aux), and Export
+  - AJV-based client-side schema validation on every draft edit
+  - save gating by `isDirty && isValid`
+  - `PUT /api/v1/projects/{project_id}/models/{model_id}` persists schema-valid config updates
 
 ## Stack
 
@@ -72,7 +77,13 @@ Local-first CV annotation platform.
     - `/projects/{project_id}/experiments/{experiment_id}`
   - top shell project selector + tabs (`Datasets`, `Models`, `Experiments`, disabled `Deploy`)
   - workspace status line (`images labeled`, `classes`, `models`, `experiments`)
-- Models pages are scaffolded with project-scoped create/list/detail and read-only summary from generated `ModelConfig`
+- Models pages support project-scoped create/list/detail plus editable model config drafting/saving
+- Model detail page includes:
+  - editable controls for Input, Backbone, Outputs (embedding aux), and Export
+  - live model summary updates as draft fields change
+  - AJV (`ajv` + `ajv-formats`) validation against `ModelConfig v1.0`
+  - Save enablement only when draft has changes and passes schema validation
+  - unsaved changes indicator + guarded navigation integration
 - Experiments pages remain placeholders (no project-scoped training backend yet)
 - Local folder import with one modal:
   - import into existing or new project
@@ -198,6 +209,7 @@ docker compose up --build
 - `GET /api/v1/projects/{project_id}/exports/{content_hash}/download`
 - `GET/POST /api/v1/projects/{project_id}/models`
 - `GET /api/v1/projects/{project_id}/models/{model_id}`
+- `PUT /api/v1/projects/{project_id}/models/{model_id}`
 - `GET/POST /api/v1/models` (placeholder MAL surface)
 - `GET /api/v1/assets/{asset_id}/suggestions` (placeholder)
 - `POST /api/v1/projects/{project_id}/suggestions/batch` (placeholder)
@@ -213,7 +225,7 @@ docker compose up --build
 - Review/QA workflow
 - Geometry tooling polish (no polygon vertex dragging/edit yet)
 - Experiment/Deploy sections are still UI placeholders in the project shell
-- Model builder editing/training actions (`Save`, `Train Model`) are still disabled placeholders
+- Model training execution is not implemented yet (`Train Model` remains disabled)
 - MAL implementation beyond placeholder endpoints
 - Shared-asset reference mode (upload-once/link-many)
 

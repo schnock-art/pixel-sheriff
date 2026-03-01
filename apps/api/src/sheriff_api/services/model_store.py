@@ -66,3 +66,13 @@ class ModelStore:
         self._write_records(project_id, records)
         return record
 
+    def update_config(self, *, project_id: str, model_id: str, config_json: dict[str, Any]) -> dict[str, Any] | None:
+        records = self._read_records(project_id)
+        for record in records:
+            if str(record.get("id")) != model_id:
+                continue
+            record["config_json"] = config_json
+            record["updated_at"] = _utc_now_iso()
+            self._write_records(project_id, records)
+            return record
+        return None

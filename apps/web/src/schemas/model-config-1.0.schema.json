@@ -1,0 +1,422 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://pixel-sheriff.dev/schemas/model-config-1.0.schema.json",
+  "title": "Pixel Sheriff ModelConfig",
+  "description": "ModelConfig v1.0 for low-code CV model building. Curated architecture blocks + optional auxiliary outputs (embeddings/feature taps) and ONNX export settings.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "name",
+    "created_at",
+    "source_dataset",
+    "input",
+    "architecture",
+    "loss",
+    "outputs",
+    "export"
+  ],
+  "properties": {
+    "schema_version": { "type": "string", "const": "1.0" },
+    "name": { "type": "string", "minLength": 1 },
+    "created_at": { "type": "string", "format": "date-time" },
+    "notes": { "type": "string" },
+
+    "source_dataset": { "$ref": "#/definitions/SourceDataset" },
+    "input": { "$ref": "#/definitions/InputSpec" },
+    "architecture": { "$ref": "#/definitions/Architecture" },
+    "loss": { "$ref": "#/definitions/LossSpec" },
+    "postprocess": { "$ref": "#/definitions/PostprocessSpec" },
+    "outputs": { "$ref": "#/definitions/OutputsSpec" },
+    "export": { "$ref": "#/definitions/ExportSpec" }
+  },
+
+  "definitions": {
+    "Task": {
+      "type": "string",
+      "enum": ["classification", "detection", "segmentation"]
+    },
+
+    "SourceDataset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["manifest_id", "task", "num_classes", "class_order"],
+      "properties": {
+        "manifest_id": { "type": "string", "minLength": 1 },
+        "task": { "$ref": "#/definitions/Task" },
+        "num_classes": { "type": "integer", "minimum": 1 },
+        "class_order": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "integer" }
+        },
+        "class_names": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+
+    "InputSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["image_channels", "input_size", "resize_policy", "normalization"],
+      "properties": {
+        "image_channels": { "type": "integer", "enum": [1, 3] },
+        "input_size": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": { "type": "integer", "minimum": 1 }
+        },
+        "resize_policy": {
+          "type": "string",
+          "enum": ["letterbox", "stretch", "longest_side_pad"]
+        },
+        "normalization": { "$ref": "#/definitions/Normalization" }
+      }
+    },
+
+    "Normalization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": {
+        "type": { "type": "string", "enum": ["imagenet", "none", "custom"] },
+        "mean": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "items": { "type": "number" }
+        },
+        "std": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "items": { "type": "number" }
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "type": { "const": "custom" } }, "required": ["type"] },
+          "then": { "required": ["mean", "std"] }
+        }
+      ]
+    },
+
+    "Architecture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["family", "framework", "precision", "backbone", "head"],
+      "properties": {
+        "family": {
+          "type": "string",
+          "enum": [
+            "resnet_classifier",
+            "retinanet",
+            "fasterrcnn",
+            "maskrcnn",
+            "deeplabv3"
+          ]
+        },
+        "framework": {
+          "type": "string",
+          "enum": ["torchvision", "custom"]
+        },
+        "precision": { "type": "string", "enum": ["fp32", "amp"] },
+
+        "backbone": { "$ref": "#/definitions/Backbone" },
+        "neck": { "$ref": "#/definitions/Neck" },
+        "head": { "$ref": "#/definitions/Head" }
+      }
+    },
+
+    "Backbone": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "pretrained"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "enum": [
+            "resnet18",
+            "resnet34",
+            "resnet50",
+            "resnet101",
+            "mobilenet_v3_large",
+            "mobilenet_v3_small"
+          ]
+        },
+        "pretrained": { "type": "boolean" },
+        "frozen_stages": { "type": "integer", "minimum": 0, "maximum": 5 },
+        "output_strides": {
+          "type": "array",
+          "items": { "type": "integer", "enum": [4, 8, 16, 32, 64] },
+          "uniqueItems": true
+        }
+      }
+    },
+
+    "Neck": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": {
+        "type": { "type": "string", "enum": ["none", "fpn"] },
+        "fpn_channels": { "type": "integer", "minimum": 1 }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "type": { "const": "fpn" } }, "required": ["type"] },
+          "then": { "required": ["fpn_channels"] }
+        }
+      ]
+    },
+
+    "Head": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "num_classes"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "linear",
+            "retinanet",
+            "fasterrcnn",
+            "maskrcnn",
+            "deeplabv3_head"
+          ]
+        },
+        "num_classes": { "type": "integer", "minimum": 1 },
+
+        "anchors": { "$ref": "#/definitions/AnchorsSpec" },
+        "nms": { "$ref": "#/definitions/NmsSpec" },
+
+        "mask_head": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean" }
+          }
+        }
+      }
+    },
+
+    "AnchorsSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sizes", "aspect_ratios"],
+      "properties": {
+        "sizes": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "number", "exclusiveMinimum": 0 }
+        },
+        "aspect_ratios": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "number", "exclusiveMinimum": 0 }
+        }
+      }
+    },
+
+    "NmsSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["score_thresh", "iou_thresh", "max_detections"],
+      "properties": {
+        "score_thresh": { "type": "number", "minimum": 0, "maximum": 1 },
+        "iou_thresh": { "type": "number", "minimum": 0, "maximum": 1 },
+        "max_detections": { "type": "integer", "minimum": 1 }
+      }
+    },
+
+    "LossSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "classification_cross_entropy",
+            "retinanet_default",
+            "fasterrcnn_default",
+            "maskrcnn_default",
+            "deeplabv3_default",
+            "custom"
+          ]
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      }
+    },
+
+    "PostprocessSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "output_format": {
+          "type": "string",
+          "enum": [
+            "classification_logits",
+            "classification_probs",
+            "coco_detections",
+            "coco_segmentation"
+          ]
+        },
+        "label_map": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "index_to_class_id": {
+              "type": "array",
+              "items": { "type": "integer" },
+              "minItems": 1
+            }
+          }
+        }
+      }
+    },
+
+    "OutputsSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["primary", "aux"],
+      "properties": {
+        "primary": { "$ref": "#/definitions/PrimaryOutput" },
+        "aux": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/AuxOutput" },
+          "maxItems": 8
+        }
+      }
+    },
+
+    "PrimaryOutput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "type", "task"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "type": { "type": "string", "const": "task_output" },
+        "task": { "$ref": "#/definitions/Task" },
+        "format": {
+          "type": "string",
+          "enum": [
+            "classification_logits",
+            "classification_probs",
+            "coco_detections",
+            "coco_segmentation"
+          ]
+        }
+      }
+    },
+
+    "AuxOutput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "type", "source", "projection"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "type": { "type": "string", "enum": ["embedding", "feature_map", "logits"] },
+        "source": { "$ref": "#/definitions/TapSource" },
+        "projection": { "$ref": "#/definitions/Projection" }
+      }
+    },
+
+    "TapSource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["block", "tap"],
+      "properties": {
+        "block": { "type": "string", "enum": ["backbone", "neck", "head"] },
+        "tap": { "type": "string", "minLength": 1 }
+      }
+    },
+
+    "Projection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["none", "linear", "mlp", "conv1x1", "pool_linear"]
+        },
+
+        "out_dim": { "type": "integer", "minimum": 1 },
+        "hidden_dim": { "type": "integer", "minimum": 1 },
+        "activation": { "type": "string", "enum": ["relu", "gelu", "silu", "tanh"] },
+        "dropout": { "type": "number", "minimum": 0, "maximum": 1 },
+
+        "normalize": { "type": "string", "enum": ["none", "l2"] },
+
+        "conv_out_channels": { "type": "integer", "minimum": 1 },
+
+        "pool": { "type": "string", "enum": ["avg", "max"] }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "type": { "const": "linear" } }, "required": ["type"] },
+          "then": { "required": ["out_dim"] }
+        },
+        {
+          "if": { "properties": { "type": { "const": "mlp" } }, "required": ["type"] },
+          "then": { "required": ["out_dim", "hidden_dim", "activation", "dropout"] }
+        },
+        {
+          "if": { "properties": { "type": { "const": "conv1x1" } }, "required": ["type"] },
+          "then": { "required": ["conv_out_channels"] }
+        },
+        {
+          "if": { "properties": { "type": { "const": "pool_linear" } }, "required": ["type"] },
+          "then": { "required": ["pool", "out_dim"] }
+        }
+      ]
+    },
+
+    "ExportSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["onnx"],
+      "properties": {
+        "onnx": { "$ref": "#/definitions/OnnxExport" }
+      }
+    },
+
+    "OnnxExport": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "opset", "dynamic_shapes", "output_names"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "opset": { "type": "integer", "minimum": 9 },
+        "dynamic_shapes": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["enabled", "batch", "height_width"],
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "batch": { "type": "boolean" },
+            "height_width": { "type": "boolean" }
+          }
+        },
+        "output_names": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "output_dtypes": {
+          "type": "object",
+          "additionalProperties": { "type": "string", "enum": ["float32", "float16", "int64"] }
+        }
+      }
+    }
+  }
+}

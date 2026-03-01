@@ -169,7 +169,9 @@ Project-scoped model scaffolding:
 - `GET /api/v1/projects/{project_id}/models`
 - `POST /api/v1/projects/{project_id}/models`
 - `GET /api/v1/projects/{project_id}/models/{model_id}`
+- `PUT /api/v1/projects/{project_id}/models/{model_id}`
 - model creation derives deterministic `ModelConfig v1.0` from latest `DatasetVersion.manifest_json` and validates against schema before persistence
+- model updates validate incoming `config_json` against `ModelConfig v1.0` before persistence
 
 Error response contract:
 
@@ -192,7 +194,7 @@ App-router entry and project shell:
   - guarded navigation for unsaved drafts
 - `apps/web/src/app/projects/[projectId]/datasets/page.tsx` mounts the datasets workspace
 - `apps/web/src/app/projects/[projectId]/models/page.tsx` renders project-scoped model list/empty state + create flow
-- `apps/web/src/app/projects/[projectId]/models/[modelId]/page.tsx` renders builder scaffold with read-only config summary + back navigation
+- `apps/web/src/app/projects/[projectId]/models/[modelId]/page.tsx` renders editable Model Builder controls with draft/save state, AJV validation, and live summary updates
 - experiments routes are currently placeholders for Phase 1 UI structure
 
 UI structure:
@@ -216,6 +218,12 @@ Local persisted setting:
 
 - project multi-label map in `localStorage` (`pixel-sheriff:project-multilabel:v1`)
 
+Schema validation:
+
+- AJV (`ajv` + `ajv-formats`) is the standard web validation layer for JSON Schema checks
+- `apps/web/src/lib/schema/validator.ts` provides reusable schema compilation + AJV error normalization
+- `apps/web/src/schemas/model-config-1.0.schema.json` mirrors backend `ModelConfig v1.0` for client-side draft validation
+
 Workspace pure helpers (`apps/web/src/lib/workspace/*`):
 
 - `tree.*`: relative-path normalization, folder tree construction, folder chain helpers
@@ -237,7 +245,7 @@ Workspace container components (`apps/web/src/components/workspace/*`):
 - `ProjectAssetsWorkspace.tsx`: datasets UI/workflow integration
 - `ProjectNavigationContext.tsx`: unsaved-draft guard context and guarded navigation wrapper
 - `ProjectCreateModal.tsx`: project creation modal used in shell and empty state
-- `ModelBuilderSkeleton.tsx`: builder scaffold layout for model routes (stepper + summary + disabled action controls)
+- `ModelBuilderSkeleton.tsx`: builder layout for model routes (stepper + editable center panel + summary + save-state actions)
 
 ### Implemented UX Behaviors
 
@@ -291,12 +299,20 @@ Workspace container components (`apps/web/src/components/workspace/*`):
   - segmentation mode (polygon v1): click to add points, close near start-point, by double-click, or with `Enter`; `Esc` to cancel draft
   - geometry edits join existing pending/edit-mode submit workflow
   - inline draft-status warnings are shown while geometry is uncommitted
+- Model Builder behavior:
+  - model detail keeps a local draft separate from saved `config_json`
+  - draft is validated on each change using AJV + `ModelConfig v1.0` schema
+  - Save is enabled only when draft is both changed and valid (`isDirty && isValid`)
+  - editable v0 steps are implemented for Input, Backbone, Outputs (embedding aux), and Export
+  - model summary updates live from draft edits
+  - unsaved model edits integrate with project navigation guard behavior
+  - successful save updates persisted config snapshot and shows toast feedback
 - Feedback behavior:
   - auto-dismiss toast message for success/error summaries
   - delete summaries include removed image and annotation counts
- - Navigation guard behavior:
-   - when staged/pending edits exist, switching project/section/model builder prompts for discard confirmation
-   - accepted navigation clears draft-guard state before transition
+- Navigation guard behavior:
+  - when staged/pending edits exist, switching project/section/model builder prompts for discard confirmation
+  - accepted navigation clears draft-guard state before transition
 
 ## 6. Annotation Payload Contract
 
@@ -333,8 +349,9 @@ Supported statuses:
   - import -> label -> submit workflow composition checks
   - edit-mode staged state persistence regression checks
   - helper-level regressions for hotkeys, delete flows, tree/pagination, import defaults, annotation state transitions, and geometry math helpers
+  - model builder helper/validator regressions for draft transforms, dirty checks, and AJV schema validation
 - API test suite uses `pytest` with `httpx` ASGI client fixtures in `apps/api/tests`.
-- API coverage includes geometry validation and COCO export geometry record assertions.
+- API coverage includes geometry validation/COCO export assertions and project model update validation/persistence checks.
 
 ## 8. Known Gaps
 
@@ -343,5 +360,5 @@ Supported statuses:
 - Auth/multi-user permissions not implemented
 - MAL routes are placeholders only
 - Experiment routes are currently placeholders
-- Model routes are scaffolded only (no editable builder fields, no training execution yet)
+- Model training/execution is not implemented yet (`Train Model` remains disabled)
 - Active bug investigation: intermittent annotation submit `404` can occur in stale project/asset submit contexts

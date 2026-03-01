@@ -15,11 +15,13 @@ from sheriff_api.schemas.models import (
     ProjectModelCreateResponse,
     ProjectModelRecord,
     ProjectModelSummary,
+    ProjectModelUpdate,
 )
 from sheriff_api.services.model_config_factory import (
     ManifestConfigError,
     ModelConfigValidationError,
     build_default_model_config,
+    collect_model_config_issues,
     validate_model_config,
 )
 from sheriff_api.services.model_store import ModelStore
@@ -172,6 +174,51 @@ async def get_project_model(project_id: str, model_id: str, db: AsyncSession = D
         )
 
     return ProjectModelRecord.model_validate(record)
+
+
+@router.put("/projects/{project_id}/models/{model_id}", response_model=ProjectModelRecord)
+async def update_project_model(
+    project_id: str,
+    model_id: str,
+    payload: ProjectModelUpdate,
+    db: AsyncSession = Depends(get_db),
+) -> ProjectModelRecord:
+    project = await db.get(Project, project_id)
+    if project is None:
+        raise api_error(status_code=404, code="project_not_found", message="Project not found")
+
+    record = model_store.get(project_id, model_id)
+    if record is None:
+        raise api_error(
+            status_code=404,
+            code="model_not_found",
+            message="Model not found in project",
+            details={"project_id": project_id, "model_id": model_id},
+        )
+
+    issues = collect_model_config_issues(payload.config_json)
+    if issues:
+        raise api_error(
+            status_code=422,
+            code="validation_error",
+            message="Model config validation failed",
+            details={
+                "project_id": project_id,
+                "model_id": model_id,
+                "issues": issues,
+            },
+        )
+
+    updated = model_store.update_config(project_id=project_id, model_id=model_id, config_json=payload.config_json)
+    if updated is None:
+        raise api_error(
+            status_code=404,
+            code="model_not_found",
+            message="Model not found in project",
+            details={"project_id": project_id, "model_id": model_id},
+        )
+
+    return ProjectModelRecord.model_validate(updated)
 
 
 @router.get("/assets/{asset_id}/suggestions")

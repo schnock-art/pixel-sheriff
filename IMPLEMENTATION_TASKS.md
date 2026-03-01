@@ -30,6 +30,7 @@ Status reflects current repository behavior.
   - [x] `GET /projects/{project_id}/models`
   - [x] `POST /projects/{project_id}/models` (manifest-derived deterministic `ModelConfig` + schema validation)
   - [x] `GET /projects/{project_id}/models/{model_id}`
+  - [x] `PUT /projects/{project_id}/models/{model_id}` (server-side schema validation before persistence)
   - [x] temporary file-backed model persistence (`models/{project_id}/records.json`)
 - [x] Local storage safety checks (path containment)
 - [x] API packaging fixes for `src` layout Docker builds
@@ -51,7 +52,8 @@ Status reflects current repository behavior.
 - [x] Datasets workspace extracted to `ProjectAssetsWorkspace`
 - [x] Unsaved-draft guard on project/tab/build-model navigation
 - [x] Build Model CTA creates a project-scoped model draft and opens model detail
-- [x] Models pages scaffolded with list/create/detail + read-only model summary
+- [x] Models pages support list/create/detail + editable Model Builder draft/save workflow
+- [x] AJV validation layer for web JSON Schema checks (`ajv` + `ajv-formats`) wired for ModelConfig draft validation
 - [x] Experiments placeholder pages/skeletons
 - [x] Fixed project switch activation/navigation bug in shell
 - [x] Responsive styling + viewer letterbox rendering

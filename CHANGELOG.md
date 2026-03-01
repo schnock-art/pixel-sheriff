@@ -9,12 +9,19 @@ All notable changes to this project will be documented in this file.
   - `POST /api/v1/projects/{project_id}/models` builds deterministic `ModelConfig v1.0` from latest dataset manifest and validates schema
   - `GET /api/v1/projects/{project_id}/models` returns model summaries
   - `GET /api/v1/projects/{project_id}/models/{model_id}` returns full model record/config
+  - `PUT /api/v1/projects/{project_id}/models/{model_id}` validates and persists updated `config_json`
   - temporary file-backed model persistence under `models/{project_id}/records.json` (explicit TODO to move to DB table)
 - Models UI wiring:
   - datasets `Build Model` now creates model draft and navigates to model detail
   - models list page now fetches real project-scoped model summaries and supports `+ New Model`
   - model detail scaffold now loads read-only summary from `config_json`
   - model detail header now includes `Back to Models` action
+- Model Builder editing + validation flow:
+  - editable v0 controls for Input, Backbone, Outputs (embedding aux), and Export steps
+  - local draft state with dirty tracking vs saved config
+  - AJV (`ajv` + `ajv-formats`) validation of draft config against `ModelConfig v1.0` schema
+  - Save action gating via `isDirty && isValid` and success toast feedback
+  - model builder unsaved edits integrated with project navigation guard
 - Project-scoped App Router workspace shell:
   - `/` -> `/projects` redirect
   - `/projects` project entry resolver + empty-state create-project flow
@@ -110,6 +117,8 @@ All notable changes to this project will be documented in this file.
 - Inline geometry draft warnings in viewer for uncommitted bbox/polygon drafts.
 
 ### Changed
+- Model detail page behavior evolved from read-only scaffold to editable builder with live summary updates.
+- Model builder footer now uses active Save state handling; `Train Model` remains disabled placeholder.
 - Web datasets workspace was moved into `apps/web/src/components/workspace/ProjectAssetsWorkspace.tsx`.
 - Root `apps/web/src/app/page.tsx` is now redirect-only.
 - Project/tab navigation now uses guarded hard transitions to guarantee reliable project activation in shell interactions.

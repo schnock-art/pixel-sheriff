@@ -980,3 +980,81 @@ async def test_project_model_list_returns_summaries(client: AsyncClient) -> None
         assert row["task"] == "detection"
         assert row["backbone_name"] == "resnet50"
         assert row["num_classes"] == 1
+
+
+@pytest.mark.asyncio
+async def test_project_model_update_persists_valid_config(client: AsyncClient) -> None:
+    project_id, _manifest = await _create_detection_project_with_manifest(client, project_name="model-update-valid")
+
+    created = await client.post(f"/api/v1/projects/{project_id}/models", json={})
+    assert created.status_code == 200
+    created_payload = created.json()
+    model_id = created_payload["id"]
+    updated_config = created_payload["config"]
+    updated_config["input"]["input_size"] = [512, 512]
+    updated_config["architecture"]["backbone"]["name"] = "resnet34"
+    updated_config["export"]["onnx"]["opset"] = 18
+
+    update_response = await client.put(
+        f"/api/v1/projects/{project_id}/models/{model_id}",
+        json={"config_json": updated_config},
+    )
+    assert update_response.status_code == 200
+    update_payload = update_response.json()
+    assert update_payload["id"] == model_id
+    assert update_payload["config_json"]["input"]["input_size"] == [512, 512]
+    assert update_payload["config_json"]["architecture"]["backbone"]["name"] == "resnet34"
+    assert update_payload["config_json"]["export"]["onnx"]["opset"] == 18
+
+    detail = await client.get(f"/api/v1/projects/{project_id}/models/{model_id}")
+    assert detail.status_code == 200
+    detail_payload = detail.json()
+    assert detail_payload["config_json"]["input"]["input_size"] == [512, 512]
+    assert detail_payload["config_json"]["architecture"]["backbone"]["name"] == "resnet34"
+    assert detail_payload["config_json"]["export"]["onnx"]["opset"] == 18
+
+
+@pytest.mark.asyncio
+async def test_project_model_update_returns_validation_error_for_invalid_config(client: AsyncClient) -> None:
+    project_id, _manifest = await _create_detection_project_with_manifest(client, project_name="model-update-invalid")
+
+    created = await client.post(f"/api/v1/projects/{project_id}/models", json={})
+    assert created.status_code == 200
+    created_payload = created.json()
+    model_id = created_payload["id"]
+    invalid_config = created_payload["config"]
+    invalid_config["schema_version"] = "2.0"
+
+    update_response = await client.put(
+        f"/api/v1/projects/{project_id}/models/{model_id}",
+        json={"config_json": invalid_config},
+    )
+    payload = assert_api_error(
+        update_response,
+        status_code=422,
+        code="validation_error",
+        message="Model config validation failed",
+    )
+    issues = payload["error"]["details"]["issues"]
+    assert isinstance(issues, list)
+    assert len(issues) >= 1
+    first_issue = issues[0]
+    assert isinstance(first_issue["path"], str)
+    assert isinstance(first_issue["message"], str)
+
+
+@pytest.mark.asyncio
+async def test_project_model_update_returns_not_found_for_missing_model(client: AsyncClient) -> None:
+    project_id, _manifest = await _create_detection_project_with_manifest(client, project_name="model-update-missing")
+    missing_model_id = str(uuid.uuid4())
+
+    update_response = await client.put(
+        f"/api/v1/projects/{project_id}/models/{missing_model_id}",
+        json={"config_json": {}},
+    )
+    assert_api_error(
+        update_response,
+        status_code=404,
+        code="model_not_found",
+        message="Model not found in project",
+    )
