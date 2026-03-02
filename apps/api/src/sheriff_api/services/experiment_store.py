@@ -74,6 +74,24 @@ class ExperimentStore:
     def _checkpoints_path(self, project_id: str, experiment_id: str, attempt: int) -> Path:
         return self._run_dir(project_id, experiment_id, attempt) / "checkpoints.json"
 
+    def _evaluation_path(self, project_id: str, experiment_id: str, attempt: int) -> Path:
+        return self._run_dir(project_id, experiment_id, attempt) / "evaluation.json"
+
+    def _predictions_path(self, project_id: str, experiment_id: str, attempt: int) -> Path:
+        return self._run_dir(project_id, experiment_id, attempt) / "predictions.jsonl"
+
+    def _predictions_meta_path(self, project_id: str, experiment_id: str, attempt: int) -> Path:
+        return self._run_dir(project_id, experiment_id, attempt) / "predictions.meta.json"
+
+    def _latest_evaluation_path(self, project_id: str, experiment_id: str) -> Path:
+        return self._experiment_dir(project_id, experiment_id) / "evaluation.json"
+
+    def _latest_predictions_path(self, project_id: str, experiment_id: str) -> Path:
+        return self._experiment_dir(project_id, experiment_id) / "predictions.jsonl"
+
+    def _latest_predictions_meta_path(self, project_id: str, experiment_id: str) -> Path:
+        return self._experiment_dir(project_id, experiment_id) / "predictions.meta.json"
+
     def _status_default(self) -> dict[str, Any]:
         return {
             "status": "draft",
@@ -395,6 +413,126 @@ class ExperimentStore:
         with path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(metric_row, sort_keys=True))
             handle.write("\n")
+
+    def _list_attempts(self, project_id: str, experiment_id: str) -> list[int]:
+        runs_dir = self._runs_dir(project_id, experiment_id)
+        if not runs_dir.exists():
+            return []
+        attempts: list[int] = []
+        try:
+            for child in runs_dir.iterdir():
+                if not child.is_dir():
+                    continue
+                try:
+                    attempt = int(child.name)
+                except ValueError:
+                    continue
+                if attempt >= 1:
+                    attempts.append(attempt)
+        except OSError:
+            return []
+        return sorted(set(attempts), reverse=True)
+
+    def _candidate_attempts(self, project_id: str, experiment_id: str) -> list[int]:
+        status_row = self._read_status(project_id, experiment_id)
+        attempts: list[int] = []
+        for key in ("last_completed_attempt", "current_run_attempt"):
+            value = status_row.get(key)
+            if isinstance(value, int) and value >= 1:
+                attempts.append(value)
+        attempts.extend(self._list_attempts(project_id, experiment_id))
+        ordered: list[int] = []
+        seen: set[int] = set()
+        for attempt in attempts:
+            if attempt in seen:
+                continue
+            seen.add(attempt)
+            ordered.append(attempt)
+        return ordered
+
+    def _latest_attempt_with_file(self, project_id: str, experiment_id: str, filename: str) -> int | None:
+        for attempt in self._candidate_attempts(project_id, experiment_id):
+            path = self._run_dir(project_id, experiment_id, attempt) / filename
+            if path.exists() and path.is_file():
+                return attempt
+        return None
+
+    def latest_attempt_with_evaluation(self, project_id: str, experiment_id: str) -> int | None:
+        return self._latest_attempt_with_file(project_id, experiment_id, "evaluation.json")
+
+    def read_evaluation(self, project_id: str, experiment_id: str, *, attempt: int | None = None) -> tuple[int, dict[str, Any]] | None:
+        resolved_attempt = attempt if isinstance(attempt, int) and attempt >= 1 else self.latest_attempt_with_evaluation(project_id, experiment_id)
+        if isinstance(resolved_attempt, int) and resolved_attempt >= 1:
+            path = self._evaluation_path(project_id, experiment_id, resolved_attempt)
+            payload = self._read_json(path, None)
+            if isinstance(payload, dict):
+                return resolved_attempt, payload
+
+        fallback_payload = self._read_json(self._latest_evaluation_path(project_id, experiment_id), None)
+        if isinstance(fallback_payload, dict):
+            status_row = self._read_status(project_id, experiment_id)
+            fallback_attempt = status_row.get("last_completed_attempt")
+            if not isinstance(fallback_attempt, int) or fallback_attempt < 1:
+                fallback_attempt = status_row.get("current_run_attempt")
+            if not isinstance(fallback_attempt, int) or fallback_attempt < 1:
+                fallback_attempt = 1
+            return int(fallback_attempt), fallback_payload
+        return None
+
+    def read_predictions(
+        self,
+        project_id: str,
+        experiment_id: str,
+        *,
+        attempt: int | None = None,
+    ) -> tuple[int, list[dict[str, Any]], dict[str, Any] | None] | None:
+        resolved_attempt = attempt if isinstance(attempt, int) and attempt >= 1 else self._latest_attempt_with_file(project_id, experiment_id, "predictions.jsonl")
+        if isinstance(resolved_attempt, int) and resolved_attempt >= 1:
+            predictions_path = self._predictions_path(project_id, experiment_id, resolved_attempt)
+            meta = self._read_json(self._predictions_meta_path(project_id, experiment_id, resolved_attempt), None)
+            rows: list[dict[str, Any]] = []
+            if predictions_path.exists() and predictions_path.is_file():
+                try:
+                    with predictions_path.open("r", encoding="utf-8") as handle:
+                        for line in handle:
+                            line = line.strip()
+                            if not line:
+                                continue
+                            try:
+                                parsed = json.loads(line)
+                            except json.JSONDecodeError:
+                                continue
+                            if isinstance(parsed, dict):
+                                rows.append(parsed)
+                except OSError:
+                    return None
+                return resolved_attempt, rows, meta if isinstance(meta, dict) else None
+
+        fallback_path = self._latest_predictions_path(project_id, experiment_id)
+        if not fallback_path.exists() or not fallback_path.is_file():
+            return None
+        fallback_meta = self._read_json(self._latest_predictions_meta_path(project_id, experiment_id), None)
+        rows: list[dict[str, Any]] = []
+        try:
+            with fallback_path.open("r", encoding="utf-8") as handle:
+                for line in handle:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        parsed = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if isinstance(parsed, dict):
+                        rows.append(parsed)
+        except OSError:
+            return None
+        fallback_attempt = fallback_meta.get("attempt") if isinstance(fallback_meta, dict) else None
+        if not isinstance(fallback_attempt, int) or fallback_attempt < 1:
+            fallback_attempt = self._read_status(project_id, experiment_id).get("last_completed_attempt")
+        if not isinstance(fallback_attempt, int) or fallback_attempt < 1:
+            fallback_attempt = 1
+        return int(fallback_attempt), rows, fallback_meta if isinstance(fallback_meta, dict) else None
 
     def set_checkpoints(self, *, project_id: str, experiment_id: str, attempt: int, checkpoints: list[dict[str, Any]]) -> None:
         self._write_json(self._checkpoints_path(project_id, experiment_id, attempt), checkpoints)

@@ -1070,6 +1070,117 @@ async def _create_project_model(client: AsyncClient, *, project_name: str) -> tu
     return project_id, created.json()["id"]
 
 
+def _seed_experiment_run_artifacts(
+    *,
+    project_id: str,
+    experiment_id: str,
+    attempt: int = 1,
+    metrics_rows: list[dict] | None = None,
+) -> None:
+    settings = get_settings()
+    experiment_dir = Path(settings.storage_root) / "experiments" / project_id / experiment_id
+    run_dir = experiment_dir / "runs" / str(attempt)
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    if metrics_rows is None:
+        metrics_rows = [
+            {"attempt": attempt, "epoch": 1, "train_loss": 0.9, "val_loss": 0.8, "val_accuracy": 0.5},
+            {"attempt": attempt, "epoch": 2, "train_loss": 0.7, "val_loss": 0.6, "val_accuracy": 0.65},
+            {"attempt": attempt, "epoch": 3, "train_loss": 0.6, "val_loss": 0.5, "val_accuracy": 0.72},
+        ]
+
+    metrics_content = "".join(f"{json.dumps(row, sort_keys=True)}\n" for row in metrics_rows)
+    (run_dir / "metrics.jsonl").write_text(metrics_content, encoding="utf-8")
+
+    evaluation_payload = {
+        "schema_version": "1",
+        "task": "classification",
+        "computed_at": "2025-01-01T00:00:00Z",
+        "split": "val",
+        "num_samples": 4,
+        "classes": {
+            "class_order": [1, 2],
+            "class_names": ["one", "two"],
+            "id_to_index": {"1": 0, "2": 1},
+        },
+        "overall": {
+            "accuracy": 0.75,
+            "macro_f1": 0.73,
+            "macro_precision": 0.72,
+            "macro_recall": 0.74,
+        },
+        "per_class": [
+            {"class_index": 0, "class_id": 1, "name": "one", "precision": 0.8, "recall": 0.67, "f1": 0.73, "support": 3},
+            {"class_index": 1, "class_id": 2, "name": "two", "precision": 0.67, "recall": 1.0, "f1": 0.8, "support": 1},
+        ],
+        "confusion_matrix": {
+            "matrix": [[2, 1], [0, 1]],
+            "normalized_by": "none",
+            "labels": {"axis": "true_rows_pred_cols"},
+        },
+        "samples": {
+            "misclassified": [
+                {
+                    "asset_id": "asset-1",
+                    "relative_path": "assets/a1.jpg",
+                    "true_class_index": 0,
+                    "pred_class_index": 1,
+                    "confidence": 0.95,
+                    "margin": 0.70,
+                }
+            ],
+            "lowest_confidence_correct": [],
+            "highest_confidence_wrong": [
+                {
+                    "asset_id": "asset-1",
+                    "relative_path": "assets/a1.jpg",
+                    "true_class_index": 0,
+                    "pred_class_index": 1,
+                    "confidence": 0.95,
+                    "margin": 0.70,
+                }
+            ],
+        },
+    }
+    predictions_rows = [
+        {"asset_id": "asset-0", "relative_path": "assets/a0.jpg", "true_class_index": 0, "pred_class_index": 0, "confidence": 0.81, "margin": 0.52},
+        {"asset_id": "asset-1", "relative_path": "assets/a1.jpg", "true_class_index": 0, "pred_class_index": 1, "confidence": 0.95, "margin": 0.70},
+        {"asset_id": "asset-2", "relative_path": "assets/a2.jpg", "true_class_index": 0, "pred_class_index": 0, "confidence": 0.55, "margin": 0.11},
+        {"asset_id": "asset-3", "relative_path": "assets/a3.jpg", "true_class_index": 1, "pred_class_index": 1, "confidence": 0.60, "margin": 0.22},
+    ]
+    predictions_content = "".join(f"{json.dumps(row, sort_keys=True)}\n" for row in predictions_rows)
+    predictions_meta = {
+        "schema_version": "1",
+        "attempt": attempt,
+        "num_samples": len(predictions_rows),
+        "task": "classification",
+        "split": "val",
+        "computed_at": "2025-01-01T00:00:00Z",
+    }
+
+    for target in [run_dir / "evaluation.json", experiment_dir / "evaluation.json"]:
+        target.write_text(json.dumps(evaluation_payload, indent=2, sort_keys=True), encoding="utf-8")
+    for target in [run_dir / "predictions.jsonl", experiment_dir / "predictions.jsonl"]:
+        target.write_text(predictions_content, encoding="utf-8")
+    for target in [run_dir / "predictions.meta.json", experiment_dir / "predictions.meta.json"]:
+        target.write_text(json.dumps(predictions_meta, indent=2, sort_keys=True), encoding="utf-8")
+
+    status_path = experiment_dir / "status.json"
+    status_payload = {}
+    if status_path.exists():
+        status_payload = json.loads(status_path.read_text(encoding="utf-8"))
+    status_payload.update(
+        {
+            "status": "completed",
+            "current_run_attempt": attempt,
+            "last_completed_attempt": attempt,
+            "active_job_id": None,
+            "error": None,
+        }
+    )
+    status_path.write_text(json.dumps(status_payload, indent=2, sort_keys=True), encoding="utf-8")
+
+
 @pytest.mark.asyncio
 async def test_experiment_create_from_model_returns_draft_record(client: AsyncClient) -> None:
     project_id, model_id = await _create_project_model(client, project_name="exp-create")
@@ -1160,6 +1271,99 @@ async def test_experiment_start_generates_metrics_and_checkpoints(client: AsyncC
     assert detail_payload["current_run_attempt"] == payload["attempt"]
     assert detail_payload["active_job_id"] == payload["job_id"]
     assert detail_payload["metrics"] == []
+
+
+@pytest.mark.asyncio
+async def test_experiment_analytics_endpoint_returns_series_and_honors_max_points(client: AsyncClient) -> None:
+    project_id, model_id = await _create_project_model(client, project_name="exp-analytics")
+    created = await client.post(
+        f"/api/v1/projects/{project_id}/experiments",
+        json={"model_id": model_id, "name": "analytics-run"},
+    )
+    assert created.status_code == 200
+    experiment_id = created.json()["id"]
+    _seed_experiment_run_artifacts(project_id=project_id, experiment_id=experiment_id, attempt=1)
+
+    analytics = await client.get(f"/api/v1/projects/{project_id}/experiments/analytics?max_points=2")
+    assert analytics.status_code == 200
+    payload = analytics.json()
+    assert "items" in payload
+    assert "available_series" in payload
+    item = next((row for row in payload["items"] if row["experiment_id"] == experiment_id), None)
+    assert item is not None
+    assert item["series"]["epochs"] == [2, 3]
+    assert len(item["series"]["val_accuracy"]) == 2
+    assert "val_accuracy" in payload["available_series"]
+
+
+@pytest.mark.asyncio
+async def test_experiment_evaluation_endpoint_returns_attempt_payload(client: AsyncClient) -> None:
+    project_id, model_id = await _create_project_model(client, project_name="exp-evaluation")
+    created = await client.post(
+        f"/api/v1/projects/{project_id}/experiments",
+        json={"model_id": model_id, "name": "evaluation-run"},
+    )
+    assert created.status_code == 200
+    experiment_id = created.json()["id"]
+    _seed_experiment_run_artifacts(project_id=project_id, experiment_id=experiment_id, attempt=3)
+
+    response = await client.get(f"/api/v1/projects/{project_id}/experiments/{experiment_id}/evaluation")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["attempt"] == 3
+    assert payload["schema_version"] == "1"
+    assert payload["overall"]["accuracy"] == 0.75
+
+
+@pytest.mark.asyncio
+async def test_experiment_evaluation_endpoint_returns_not_found_when_missing(client: AsyncClient) -> None:
+    project_id, model_id = await _create_project_model(client, project_name="exp-evaluation-missing")
+    created = await client.post(
+        f"/api/v1/projects/{project_id}/experiments",
+        json={"model_id": model_id, "name": "evaluation-missing"},
+    )
+    assert created.status_code == 200
+    experiment_id = created.json()["id"]
+
+    response = await client.get(f"/api/v1/projects/{project_id}/experiments/{experiment_id}/evaluation")
+    assert_api_error(
+        response,
+        status_code=404,
+        code="evaluation_not_found",
+        message="Evaluation not available for this experiment",
+    )
+
+
+@pytest.mark.asyncio
+async def test_experiment_samples_endpoint_filters_rows_and_returns_attempt(client: AsyncClient) -> None:
+    project_id, model_id = await _create_project_model(client, project_name="exp-samples")
+    created = await client.post(
+        f"/api/v1/projects/{project_id}/experiments",
+        json={"model_id": model_id, "name": "samples-run"},
+    )
+    assert created.status_code == 200
+    experiment_id = created.json()["id"]
+    _seed_experiment_run_artifacts(project_id=project_id, experiment_id=experiment_id, attempt=2)
+
+    misclassified = await client.get(
+        f"/api/v1/projects/{project_id}/experiments/{experiment_id}/samples?mode=misclassified&true_class_index=0&pred_class_index=1&limit=10"
+    )
+    assert misclassified.status_code == 200
+    payload = misclassified.json()
+    assert payload["attempt"] == 2
+    assert payload["mode"] == "misclassified"
+    assert len(payload["items"]) == 1
+    assert payload["items"][0]["asset_id"] == "asset-1"
+
+    lowest_correct = await client.get(
+        f"/api/v1/projects/{project_id}/experiments/{experiment_id}/samples?mode=lowest_confidence_correct&limit=1"
+    )
+    assert lowest_correct.status_code == 200
+    payload_correct = lowest_correct.json()
+    assert payload_correct["attempt"] == 2
+    assert payload_correct["mode"] == "lowest_confidence_correct"
+    assert len(payload_correct["items"]) == 1
+    assert payload_correct["items"][0]["pred_class_index"] == payload_correct["items"][0]["true_class_index"]
 
 
 @pytest.mark.asyncio

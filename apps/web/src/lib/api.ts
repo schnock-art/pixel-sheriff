@@ -236,6 +236,9 @@ export interface ExperimentMetricPoint {
   train_loss?: number;
   val_loss?: number;
   val_accuracy?: number;
+  val_macro_f1?: number;
+  val_macro_precision?: number;
+  val_macro_recall?: number;
   val_map?: number;
   val_iou?: number;
   created_at?: string;
@@ -284,6 +287,96 @@ export interface ExperimentActionResponse {
   status?: ExperimentStatus | null;
   attempt?: number | null;
   job_id?: string | null;
+}
+
+export interface ExperimentAnalyticsBest {
+  metric_name?: string | null;
+  metric_value?: number | null;
+  epoch?: number | null;
+}
+
+export interface ExperimentAnalyticsConfig {
+  optimizer?: { type?: string | null; lr?: number | null };
+  batch_size?: number | null;
+  epochs?: number | null;
+  augmentation?: string | null;
+}
+
+export interface ExperimentAnalyticsItem {
+  experiment_id: string;
+  name: string;
+  model_id: string;
+  model_name: string;
+  status: ExperimentStatus;
+  updated_at: string;
+  config: ExperimentAnalyticsConfig;
+  best: ExperimentAnalyticsBest;
+  final: Record<string, number | null>;
+  series: Record<string, unknown>;
+}
+
+export interface ProjectExperimentAnalyticsResponse {
+  items: ExperimentAnalyticsItem[];
+  available_series: string[];
+}
+
+export interface ExperimentEvaluationOverall {
+  accuracy?: number;
+  macro_f1?: number;
+  macro_precision?: number;
+  macro_recall?: number;
+}
+
+export interface ExperimentEvaluationPerClassRow {
+  class_index: number;
+  class_id: number;
+  name: string;
+  precision: number;
+  recall: number;
+  f1: number;
+  support: number;
+}
+
+export interface ExperimentEvaluationSampleRow {
+  asset_id: string;
+  relative_path?: string;
+  true_class_index: number;
+  pred_class_index: number;
+  confidence: number;
+  margin?: number | null;
+}
+
+export interface ExperimentEvaluationPayload {
+  attempt: number;
+  schema_version?: string;
+  task?: string;
+  computed_at?: string;
+  split?: string;
+  num_samples?: number;
+  classes?: {
+    class_order?: number[];
+    class_names?: string[];
+    id_to_index?: Record<string, number>;
+  };
+  overall?: ExperimentEvaluationOverall;
+  per_class?: ExperimentEvaluationPerClassRow[];
+  confusion_matrix?: {
+    matrix?: number[][];
+    normalized_by?: string;
+    labels?: Record<string, string>;
+  };
+  samples?: {
+    misclassified?: ExperimentEvaluationSampleRow[];
+    lowest_confidence_correct?: ExperimentEvaluationSampleRow[];
+    highest_confidence_wrong?: ExperimentEvaluationSampleRow[];
+  };
+}
+
+export interface ExperimentSamplesResponse {
+  attempt: number;
+  mode: "misclassified" | "lowest_confidence_correct" | "highest_confidence_wrong";
+  items: ExperimentEvaluationSampleRow[];
+  message?: string | null;
 }
 
 export type ExperimentEvent =
@@ -421,6 +514,20 @@ export function listExperiments(projectId: string, options: { modelId?: string }
   return apiGet<ProjectExperimentListResponse>(`/projects/${projectId}/experiments${suffix}`);
 }
 
+export function getExperimentAnalytics(
+  projectId: string,
+  options: { maxPoints?: number } = {},
+): Promise<ProjectExperimentAnalyticsResponse> {
+  const params = new URLSearchParams();
+  if (typeof options.maxPoints === "number" && Number.isFinite(options.maxPoints) && options.maxPoints >= 1) {
+    params.set("max_points", String(Math.floor(options.maxPoints)));
+  }
+  const query = params.toString();
+  return apiGet<ProjectExperimentAnalyticsResponse>(
+    `/projects/${projectId}/experiments/analytics${query ? `?${query}` : ""}`,
+  );
+}
+
 export function createExperiment(
   projectId: string,
   payload: ProjectExperimentCreatePayload,
@@ -430,6 +537,36 @@ export function createExperiment(
 
 export function getExperiment(projectId: string, experimentId: string): Promise<ProjectExperimentRecord> {
   return apiGet<ProjectExperimentRecord>(`/projects/${projectId}/experiments/${experimentId}`);
+}
+
+export function getExperimentEvaluation(projectId: string, experimentId: string): Promise<ExperimentEvaluationPayload> {
+  return apiGet<ExperimentEvaluationPayload>(`/projects/${projectId}/experiments/${experimentId}/evaluation`);
+}
+
+export function listExperimentSamples(
+  projectId: string,
+  experimentId: string,
+  options: {
+    mode: "misclassified" | "lowest_confidence_correct" | "highest_confidence_wrong";
+    trueClassIndex?: number;
+    predClassIndex?: number;
+    limit?: number;
+  },
+): Promise<ExperimentSamplesResponse> {
+  const params = new URLSearchParams();
+  params.set("mode", options.mode);
+  if (typeof options.trueClassIndex === "number" && Number.isFinite(options.trueClassIndex) && options.trueClassIndex >= 0) {
+    params.set("true_class_index", String(Math.floor(options.trueClassIndex)));
+  }
+  if (typeof options.predClassIndex === "number" && Number.isFinite(options.predClassIndex) && options.predClassIndex >= 0) {
+    params.set("pred_class_index", String(Math.floor(options.predClassIndex)));
+  }
+  if (typeof options.limit === "number" && Number.isFinite(options.limit) && options.limit >= 1) {
+    params.set("limit", String(Math.floor(options.limit)));
+  }
+  return apiGet<ExperimentSamplesResponse>(
+    `/projects/${projectId}/experiments/${experimentId}/samples?${params.toString()}`,
+  );
 }
 
 export function updateExperiment(

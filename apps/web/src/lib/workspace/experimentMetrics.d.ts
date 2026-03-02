@@ -14,11 +14,24 @@ export interface MetricDomain {
   max: number;
 }
 
+export interface TickBuildOptions {
+  useLog?: boolean;
+  count?: number;
+  clamp01?: boolean;
+}
+
+export interface TickFormatOptions {
+  useLog?: boolean;
+  bounded?: boolean;
+}
+
 export interface BuildLineOptions {
   width?: number;
   height?: number;
   padding?: number;
   seriesKeys?: string[];
+  domain?: MetricDomain;
+  useLog?: boolean;
 }
 
 export interface CheckpointRow {
@@ -30,8 +43,14 @@ export interface CheckpointRow {
 }
 
 export function metricKeyForTask(task: ExperimentTask | string): "val_accuracy" | "val_map" | "val_iou";
+export function isLossMetricKey(key: string): boolean;
+export function isBoundedMetricKey(key: string): boolean;
+export function isBoundedSeries(rowsOrPoints: Array<Record<string, unknown>>, key?: string): boolean;
+export function computeSeriesDomain(values: Array<number | string | null | undefined>, options?: { useLog?: boolean; clamp01?: boolean }): MetricDomain;
+export function buildTicks(domain: MetricDomain, options?: TickBuildOptions): number[];
+export function formatTick(value: number, options?: TickFormatOptions): string;
 export function mergeMetricPoints(existing: MetricPoint[], incoming: MetricPoint[]): MetricPoint[];
-export function metricDomain(metrics: MetricPoint[], seriesKeys: string[]): MetricDomain;
+export function metricDomain(metrics: MetricPoint[], seriesKeys: string[], options?: { useLog?: boolean; clampBounded?: boolean }): MetricDomain;
 export function buildLinePoints(metrics: MetricPoint[], seriesKey: string, options?: BuildLineOptions): string;
 export function indexCheckpointsByKind(checkpoints: CheckpointRow[]): {
   best_metric: CheckpointRow | null;

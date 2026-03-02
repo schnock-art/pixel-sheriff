@@ -61,6 +61,21 @@ class ExperimentStorage:
     def checkpoints_dir(self, project_id: str, experiment_id: str, attempt: int) -> Path:
         return self.run_dir(project_id, experiment_id, attempt) / "checkpoints"
 
+    def evaluation_path(self, project_id: str, experiment_id: str, attempt: int | None = None) -> Path:
+        if isinstance(attempt, int) and attempt >= 1:
+            return self.run_dir(project_id, experiment_id, attempt) / "evaluation.json"
+        return self.experiment_dir(project_id, experiment_id) / "evaluation.json"
+
+    def predictions_path(self, project_id: str, experiment_id: str, attempt: int | None = None) -> Path:
+        if isinstance(attempt, int) and attempt >= 1:
+            return self.run_dir(project_id, experiment_id, attempt) / "predictions.jsonl"
+        return self.experiment_dir(project_id, experiment_id) / "predictions.jsonl"
+
+    def predictions_meta_path(self, project_id: str, experiment_id: str, attempt: int | None = None) -> Path:
+        if isinstance(attempt, int) and attempt >= 1:
+            return self.run_dir(project_id, experiment_id, attempt) / "predictions.meta.json"
+        return self.experiment_dir(project_id, experiment_id) / "predictions.meta.json"
+
     def _read_json(self, path: Path, default: Any) -> Any:
         if not path.exists():
             return default
@@ -148,4 +163,3 @@ class ExperimentStorage:
             run_row = {}
         run_row["ended_at"] = utc_now_iso()
         self._write_json(run_path, run_row)
-

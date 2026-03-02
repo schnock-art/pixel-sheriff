@@ -13,7 +13,7 @@ from torchvision import transforms
 
 
 class ClassificationDataset(Dataset):
-    def __init__(self, samples: list[tuple[Path, int]], transform: transforms.Compose) -> None:
+    def __init__(self, samples: list["ClassificationSample"], transform: transforms.Compose) -> None:
         self.samples = samples
         self.transform = transform
 
@@ -21,11 +21,19 @@ class ClassificationDataset(Dataset):
         return len(self.samples)
 
     def __getitem__(self, index: int) -> tuple[Any, int]:
-        path, label = self.samples[index]
-        with Image.open(path) as image:
+        sample = self.samples[index]
+        with Image.open(sample.path) as image:
             rgb = image.convert("RGB")
             tensor = self.transform(rgb)
-        return tensor, int(label)
+        return tensor, int(sample.label)
+
+
+@dataclass(frozen=True)
+class ClassificationSample:
+    path: Path
+    label: int
+    asset_id: str
+    relative_path: str
 
 
 @dataclass
@@ -34,9 +42,11 @@ class LoadedClassificationData:
     val_loader: DataLoader[Any]
     class_order: list[int]
     num_classes: int
+    class_names: list[str]
     train_count: int
     val_count: int
     skipped_unlabeled: int
+    val_samples: list[ClassificationSample]
 
 
 def _normalization_from_model(model_config: dict[str, Any]) -> tuple[list[float] | None, list[float] | None]:
@@ -80,7 +90,9 @@ def _extract_if_missing(zip_path: Path, workdir: Path) -> Path:
     return dataset_dir
 
 
-def _asset_label_samples(manifest: dict[str, Any], dataset_dir: Path) -> tuple[list[tuple[Path, int, str]], list[int], int]:
+def _asset_label_samples(
+    manifest: dict[str, Any], dataset_dir: Path
+) -> tuple[list[ClassificationSample], list[int], list[str], int]:
     label_schema = manifest.get("label_schema")
     if not isinstance(label_schema, dict):
         raise ValueError("manifest.label_schema is missing")
@@ -94,23 +106,35 @@ def _asset_label_samples(manifest: dict[str, Any], dataset_dir: Path) -> tuple[l
     if not normalized_order:
         raise ValueError("manifest.label_schema.class_order is invalid")
 
+    classes_raw = label_schema.get("classes")
+    class_name_map: dict[int, str] = {}
+    if isinstance(classes_raw, list):
+        for row in classes_raw:
+            if not isinstance(row, dict):
+                continue
+            class_id = row.get("id")
+            if not isinstance(class_id, int):
+                continue
+            name = str(row.get("name") or f"class_{class_id}").strip()
+            class_name_map[class_id] = name or f"class_{class_id}"
+    class_names = [class_name_map.get(class_id, f"class_{class_id}") for class_id in normalized_order]
     class_index = {class_id: idx for idx, class_id in enumerate(normalized_order)}
     assets_raw = manifest.get("assets")
     annotations_raw = manifest.get("annotations")
     if not isinstance(assets_raw, list) or not isinstance(annotations_raw, list):
         raise ValueError("manifest assets/annotations are missing")
 
-    asset_paths: dict[str, Path] = {}
+    asset_paths: dict[str, tuple[Path, str]] = {}
     for row in assets_raw:
         if not isinstance(row, dict):
             continue
         asset_id = row.get("asset_id")
         path = row.get("path")
         if isinstance(asset_id, str) and isinstance(path, str):
-            asset_paths[asset_id] = dataset_dir / path
+            asset_paths[asset_id] = (dataset_dir / path, path)
 
     skipped_unlabeled = 0
-    samples: list[tuple[Path, int, str]] = []
+    samples: list[ClassificationSample] = []
     for row in annotations_raw:
         if not isinstance(row, dict):
             continue
@@ -139,11 +163,21 @@ def _asset_label_samples(manifest: dict[str, Any], dataset_dir: Path) -> tuple[l
         if label_idx is None:
             skipped_unlabeled += 1
             continue
-        image_path = asset_paths.get(asset_id)
-        if image_path is None or not image_path.exists():
+        image_row = asset_paths.get(asset_id)
+        if image_row is None:
             continue
-        samples.append((image_path, label_idx, asset_id))
-    return samples, normalized_order, skipped_unlabeled
+        image_path, relative_path = image_row
+        if not image_path.exists():
+            continue
+        samples.append(
+            ClassificationSample(
+                path=image_path,
+                label=label_idx,
+                asset_id=asset_id,
+                relative_path=relative_path,
+            )
+        )
+    return samples, normalized_order, class_names, skipped_unlabeled
 
 
 def build_classification_loaders(
@@ -159,7 +193,7 @@ def build_classification_loaders(
         raise ValueError("manifest.json is missing from export")
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
 
-    samples, class_order, skipped_unlabeled = _asset_label_samples(manifest, dataset_dir)
+    samples, class_order, class_names, skipped_unlabeled = _asset_label_samples(manifest, dataset_dir)
     if not samples:
         raise ValueError("No labeled classification samples were found in manifest")
 
@@ -174,9 +208,9 @@ def build_classification_loaders(
         if isinstance(split_val, dict) and isinstance(split_val.get("asset_ids"), list):
             split_val_ids = [str(v) for v in split_val["asset_ids"] if isinstance(v, str)]
 
-    sample_map = {asset_id: (path, label) for path, label, asset_id in samples}
-    train_samples: list[tuple[Path, int]]
-    val_samples: list[tuple[Path, int]]
+    sample_map = {sample.asset_id: sample for sample in samples}
+    train_samples: list[ClassificationSample]
+    val_samples: list[ClassificationSample]
     if split_train_ids or split_val_ids:
         train_samples = [sample_map[asset_id] for asset_id in split_train_ids if asset_id in sample_map]
         val_samples = [sample_map[asset_id] for asset_id in split_val_ids if asset_id in sample_map]
@@ -187,7 +221,7 @@ def build_classification_loaders(
         advanced = training_config.get("advanced")
         if isinstance(advanced, dict) and isinstance(advanced.get("seed"), int):
             seed = int(advanced["seed"])
-        raw_samples = [(path, label) for path, label, _asset_id in samples]
+        raw_samples = list(samples)
         random.Random(seed).shuffle(raw_samples)
         split_at = int(len(raw_samples) * 0.8)
         split_at = max(1, min(len(raw_samples) - 1, split_at)) if len(raw_samples) > 1 else 1
@@ -230,8 +264,9 @@ def build_classification_loaders(
         val_loader=val_loader,
         class_order=class_order,
         num_classes=len(class_order),
+        class_names=class_names,
         train_count=len(train_dataset),
         val_count=len(val_dataset),
         skipped_unlabeled=skipped_unlabeled,
+        val_samples=val_samples,
     )
-

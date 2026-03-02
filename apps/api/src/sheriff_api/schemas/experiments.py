@@ -78,6 +78,9 @@ class ExperimentMetricPoint(BaseModel):
     train_loss: float | None = None
     val_loss: float | None = None
     val_accuracy: float | None = None
+    val_macro_f1: float | None = None
+    val_macro_precision: float | None = None
+    val_macro_recall: float | None = None
     val_map: float | None = None
     val_iou: float | None = None
     created_at: datetime | None = None
@@ -135,3 +138,48 @@ class ProjectExperimentActionResponse(BaseModel):
     status: ExperimentStatus | None = None
     attempt: int | None = None
     job_id: str | None = None
+
+
+class ExperimentAnalyticsBest(BaseModel):
+    metric_name: str | None = None
+    metric_value: float | None = None
+    epoch: int | None = None
+
+
+class ExperimentAnalyticsItem(BaseModel):
+    experiment_id: str
+    name: str
+    model_id: str
+    model_name: str
+    status: ExperimentStatus
+    updated_at: datetime
+    config: dict[str, Any] = Field(default_factory=dict)
+    best: ExperimentAnalyticsBest = Field(default_factory=ExperimentAnalyticsBest)
+    final: dict[str, float | None] = Field(default_factory=dict)
+    series: dict[str, Any] = Field(default_factory=dict)
+
+
+class ProjectExperimentAnalyticsResponse(BaseModel):
+    items: list[ExperimentAnalyticsItem] = Field(default_factory=list)
+    available_series: list[str] = Field(default_factory=list)
+
+
+class ExperimentEvaluationResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    attempt: int = Field(ge=1)
+
+
+class ExperimentSampleItem(BaseModel):
+    asset_id: str
+    relative_path: str = ""
+    true_class_index: int
+    pred_class_index: int
+    confidence: float
+    margin: float | None = None
+
+
+class ExperimentSamplesResponse(BaseModel):
+    attempt: int = Field(ge=1)
+    mode: Literal["misclassified", "lowest_confidence_correct", "highest_confidence_wrong"]
+    items: list[ExperimentSampleItem] = Field(default_factory=list)
+    message: str | None = None

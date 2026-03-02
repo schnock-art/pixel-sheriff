@@ -1,6 +1,9 @@
-# Experiments SSE Manual QA (Phase 2)
+# Experiments Manual QA (Phase 3)
 
-Use this checklist to verify create/save/start/cancel + live SSE updates + surfaced trainer failure messages.
+Use this checklist to verify:
+- create/save/start/cancel + live SSE updates + surfaced trainer failure messages
+- classification analytics and deep-dive dashboard data flows
+- attempt-aware evaluation artifacts + API responses
 
 ## Preconditions
 - `docker compose up -d --build api trainer web db redis`
@@ -61,6 +64,16 @@ Invoke-RestMethod -Method Post -Uri "$api/projects/$projectId/experiments/$exper
   $detail = Invoke-RestMethod -Method Get -Uri "$api/projects/$projectId/experiments/$experimentId"
   "status=$($detail.status), metrics=$($detail.metrics.Count), last_epoch=$($detail.summary_json.last_epoch)"
 }
+
+# 7) Check analytics/evaluation/samples contracts
+$analytics = Invoke-RestMethod -Method Get -Uri "$api/projects/$projectId/experiments/analytics?max_points=50"
+"analytics_items=$($analytics.items.Count), available_series=$($analytics.available_series -join ',')"
+
+$evaluation = Invoke-RestMethod -Method Get -Uri "$api/projects/$projectId/experiments/$experimentId/evaluation"
+"evaluation_attempt=$($evaluation.attempt), task=$($evaluation.task), num_samples=$($evaluation.num_samples)"
+
+$samples = Invoke-RestMethod -Method Get -Uri "$api/projects/$projectId/experiments/$experimentId/samples?mode=misclassified&limit=25"
+"samples_attempt=$($samples.attempt), samples_count=$($samples.items.Count)"
 ```
 
 ## Browser SSE Checklist
@@ -80,6 +93,39 @@ Invoke-RestMethod -Method Post -Uri "$api/projects/$projectId/experiments/$exper
   - Click `Cancel` during run and verify terminal status `canceled`.
   - If run fails, verify toast shows failure reason and header shows `Last run error: ...`.
 
+## Browser Analytics + Dashboard Checklist
+- Open `http://localhost:3010/projects/{projectId}/experiments`.
+- Verify analytics section appears above the experiments table.
+- Verify summary cards show:
+  - `Best accuracy`
+  - `Lowest val loss`
+  - `Total runs`
+  - `Failures`
+- Verify run-selection defaults:
+  - last 3 completed runs selected
+  - failed runs hidden until `Show failed` is enabled
+  - best run is visually highlighted
+- In comparison chart:
+  - switch metric dropdown (for example `val_accuracy`, `val_loss`)
+  - toggle log scale and confirm chart re-renders without errors
+- In hyperparameter scatter:
+  - change x/y selectors
+  - hover a dot and verify tooltip shows experiment name and x/y values
+  - click a dot and verify navigation to experiment detail page
+- On experiment detail page (`/experiments/{experimentId}`):
+  - verify header action is `Back to Experiments` and returns to `/projects/{projectId}/experiments`
+  - verify dashboard appears below existing training sections
+  - verify chart tabs (`Loss`, `Accuracy`, `F1/Precision/Recall`) switch correctly
+  - verify confusion normalization modes:
+    - `none` = raw counts
+    - `by_true` = row-normalized
+    - `by_pred` = column-normalized
+    - no `NaN`/`inf` on zero-sum rows/columns
+  - click a confusion cell and verify sample drill-down panel/modal opens
+  - verify per-class metrics table supports sorting
+  - verify prediction explorer mode/class/limit filters update thumbnails
+  - verify served attempt label is shown for evaluation/sample data
+
 ## SSE Endpoint Spot Check (raw stream)
 In a separate shell (after start), inspect SSE output:
 
@@ -93,3 +139,13 @@ Expected events:
 - occasional `{"type":"checkpoint", ...}`
 - terminal `{"type":"done","status":"completed|canceled|failed"}`
 - failed done events include `message` + `error_code` fields for UI/runtime diagnostics.
+
+## Artifact Filesystem Spot Check (optional)
+After a completed classification run, verify files exist under storage root:
+
+- `experiments/{project_id}/{experiment_id}/runs/{attempt}/evaluation.json`
+- `experiments/{project_id}/{experiment_id}/runs/{attempt}/predictions.jsonl`
+- `experiments/{project_id}/{experiment_id}/runs/{attempt}/predictions.meta.json`
+- `experiments/{project_id}/{experiment_id}/evaluation.json` (latest mirror)
+- `experiments/{project_id}/{experiment_id}/predictions.jsonl` (latest mirror)
+- `experiments/{project_id}/{experiment_id}/predictions.meta.json` (latest mirror)

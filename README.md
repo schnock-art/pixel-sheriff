@@ -63,6 +63,20 @@ Local-first CV annotation platform.
   - run-attempt isolation under `runs/{attempt}` to avoid metric/event/checkpoint mixing across restarts
   - live SSE stream consumed by web chart UI
   - chart includes axes, legend, toggles, and hover value tooltip
+- Classification experiment analytics + deep dashboard:
+  - trainer now writes attempt-scoped classification evaluation artifacts:
+    - `experiments/{project_id}/{experiment_id}/runs/{attempt}/evaluation.json`
+    - `experiments/{project_id}/{experiment_id}/runs/{attempt}/predictions.jsonl`
+    - `experiments/{project_id}/{experiment_id}/runs/{attempt}/predictions.meta.json`
+  - trainer also writes latest mirrors at experiment root:
+    - `experiments/{project_id}/{experiment_id}/evaluation.json`
+    - `experiments/{project_id}/{experiment_id}/predictions.jsonl`
+    - `experiments/{project_id}/{experiment_id}/predictions.meta.json`
+  - predictions rows now include `confidence` (top-1 softmax probability) and optional `margin` (`top1-top2`)
+  - analytics API endpoint for multi-run comparison with `max_points` (default `200`, bounded server-side)
+  - evaluation/samples API endpoints include served `attempt` in responses
+  - experiments list page now includes summary cards, multi-run metric chart, and hyperparameter scatter
+  - experiment detail page now includes confusion matrix drill-down, per-class metrics, and prediction explorer
 - Backend ML model-building layer (v0) is now implemented under `apps/api/src/sheriff_api/ml`:
   - extensible `ModelFactory` + family adapter registry
   - backbone metadata registry (`resnet18/34/50/101`) + verification utilities
@@ -100,6 +114,14 @@ Local-first CV annotation platform.
   - Save enablement only when draft has changes and passes schema validation
   - unsaved changes indicator + guarded navigation integration
 - Experiments pages support project-scoped list/create/detail plus live training telemetry
+- Experiments list analytics dashboard includes:
+  - summary cards (`best accuracy`, `lowest val loss`, `total runs`, `failures`)
+  - multi-run comparison chart with metric selector + log scale
+  - hyperparameter scatter with hover tooltip (experiment name + x/y values) and dot click-through to detail
+- Experiment analytics defaults:
+  - last 3 completed runs pre-selected
+  - failed runs hidden by default (`Show failed` toggle)
+  - best run highlighted in legend
 - Experiment detail page includes:
   - editable training params (optimizer/lr/epochs/batch/augmentation/advanced)
   - advanced runtime defaults to `num_workers=0` (editable)
@@ -110,6 +132,25 @@ Local-first CV annotation platform.
   - refresh-safe history rehydration and SSE resume while running
   - queued/running/terminal state handling and attempt-aware event cursors (`from_line`, `attempt`)
   - trainer failure reasons surfaced in UI toast and inline `Last run error`
+  - header quick navigation action: `Back to Experiments`
+- Experiment detail deep dashboard (classification) includes:
+  - chart tabs (`Loss`, `Accuracy`, `F1/Precision/Recall`) + log scale
+  - confusion matrix with `none`/`by_true`/`by_pred` client-side normalization
+  - confusion-cell drill-down modal with thumbnails
+  - per-class metrics sortable table
+  - prediction explorer filters (`mode`, `true class`, `pred class`, `limit`)
+  - sample image preview modal
+  - detection/segmentation placeholder (`not supported yet`)
+- Classification evaluation artifact + API contract:
+  - per-attempt artifacts are source-of-truth under `runs/{attempt}/...`
+  - latest mirrors at experiment root are default API/UI read targets
+  - `GET /experiments/{id}/evaluation` serves latest available evaluation and includes `attempt`
+  - `GET /experiments/{id}/samples` supports `mode`, `true_class_index`, `pred_class_index`, `limit`, and includes `attempt`
+  - confusion-matrix normalization stays client-side:
+    - `none`: raw counts
+    - `by_true`: row-normalized
+    - `by_pred`: column-normalized
+    - zero-sum rows/columns render `0` safely
 - Local folder import with one modal:
   - import into existing or new project
   - select task mode when creating a new project (`classification_single`, `bbox`, `segmentation`)
@@ -267,10 +308,13 @@ docker compose up --build
 - `GET /api/v1/projects/{project_id}/models/{model_id}`
 - `PUT /api/v1/projects/{project_id}/models/{model_id}`
 - `GET/POST /api/v1/projects/{project_id}/experiments`
+- `GET /api/v1/projects/{project_id}/experiments/analytics` (`max_points` query, default `200`, range `1..2000`)
 - `GET/PUT /api/v1/projects/{project_id}/experiments/{experiment_id}`
 - `POST /api/v1/projects/{project_id}/experiments/{experiment_id}/start`
 - `POST /api/v1/projects/{project_id}/experiments/{experiment_id}/cancel`
 - `GET /api/v1/projects/{project_id}/experiments/{experiment_id}/events` (SSE)
+- `GET /api/v1/projects/{project_id}/experiments/{experiment_id}/evaluation` (includes top-level `attempt`; returns `evaluation_not_found` when unavailable)
+- `GET /api/v1/projects/{project_id}/experiments/{experiment_id}/samples` (supports mode/class filters + `limit`; includes top-level `attempt`)
 - `GET/POST /api/v1/models` (placeholder MAL surface)
 - `GET /api/v1/assets/{asset_id}/suggestions` (placeholder)
 - `POST /api/v1/projects/{project_id}/suggestions/batch` (placeholder)

@@ -1713,8 +1713,210 @@ button {
   cursor: crosshair;
 }
 
+.experiment-chart-wrap svg text {
+  user-select: none;
+}
+
+.experiment-chart-wrap svg .axis-label {
+  fill: #334a6a;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.experiment-chart-wrap svg .axis-tick {
+  fill: #4f6482;
+  font-size: 11px;
+}
+
+.experiment-chart-wrap svg .axis-tick-right {
+  text-anchor: start;
+}
+
 .experiment-actions-row {
   margin-top: 12px;
+}
+
+.experiments-analytics-toolbar {
+  align-items: flex-end;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.experiment-analytics-section {
+  display: grid;
+  gap: 12px;
+}
+
+.experiment-analytics-section h3 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.experiment-analytics-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.experiment-analytics-summary h4 {
+  margin: 0;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #4b607e;
+}
+
+.experiment-analytics-summary p {
+  margin: 8px 0 0;
+  font-size: 24px;
+  font-weight: 700;
+  color: #274166;
+}
+
+@media (max-width: 860px) {
+  .experiment-chart-wrap svg .axis-label {
+    font-size: 11px;
+  }
+
+  .experiment-chart-wrap svg .axis-tick {
+    font-size: 10px;
+  }
+}
+
+.experiment-analytics-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.experiment-analytics-header h4 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.experiment-analytics-controls {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.experiment-run-selector-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.experiment-dashboard-section {
+  margin-top: 16px;
+  display: grid;
+  gap: 12px;
+}
+
+.experiment-tab-row {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.confusion-matrix-wrap {
+  overflow: auto;
+}
+
+.confusion-grid {
+  display: grid;
+  gap: 6px;
+  min-width: max-content;
+}
+
+.confusion-row {
+  display: grid;
+  grid-template-columns: 140px repeat(auto-fit, minmax(40px, 1fr));
+  gap: 6px;
+  align-items: center;
+}
+
+.confusion-axis-label {
+  font-size: 12px;
+  color: #395477;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.confusion-cell {
+  border: 1px solid #c2cee0;
+  border-radius: 6px;
+  min-height: 34px;
+  min-width: 34px;
+  font-size: 11px;
+  color: #183154;
+  cursor: pointer;
+}
+
+.experiment-sample-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px;
+}
+
+.experiment-sample-tile {
+  border: 1px solid #c8d2e2;
+  border-radius: 10px;
+  background: #fbfdff;
+  padding: 8px;
+  display: grid;
+  gap: 4px;
+  text-align: left;
+  color: #2c4567;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.experiment-sample-tile img {
+  width: 100%;
+  height: 88px;
+  border-radius: 8px;
+  object-fit: cover;
+  border: 1px solid #d3dceb;
+  background: #e6edf9;
+}
+
+.experiment-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(16, 24, 38, 0.38);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 160;
+  padding: 14px;
+}
+
+.experiment-modal {
+  width: min(980px, calc(100vw - 24px));
+  max-height: calc(100vh - 24px);
+  overflow: auto;
+  border: 1px solid #c7d2e2;
+  border-radius: 14px;
+  background: #f6f9ff;
+  padding: 12px;
+  display: grid;
+  gap: 10px;
+}
+
+.experiment-image-modal {
+  width: min(760px, calc(100vw - 24px));
+}
+
+.experiment-sample-preview-image {
+  width: 100%;
+  max-height: 70vh;
+  object-fit: contain;
+  border-radius: 12px;
+  border: 1px solid #d0d9e9;
+  background: #0f1720;
 }
 
 .status-toast {
@@ -1934,6 +2136,14 @@ button {
     grid-template-columns: 1fr;
   }
 
+  .experiment-analytics-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .experiment-run-selector-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .experiment-checkpoint-row {
     grid-template-columns: 1fr;
     gap: 6px;
@@ -1975,6 +2185,14 @@ button {
 
   .workspace-shell {
     padding: 12px;
+  }
+
+  .experiment-analytics-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .experiment-run-selector-grid {
+    grid-template-columns: 1fr;
   }
 
   .workspace-frame {

@@ -5,6 +5,7 @@ from typing import Any
 from pixel_sheriff_trainer.classification.dataset import build_classification_loaders
 from pixel_sheriff_trainer.classification.train import EpochMetrics, run_training
 from pixel_sheriff_trainer.io.checkpoints import save_checkpoint
+from pixel_sheriff_trainer.io.evaluation import write_classification_evaluation
 from pixel_sheriff_trainer.io.events import EventLog
 from pixel_sheriff_trainer.io.metrics import append_metric
 from pixel_sheriff_trainer.io.storage import ExperimentStorage
@@ -143,6 +144,9 @@ class TrainRunner:
                     "train_loss": float(epoch_metrics.train_loss),
                     "val_loss": float(epoch_metrics.val_loss),
                     "val_accuracy": float(epoch_metrics.val_accuracy),
+                    "val_macro_f1": float(epoch_metrics.val_macro_f1),
+                    "val_macro_precision": float(epoch_metrics.val_macro_precision),
+                    "val_macro_recall": float(epoch_metrics.val_macro_recall),
                     "created_at": utc_now_iso(),
                 }
                 append_metric(
@@ -180,8 +184,9 @@ class TrainRunner:
                     self.storage.set_summary(job.project_id, job.experiment_id, summary)
                 self.events.append(job.project_id, job.experiment_id, job.attempt, {"type": "checkpoint", **row})
 
+            final_evaluation = None
             try:
-                run_status = run_training(
+                run_status, final_evaluation = run_training(
                     model_config=job.model_config,
                     training_config=effective_training_config,
                     train_loader=loaded.train_loader,
@@ -215,7 +220,7 @@ class TrainRunner:
                     model_config=job.model_config,
                     training_config=effective_training_config,
                 )
-                run_status = run_training(
+                run_status, final_evaluation = run_training(
                     model_config=job.model_config,
                     training_config=effective_training_config,
                     train_loader=loaded.train_loader,
@@ -235,6 +240,17 @@ class TrainRunner:
                 )
                 self.storage.set_run_ended(job.project_id, job.experiment_id, job.attempt)
                 return "canceled"
+
+            if final_evaluation is not None:
+                write_classification_evaluation(
+                    self.storage,
+                    project_id=job.project_id,
+                    experiment_id=job.experiment_id,
+                    attempt=job.attempt,
+                    class_order=loaded.class_order,
+                    class_names=loaded.class_names,
+                    evaluation=final_evaluation,
+                )
 
             self.storage.set_experiment_status(job.project_id, job.experiment_id, "completed")
             self.events.append(

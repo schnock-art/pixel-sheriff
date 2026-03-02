@@ -19,6 +19,7 @@ Primary workflow:
 5. Submit staged edits (or submit single-image edits directly).
 6. Generate and download a deterministic dataset export zip (manifest v1.2 + COCO companion).
 7. Create experiments from project models, tune training params, and run worker-executed training with live SSE metrics + checkpoints.
+8. Compare project runs from analytics dashboard and inspect classification evaluation artifacts (confusion matrix, per-class metrics, prediction explorer).
 
 ## 2. Runtime Topology
 
@@ -63,11 +64,18 @@ Defined in `apps/api/src/sheriff_api/db/models.py`:
   - `experiments/{project_id}/records.json`
   - `experiments/{project_id}/{experiment_id}/config.json`
   - `experiments/{project_id}/{experiment_id}/status.json`
+  - latest evaluation mirrors at experiment root:
+    - `evaluation.json`
+    - `predictions.jsonl`
+    - `predictions.meta.json`
   - run-attempt scoped artifacts under `experiments/{project_id}/{experiment_id}/runs/{attempt}/...`
     - `run.json`
     - `events.jsonl` + `events.meta.json`
     - `metrics.jsonl`
     - `checkpoints.json` + checkpoint files
+    - `evaluation.json`
+    - `predictions.jsonl`
+    - `predictions.meta.json`
   - implementation: `apps/api/src/sheriff_api/services/experiment_store.py`
 
 Key invariants:
@@ -195,9 +203,20 @@ Trainer responsibilities and runtime behavior:
 - Classification implementation:
   - export-zip dataset loader (`classification/dataset.py`)
   - epoch train/eval loops (`classification/train.py`, `classification/eval.py`)
+  - evaluation artifact writer (`io/evaluation.py`) persists per-attempt + latest mirrors
 - Shared experiment-file contract:
   - reads/writes run-attempt files under `experiments/{project_id}/{experiment_id}/runs/{attempt}/...`
   - appends `events.jsonl` for SSE tail streaming
+- Classification evaluation contract:
+  - per-epoch `metrics.jsonl` now includes:
+    - `val_macro_f1`
+    - `val_macro_precision`
+    - `val_macro_recall`
+  - end-of-run classification artifacts include:
+    - confusion matrix raw counts
+    - per-class precision/recall/f1/support
+    - prediction rows with `asset_id`, `relative_path`, `true_class_index`, `pred_class_index`, `confidence` (top-1 softmax), optional `margin` (top1-top2)
+  - `predictions.meta.json` carries `schema_version`, `attempt`, `num_samples`, `task`, `split`, `computed_at`
 - Idempotency + attempt safety:
   - validates `status.json` active job/attempt before execution
   - stale/duplicate jobs are ignored
@@ -270,15 +289,22 @@ Project-scoped experiments:
 
 - `GET /api/v1/projects/{project_id}/experiments`
 - `POST /api/v1/projects/{project_id}/experiments`
+- `GET /api/v1/projects/{project_id}/experiments/analytics`
 - `GET /api/v1/projects/{project_id}/experiments/{experiment_id}`
 - `PUT /api/v1/projects/{project_id}/experiments/{experiment_id}`
 - `POST /api/v1/projects/{project_id}/experiments/{experiment_id}/start`
 - `POST /api/v1/projects/{project_id}/experiments/{experiment_id}/cancel`
 - `GET /api/v1/projects/{project_id}/experiments/{experiment_id}/events` (SSE)
+- `GET /api/v1/projects/{project_id}/experiments/{experiment_id}/evaluation`
+- `GET /api/v1/projects/{project_id}/experiments/{experiment_id}/samples`
 - create flow derives default `TrainingConfig v0` from model + latest `DatasetVersion` and persists in `draft`
 - start flow pins dataset export, creates run attempt metadata, enqueues Redis job, and transitions to `queued`
 - SSE events stream by tailing run-attempt `events.jsonl` with optional resume cursor (`from_line`) and run selection (`attempt`)
 - default training config sets `advanced.num_workers = 0` (user-editable in Advanced Parameters)
+- analytics endpoint returns multi-run `series` with `max_points` query support (default 200, bounded server-side)
+- router registration keeps `/analytics` before `/{experiment_id}` to avoid path shadowing
+- evaluation/samples endpoints default to latest completed attempt and include top-level `attempt` in responses
+- latest mirror files at experiment root are convenience snapshots; run-attempt artifacts remain source-of-truth
 
 Error response contract:
 
@@ -302,9 +328,9 @@ App-router entry and project shell:
 - `apps/web/src/app/projects/[projectId]/datasets/page.tsx` mounts the datasets workspace
 - `apps/web/src/app/projects/[projectId]/models/page.tsx` renders project-scoped model list/empty state + create flow
 - `apps/web/src/app/projects/[projectId]/models/[modelId]/page.tsx` renders editable Model Builder controls with draft/save state, AJV validation, and live summary updates
-- `apps/web/src/app/projects/[projectId]/experiments/page.tsx` renders experiment list with model filter and status/metric summaries
+- `apps/web/src/app/projects/[projectId]/experiments/page.tsx` renders experiment list plus analytics dashboard (summary cards, multi-run chart, hyperparameter scatter)
 - `apps/web/src/app/projects/[projectId]/experiments/new/page.tsx` creates experiment drafts (auto when `modelId` query is provided)
-- `apps/web/src/app/projects/[projectId]/experiments/[experimentId]/page.tsx` renders train workspace with editable params, checkpoints, live chart, and SSE updates
+- `apps/web/src/app/projects/[projectId]/experiments/[experimentId]/page.tsx` renders train workspace with editable params/checkpoints/live chart/SSE plus deep dashboard (confusion matrix, per-class metrics, prediction explorer)
 
 UI structure:
 
@@ -348,6 +374,8 @@ Workspace pure helpers (`apps/web/src/lib/workspace/*`):
 - `classColors.*`: deterministic class-to-color mapping for label chips and geometry overlays
 - `projectRouting.*`: project route section parsing and project-target href generation
 - `navigationGuard.*`: pure unsaved-draft guard decision helper
+- `experimentAnalytics.*`: experiment analytics shaping helpers for comparison dashboard
+- `experimentDashboard.*`: confusion normalization and prediction filtering helpers
 
 Workspace container components (`apps/web/src/components/workspace/*`):
 
@@ -421,11 +449,26 @@ Workspace container components (`apps/web/src/components/workspace/*`):
     - otherwise offers `Continue` latest vs `New run`
 - Experiment training behavior:
   - experiments list shows status and best metric summary per run
+  - experiments list analytics section includes:
+    - summary cards (best accuracy, lowest val loss, total runs, failures)
+    - multi-run comparison chart with metric selector and log-scale toggle
+    - hyperparameter scatter with hover tooltip (experiment identity + x/y values) and click-through to experiment detail
+    - defaults: last 3 completed runs selected, failed runs hidden unless toggled, best run highlighted
   - experiment detail supports editable training params in `draft`/`failed` states
+  - experiment detail header includes `Back to Experiments` navigation to project experiments list
   - `Start Training` enqueues worker job and transitions `queued -> running -> terminal`
   - `Cancel` supports queued cancel and running cancel-request semantics
   - checkpoints tracked as `best_metric`, `best_loss`, `latest` with selection placeholder (`Pick`)
   - metrics chart supports axis/ticks, legend, series toggles, crosshair hover, and per-epoch tooltip values
+  - experiment detail dashboard (classification only) includes:
+    - metric tabs (`Loss`, `Accuracy`, `F1/Precision/Recall`) with log-scale toggle
+    - confusion matrix heatmap with client-side normalization (`none`, `by_true`, `by_pred`)
+    - confusion-cell drill-down modal with sample thumbnails
+    - per-class metrics table with sortable columns
+    - prediction explorer with mode/class filters and limit controls
+    - sample image preview modal
+    - served-attempt indicator from evaluation/samples APIs
+  - non-classification experiments show dashboard placeholder (`not supported yet`)
   - trainer failure details are surfaced in UI (toast + inline `Last run error` in experiment header)
   - refresh-safe behavior: persisted history loads first, then live stream resumes for running experiments
 - Feedback behavior:
@@ -474,6 +517,18 @@ Supported statuses:
 - API test suite uses `pytest` with `httpx` ASGI client fixtures in `apps/api/tests`.
 - API coverage includes geometry validation/COCO export assertions and project model update validation/persistence checks.
 - API coverage includes experiment create/update/start/cancel flows and SSE smoke validation.
+- API coverage includes experiment analytics/evaluation/samples endpoint behavior:
+  - analytics structure + `max_points`
+  - evaluation `attempt` inclusion and `evaluation_not_found`
+  - samples mode/filter behavior with `attempt` inclusion
+- Trainer coverage includes classification evaluation artifact persistence:
+  - per-attempt + latest mirror evaluation/predictions files
+  - `predictions.meta.json` contract checks
+  - confusion matrix shape/per-class length/accuracy bounds
+- Web helper coverage includes analytics/dashboard helpers:
+  - run selection, summary and scatter shaping
+  - confusion normalization (`none`, `by_true`, `by_pred`) and zero-sum handling
+  - prediction filtering helpers for explorer/drill-down
 - ML-specific pytest coverage added under `apps/api/tests/ml`:
   - metadata verification vs real torchvision backbones (`resnet18`, `resnet50`)
   - registry JSON generation checks for expected structure/tap entries
@@ -488,4 +543,5 @@ Supported statuses:
 - MAL routes are placeholders only
 - Detection/segmentation training execution remains TODO (unsupported jobs fail gracefully)
 - Classification training currently supports `resnet_classifier` family only in worker runtime
+- Detection/segmentation deep evaluation dashboards are placeholders (classification analytics only in this phase)
 - Active bug investigation: intermittent annotation submit `404` can occur in stale project/asset submit contexts

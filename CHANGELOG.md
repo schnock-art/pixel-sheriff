@@ -115,6 +115,31 @@ All notable changes to this project will be documented in this file.
   - explicit `Clear Selected Labels` action in label mode
   - assigned-label summary line (`Assigned: ...`) and per-chip assigned badge
 - Inline geometry draft warnings in viewer for uncommitted bbox/polygon drafts.
+- Classification experiment evaluation persistence contract:
+  - per-attempt source-of-truth artifacts under `experiments/{project_id}/{experiment_id}/runs/{attempt}/...`
+    - `evaluation.json`
+    - `predictions.jsonl`
+    - `predictions.meta.json`
+  - latest mirror artifacts at experiment root:
+    - `evaluation.json`
+    - `predictions.jsonl`
+    - `predictions.meta.json`
+  - `predictions.meta.json` now tracks `schema_version`, `attempt`, `num_samples`, `task`, `split`, and `computed_at`
+- Classification evaluation payload enrichment:
+  - `evaluation.json` includes confusion matrix, per-class metrics, and sample buckets for explorer/drill-down
+  - prediction rows include `asset_id`, `relative_path`, `true_class_index`, `pred_class_index`, `confidence` (top-1 softmax), and optional `margin` (`top1-top2`)
+- Experiments analytics/evaluation API additions:
+  - `GET /api/v1/projects/{project_id}/experiments/analytics` with `max_points` query support (default `200`, bounded server-side)
+  - `GET /api/v1/projects/{project_id}/experiments/{experiment_id}/evaluation` now returns served `attempt`
+  - `GET /api/v1/projects/{project_id}/experiments/{experiment_id}/samples` now supports mode/class filters and returns served `attempt`
+- Experiments web dashboards:
+  - experiments list page now includes summary cards, multi-run comparison chart, and hyperparameter scatter
+  - experiment detail now includes classification dashboard with metric tabs, confusion matrix normalization, per-class table, prediction explorer, and cell drill-down
+  - hyperparameter scatter now surfaces experiment details on hover and keeps click-through navigation to detail
+- Tests expanded for experiment analytics/evaluation:
+  - trainer tests for per-attempt + mirror artifact persistence and `predictions.meta.json`
+  - API tests for analytics `max_points`, evaluation `attempt`/not-found behavior, and samples filtering
+  - web helper tests for analytics shaping, confusion normalization, and prediction drill-down filtering
 
 ### Changed
 - Model detail page behavior evolved from read-only scaffold to editable builder with live summary updates.
@@ -189,6 +214,9 @@ All notable changes to this project will be documented in this file.
   - manifest/COCO join integrity checks (`image_id`/`annotation_ids`)
   - split integrity checks against exported assets
 - Annotation payload normalization now preserves class/category assignments when `classification` block is empty but top-level/object category data exists.
+- Classification trainer now appends macro validation metrics (`val_macro_f1`, `val_macro_precision`, `val_macro_recall`) to `metrics.jsonl`.
+- Experiment deep dashboard behavior now gates non-classification tasks behind explicit `not supported yet` placeholders.
+- Experiment detail header navigation now uses `Back to Experiments` (instead of `Back to Model`) to return directly to the experiments list.
 
 ### Fixed
 - Removed duplicate numeric prefixes in model builder step list (`1. 1. Dataset` -> `1. Dataset`).

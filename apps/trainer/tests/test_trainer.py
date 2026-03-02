@@ -208,3 +208,34 @@ def test_runner_process_writes_events_metrics_and_checkpoints(tmp_path: Path) ->
     assert (run_dir / "events.jsonl").exists()
     assert (run_dir / "metrics.jsonl").exists()
     assert (run_dir / "checkpoints.json").exists()
+    if result == "completed":
+        run_eval = run_dir / "evaluation.json"
+        run_predictions = run_dir / "predictions.jsonl"
+        run_predictions_meta = run_dir / "predictions.meta.json"
+        latest_eval = tmp_path / "experiments" / project_id / experiment_id / "evaluation.json"
+        latest_predictions = tmp_path / "experiments" / project_id / experiment_id / "predictions.jsonl"
+        latest_predictions_meta = tmp_path / "experiments" / project_id / experiment_id / "predictions.meta.json"
+        assert run_eval.exists()
+        assert run_predictions.exists()
+        assert run_predictions_meta.exists()
+        assert latest_eval.exists()
+        assert latest_predictions.exists()
+        assert latest_predictions_meta.exists()
+
+        evaluation_payload = json.loads(run_eval.read_text(encoding="utf-8"))
+        assert evaluation_payload["schema_version"] == "1"
+        confusion = evaluation_payload["confusion_matrix"]["matrix"]
+        assert isinstance(confusion, list)
+        assert len(confusion) == 1
+        assert len(confusion[0]) == 1
+        per_class = evaluation_payload["per_class"]
+        assert isinstance(per_class, list)
+        assert len(per_class) == 1
+        accuracy = evaluation_payload["overall"]["accuracy"]
+        assert isinstance(accuracy, float)
+        assert 0.0 <= accuracy <= 1.0
+
+        predictions_meta = json.loads(run_predictions_meta.read_text(encoding="utf-8"))
+        assert predictions_meta["schema_version"] == "1"
+        assert predictions_meta["attempt"] == 1
+        assert predictions_meta["task"] == "classification"

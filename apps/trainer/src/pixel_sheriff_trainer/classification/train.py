@@ -9,7 +9,7 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 
 from pixel_sheriff_ml.model_factory import build_resnet_classifier
-from pixel_sheriff_trainer.classification.eval import evaluate_classifier
+from pixel_sheriff_trainer.classification.eval import ClassifierEvaluation, evaluate_classifier
 
 
 def _build_classifier(model_config: dict[str, Any], num_classes: int) -> nn.Module:
@@ -40,6 +40,9 @@ class EpochMetrics:
     train_loss: float
     val_loss: float
     val_accuracy: float
+    val_macro_f1: float
+    val_macro_precision: float
+    val_macro_recall: float
 
 
 def run_training(
@@ -52,7 +55,7 @@ def run_training(
     should_cancel: Callable[[], bool],
     on_epoch: Callable[[EpochMetrics], None],
     on_checkpoint: Callable[[str, int, str | None, float | None, dict[str, Any]], None],
-) -> str:
+) -> tuple[str, ClassifierEvaluation | None]:
     model = _build_classifier(model_config, num_classes)
     device = _resolve_device(training_config)
     model.to(device)
@@ -108,9 +111,13 @@ def run_training(
 
     best_loss = None
     best_metric = None
+    final_evaluation: ClassifierEvaluation | None = None
+    val_sample_records = getattr(getattr(val_loader, "dataset", None), "samples", None)
+    if not isinstance(val_sample_records, list):
+        val_sample_records = None
     for epoch in range(1, epochs + 1):
         if should_cancel():
-            return "canceled"
+            return "canceled", None
 
         model.train()
         if effective_batch_size < 2:
@@ -138,9 +145,31 @@ def run_training(
         if scheduler is not None:
             scheduler.step()
         train_loss = (total_loss / total_samples) if total_samples > 0 else 0.0
-        val_loss, val_accuracy = evaluate_classifier(model, val_loader, criterion, device)
+        evaluation = evaluate_classifier(
+            model,
+            val_loader,
+            criterion,
+            device,
+            num_classes=num_classes,
+            include_predictions=epoch == epochs,
+            sample_records=val_sample_records,
+        )
+        val_loss = float(evaluation.avg_loss)
+        val_accuracy = float(evaluation.accuracy)
+        if epoch == epochs:
+            final_evaluation = evaluation
 
-        on_epoch(EpochMetrics(epoch=epoch, train_loss=float(train_loss), val_loss=float(val_loss), val_accuracy=float(val_accuracy)))
+        on_epoch(
+            EpochMetrics(
+                epoch=epoch,
+                train_loss=float(train_loss),
+                val_loss=val_loss,
+                val_accuracy=val_accuracy,
+                val_macro_f1=float(evaluation.macro_f1),
+                val_macro_precision=float(evaluation.macro_precision),
+                val_macro_recall=float(evaluation.macro_recall),
+            )
+        )
         model_state = {
             "epoch": epoch,
             "model_state_dict": model.state_dict(),
@@ -158,4 +187,4 @@ def run_training(
             best_metric = float(val_accuracy)
             on_checkpoint("best_metric", epoch, "val_accuracy", best_metric, model_state)
 
-    return "completed"
+    return "completed", final_evaluation
