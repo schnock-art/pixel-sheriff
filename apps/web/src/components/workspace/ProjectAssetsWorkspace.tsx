@@ -109,6 +109,7 @@ export default function ProjectAssetsWorkspace() {
 
   const { data: assets, annotations, setAnnotations, refetch: refetchAssets, isLoading: isAssetsLoading } = useAssets(selectedProjectId);
   const { data: labels, refetch: refetchLabels } = useLabels(selectedProjectId);
+  const availableAssetIds = useMemo(() => assets.map((asset) => asset.id), [assets]);
   const selectedProjectName = selectedProject?.name ?? "No project selected";
   const importWorkflow = useImportWorkflow({
     assets,
@@ -213,6 +214,7 @@ export default function ProjectAssetsWorkspace() {
   const annotationWorkflow = useAnnotationWorkflow({
     selectedProjectId,
     currentAsset,
+    availableAssetIds,
     annotationByAssetId,
     activeLabelRows,
     multiLabelEnabled,

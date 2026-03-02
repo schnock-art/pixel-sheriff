@@ -104,11 +104,11 @@ Status reflects current repository behavior.
 ## In Progress / Next
 
 ### Strategic Priorities (Tests + Consistency, Pre-MAL/Export Expansion)
-- [ ] Tests-first stabilization pass (before new MAL/model-export/curation feature work)
-  - [ ] add API + web regression coverage for stale submit contexts (`project/asset` churn leading to `404`)
-  - [ ] add MAL contract tests (queueing, suggestion persistence/retrieval, accept/reject lifecycle)
-  - [ ] add model-export contract tests (artifact generation, validation failures, deterministic behavior)
-  - [ ] add worker/trainer integration-path tests for queue -> execution -> persisted artifacts/events
+- [x] Tests-first stabilization pass (before new MAL/model-export/curation feature work)
+  - [x] add API + web regression coverage for stale submit contexts (`project/asset` churn leading to `404`)
+  - [x] add MAL contract tests (queueing, suggestion persistence/retrieval, accept/reject lifecycle)
+  - [x] add model-export contract tests (artifact generation, validation failures, deterministic behavior)
+  - [x] add worker/trainer integration-path tests for queue -> execution -> persisted artifacts/events
 - [ ] Consistency hardening pass (targeted, no broad rewrite)
   - [ ] standardize API error envelope usage across all routers (`api_error` with stable `error.code`)
   - [ ] remove duplicated export selection/rebuild logic shared across `exports` and `experiments` flows
@@ -120,9 +120,9 @@ Status reflects current repository behavior.
 
 ### Open Bugfixes
 - [ ] Investigate intermittent `POST /projects/{project_id}/annotations` `404` in some submit flows:
-  - [ ] identify stale project/asset context transitions that can leave invalid staged entries
-  - [ ] harden submit path with stale-entry pruning and clearer user-facing error recovery
-  - [ ] add regression coverage around project/asset churn + staged submit
+  - [x] identify stale project/asset context transitions that can leave invalid staged entries
+  - [x] harden submit path with stale-entry pruning and clearer user-facing error recovery
+  - [x] add regression coverage around project/asset churn + staged submit
 - [x] Fix label assignment persistence across all annotation modes:
   - [x] classification labels persist after submit
   - [x] bounding-box object class/category assignment persists

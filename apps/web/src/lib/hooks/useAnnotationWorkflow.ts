@@ -5,6 +5,10 @@ import {
   buildAnnotationUpsertInput,
   resolveActiveSelection,
 } from "../workspace/annotationSubmission";
+import {
+  isAnnotationSubmitNotFoundError,
+  prunePendingAnnotationsForKnownAssets,
+} from "../workspace/staleSubmit";
 import { resolveSelectionForAsset } from "../workspace/annotationWorkflowSelection";
 import {
   canSubmitWithStates,
@@ -52,6 +56,7 @@ interface LabelRow {
 interface UseAnnotationWorkflowParams {
   selectedProjectId: string | null;
   currentAsset: { id: string; width: number | null; height: number | null } | null;
+  availableAssetIds: string[];
   annotationByAssetId: Map<string, Annotation>;
   activeLabelRows: LabelRow[];
   multiLabelEnabled: boolean;
@@ -75,6 +80,7 @@ function normalizeGeometryObjectInput(objects: GeometryObject[] | undefined): Ge
 export function useAnnotationWorkflow({
   selectedProjectId,
   currentAsset,
+  availableAssetIds,
   annotationByAssetId,
   activeLabelRows,
   multiLabelEnabled,
@@ -155,6 +161,15 @@ export function useAnnotationWorkflow({
       return changed ? next : previous;
     });
   }, [multiLabelEnabled, selectedLabelIds]);
+
+  useEffect(() => {
+    if (availableAssetIds.length === 0) return;
+    setPendingAnnotations((previous) => {
+      const { nextPendingAnnotations, removedAssetIds } = prunePendingAnnotationsForKnownAssets(previous, availableAssetIds);
+      if (removedAssetIds.length === 0) return previous;
+      return nextPendingAnnotations;
+    });
+  }, [availableAssetIds]);
 
   const pendingCount = Object.keys(pendingAnnotations).length;
   const currentDraftSelectionState = useMemo(() => {
@@ -317,9 +332,21 @@ export function useAnnotationWorkflow({
       return;
     }
 
-    const entries = Object.entries(pendingAnnotations);
+    const {
+      nextPendingAnnotations: prunedPendingAnnotations,
+      removedAssetIds,
+    } = prunePendingAnnotationsForKnownAssets(pendingAnnotations, availableAssetIds);
+    if (removedAssetIds.length > 0) {
+      setPendingAnnotations(prunedPendingAnnotations);
+    }
+
+    const entries = Object.entries(prunedPendingAnnotations);
     if (entries.length === 0) {
-      setMessage("No staged edits to submit.");
+      setMessage(
+        removedAssetIds.length > 0
+          ? "No staged edits to submit. Some entries were removed because assets no longer exist."
+          : "No staged edits to submit.",
+      );
       return;
     }
 
@@ -364,6 +391,17 @@ export function useAnnotationWorkflow({
         await submitSingleAnnotation();
       }
     } catch (error) {
+      if (isAnnotationSubmitNotFoundError(error, selectedProjectId)) {
+        const {
+          nextPendingAnnotations: prunedPendingAnnotations,
+          removedAssetIds,
+        } = prunePendingAnnotationsForKnownAssets(pendingAnnotations, availableAssetIds);
+        if (removedAssetIds.length > 0) {
+          setPendingAnnotations(prunedPendingAnnotations);
+        }
+        setMessage("Submit context is stale. Missing assets were removed from staged edits. Refresh and retry.");
+        return;
+      }
       setMessage(error instanceof Error ? error.message : "Failed to submit annotation.");
     } finally {
       setIsSaving(false);

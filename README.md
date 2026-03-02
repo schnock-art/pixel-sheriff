@@ -82,6 +82,16 @@ Local-first CV annotation platform.
   - backbone metadata registry (`resnet18/34/50/101`) + verification utilities
   - generated web metadata file at `apps/web/src/lib/metadata/backbones.v1.json`
   - pytest coverage for metadata verification, registry generation, and classifier build behavior
+- Tests-first stabilization pass implemented:
+  - stale submit context regressions added (API + web helper tests)
+  - MAL contract tests added (queueing, persistence/retrieval, accept/reject lifecycle)
+  - model export contract tests added (artifact generation, validation failures, deterministic hash)
+  - trainer queue-path integration test added (`payload -> parse -> runner -> persisted events/artifacts`)
+- Initial MAL + model-export API contracts are now implemented:
+  - batch suggestion queueing and per-asset suggestion persistence
+  - suggestion decision lifecycle (`accept` / `reject`)
+  - deterministic project-model export artifact generation + download
+- Annotation submit stale-context handling now prunes missing staged asset entries and shows explicit recovery messaging.
 
 ## Stack
 
@@ -107,6 +117,9 @@ Local-first CV annotation platform.
   - top shell project selector + tabs (`Datasets`, `Models`, `Experiments`, disabled `Deploy`)
   - workspace status line (`images labeled`, `classes`, `models`, `experiments`)
 - Models pages support project-scoped create/list/detail plus editable model config drafting/saving
+- Model export contract:
+  - `POST /projects/{project_id}/models/{model_id}/exports` creates deterministic JSON export artifacts for enabled ONNX configs
+  - `GET /projects/{project_id}/models/{model_id}/exports/{hash}/download` downloads export artifacts
 - Model detail page includes:
   - editable controls for Input, Backbone, Outputs (embedding aux), and Export
   - live model summary updates as draft fields change
@@ -223,6 +236,13 @@ Local-first CV annotation platform.
   - classification exports keep `coco_instances.json` with empty `annotations`
   - detection/segmentation exports include geometry records with validated `bbox`/`segmentation` and computed `area`
   - configurable detection/segmentation negative-image policy through `selection_criteria_json.include_negative_images` (`true` by default)
+- MAL contract (initial):
+  - global model registry endpoints (`POST/GET /api/v1/models`)
+  - project batch queueing endpoint (`POST /api/v1/projects/{project_id}/suggestions/batch`)
+  - per-asset suggestion retrieval endpoint (`GET /api/v1/assets/{asset_id}/suggestions`)
+  - suggestion decision endpoints:
+    - `POST /api/v1/projects/{project_id}/suggestions/{suggestion_id}/accept`
+    - `POST /api/v1/projects/{project_id}/suggestions/{suggestion_id}/reject`
 - Shared ML model utilities:
   - `packages/pixel_sheriff_ml` provides shared helpers used by API + trainer (`architecture_family`, `build_resnet_classifier`)
   - trainer uses shared classifier builder for real classification runs
@@ -307,6 +327,8 @@ docker compose up --build
 - `GET/POST /api/v1/projects/{project_id}/models`
 - `GET /api/v1/projects/{project_id}/models/{model_id}`
 - `PUT /api/v1/projects/{project_id}/models/{model_id}`
+- `POST /api/v1/projects/{project_id}/models/{model_id}/exports`
+- `GET /api/v1/projects/{project_id}/models/{model_id}/exports/{content_hash}/download`
 - `GET/POST /api/v1/projects/{project_id}/experiments`
 - `GET /api/v1/projects/{project_id}/experiments/analytics` (`max_points` query, default `200`, range `1..2000`)
 - `GET/PUT /api/v1/projects/{project_id}/experiments/{experiment_id}`
@@ -315,15 +337,18 @@ docker compose up --build
 - `GET /api/v1/projects/{project_id}/experiments/{experiment_id}/events` (SSE)
 - `GET /api/v1/projects/{project_id}/experiments/{experiment_id}/evaluation` (includes top-level `attempt`; returns `evaluation_not_found` when unavailable)
 - `GET /api/v1/projects/{project_id}/experiments/{experiment_id}/samples` (supports mode/class filters + `limit`; includes top-level `attempt`)
-- `GET/POST /api/v1/models` (placeholder MAL surface)
-- `GET /api/v1/assets/{asset_id}/suggestions` (placeholder)
-- `POST /api/v1/projects/{project_id}/suggestions/batch` (placeholder)
+- `GET/POST /api/v1/models`
+- `GET /api/v1/assets/{asset_id}/suggestions`
+- `POST /api/v1/projects/{project_id}/suggestions/batch`
+- `POST /api/v1/projects/{project_id}/suggestions/{suggestion_id}/accept`
+- `POST /api/v1/projects/{project_id}/suggestions/{suggestion_id}/reject`
 
 ## Runtime Notes
 
 - Web uses `NEXT_PUBLIC_API_BASE_URL` for browser calls.
 - Next.js rewrite proxy (`/api/v1/* -> INTERNAL_API_BASE_URL`) remains available.
 - Default local ports are conflict-resistant and configurable in `.env`.
+- Suggestion queue key is configurable via `SUGGESTION_QUEUE_KEY` (default `pixel_sheriff:suggest_jobs:v1`).
 
 ## Known Gaps
 
@@ -331,12 +356,12 @@ docker compose up --build
 - Geometry tooling polish (no polygon vertex dragging/edit yet)
 - Deploy section is still a placeholder in the project shell
 - Detection/segmentation trainer implementations are not yet available (classification only for now)
-- MAL implementation beyond placeholder endpoints
+- MAL inference/generation quality pipeline is still minimal (queue + persistence contracts implemented; model inference integration pending)
 - Shared-asset reference mode (upload-once/link-many)
 
 ## Active Known Issue
 
-- Intermittent annotation submit `404` can still occur in stale project/asset contexts (for example after project/asset churn while staged state exists). Investigation is ongoing.
+- Stale submit contexts can still occur after aggressive project/asset churn, but staged state now prunes missing asset entries and surfaces explicit recovery guidance.
 
 ## Troubleshooting
 
@@ -351,4 +376,5 @@ docker compose up --build
 
 - Annotation submit `404`:
   - Usually means the selected project/asset pair no longer matches server state.
-  - Refresh the page, reselect the project, and verify the asset is still present in the tree before submitting again.
+  - Current behavior prunes stale staged entries automatically and shows a recovery message.
+  - If needed, refresh the page, reselect the project, and verify the asset is still present in the tree before submitting again.

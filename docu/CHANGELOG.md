@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- Initial MAL contract expansion:
+  - `POST /api/v1/projects/{project_id}/suggestions/batch` now queues batch suggestion jobs and persists per-asset pending suggestion rows
+  - `GET /api/v1/assets/{asset_id}/suggestions` now returns normalized suggestion status (`pending`/`accepted`/`rejected`)
+  - `POST /api/v1/projects/{project_id}/suggestions/{suggestion_id}/accept`
+  - `POST /api/v1/projects/{project_id}/suggestions/{suggestion_id}/reject`
+  - suggestion queue service (`apps/api/src/sheriff_api/services/suggestion_queue.py`) and configurable queue key (`SUGGESTION_QUEUE_KEY`)
+- Project model export contract:
+  - `POST /api/v1/projects/{project_id}/models/{model_id}/exports` creates deterministic ONNX-export metadata artifacts
+  - `GET /api/v1/projects/{project_id}/models/{model_id}/exports/{content_hash}/download` downloads persisted artifact JSON
+  - model export artifacts persisted under `model_exports/{project_id}/{model_id}/{content_hash}.json`
+- Tests-first stabilization coverage expansion:
+  - API stale submit regression for project/asset churn submit path (`404` contract)
+  - API MAL contract tests for queueing + retrieval + accept/reject lifecycle
+  - API model export contract tests for deterministic hashes and validation failures
+  - web helper regressions for stale submit detection + staged-entry pruning
+  - trainer queue-path integration test (`payload -> parse -> runner -> persisted events/artifacts`)
 - Project-scoped model scaffolding flow:
   - `POST /api/v1/projects/{project_id}/models` builds deterministic `ModelConfig v1.0` from latest dataset manifest and validates schema
   - `GET /api/v1/projects/{project_id}/models` returns model summaries
@@ -142,6 +158,10 @@ All notable changes to this project will be documented in this file.
   - web helper tests for analytics shaping, confusion normalization, and prediction drill-down filtering
 
 ### Changed
+- Docs refreshed to align with current implementation:
+  - `README.md`
+  - `docu/Architecture.md`
+  - `docu/Roadplan.md`
 - Model detail page behavior evolved from read-only scaffold to editable builder with live summary updates.
 - Model builder footer now uses active Save state handling; `Train Model` remains disabled placeholder.
 - Web datasets workspace was moved into `apps/web/src/components/workspace/ProjectAssetsWorkspace.tsx`.
@@ -219,6 +239,7 @@ All notable changes to this project will be documented in this file.
 - Experiment detail header navigation now uses `Back to Experiments` (instead of `Back to Model`) to return directly to the experiments list.
 
 ### Fixed
+- Web stale submit recovery behavior now prunes missing staged asset entries and surfaces explicit retry/recovery messaging when annotation submit context is stale.
 - Removed duplicate numeric prefixes in model builder step list (`1. 1. Dataset` -> `1. Dataset`).
 - Fixed project switch activation bug where selecting another project in the shell dropdown could keep the previous project context.
 - Fixed status-bar labeled-image refresh lag after submit by adding shell status refresh synchronization from datasets workspace.

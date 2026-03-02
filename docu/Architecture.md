@@ -56,7 +56,7 @@ Network behavior:
 Defined in `apps/api/src/sheriff_api/db/models.py`:
 
 - Core: `Project`, `Category`, `Asset`, `Annotation`, `DatasetVersion`
-- Placeholder MAL domain: `Model`, `Suggestion`
+- Initial MAL domain: `Model`, `Suggestion`
 - Project-scoped model drafts (Phase 1 scaffold) are stored via file-backed records under storage root:
   - `models/{project_id}/records.json`
   - implementation: `apps/api/src/sheriff_api/services/model_store.py`
@@ -132,6 +132,18 @@ Current export contract highlights:
 Export files are persisted at:
 
 - `exports/{project_id}/{content_hash}.zip`
+
+### Project Model Export Artifacts
+
+Project model export artifacts are persisted as deterministic JSON blobs at:
+
+- `model_exports/{project_id}/{model_id}/{content_hash}.json`
+
+Current behavior:
+
+- export is available only when `config_json.export.onnx.enabled == true`
+- export artifact hash is deterministic from canonicalized export payload content
+- repeated exports for unchanged config resolve to the same hash/path
 
 ### ML Model Building Layer (`apps/api/src/sheriff_api/ml`)
 
@@ -269,12 +281,19 @@ Exports:
 - `GET /api/v1/projects/{project_id}/exports`
 - `GET /api/v1/projects/{project_id}/exports/{content_hash}/download`
 
-MAL placeholders:
+MAL contract (initial):
 
 - `POST /api/v1/models`
 - `GET /api/v1/models`
 - `GET /api/v1/assets/{asset_id}/suggestions`
 - `POST /api/v1/projects/{project_id}/suggestions/batch`
+- `POST /api/v1/projects/{project_id}/suggestions/{suggestion_id}/accept`
+- `POST /api/v1/projects/{project_id}/suggestions/{suggestion_id}/reject`
+
+Project model export contract:
+
+- `POST /api/v1/projects/{project_id}/models/{model_id}/exports`
+- `GET /api/v1/projects/{project_id}/models/{model_id}/exports/{content_hash}/download`
 
 Project-scoped model scaffolding:
 
@@ -516,7 +535,16 @@ Supported statuses:
   - model builder helper/validator regressions for draft transforms, dirty checks, and AJV schema validation
 - API test suite uses `pytest` with `httpx` ASGI client fixtures in `apps/api/tests`.
 - API coverage includes geometry validation/COCO export assertions and project model update validation/persistence checks.
+- API coverage includes stale submit-context regression checks (`project/asset` churn -> annotation submit `404`) and recovery-path assertions.
 - API coverage includes experiment create/update/start/cancel flows and SSE smoke validation.
+- API coverage includes MAL contract tests for:
+  - batch suggestion queueing
+  - suggestion persistence/retrieval by asset
+  - accept/reject lifecycle transitions
+- API coverage includes project model export contract tests for:
+  - artifact generation + download
+  - deterministic export hash behavior
+  - validation/error behavior when export is disabled
 - API coverage includes experiment analytics/evaluation/samples endpoint behavior:
   - analytics structure + `max_points`
   - evaluation `attempt` inclusion and `evaluation_not_found`
@@ -525,10 +553,14 @@ Supported statuses:
   - per-attempt + latest mirror evaluation/predictions files
   - `predictions.meta.json` contract checks
   - confusion matrix shape/per-class length/accuracy bounds
+- Trainer coverage includes queue-path integration test (`raw queue payload -> parse -> runner -> persisted events/artifacts`).
 - Web helper coverage includes analytics/dashboard helpers:
   - run selection, summary and scatter shaping
   - confusion normalization (`none`, `by_true`, `by_pred`) and zero-sum handling
   - prediction filtering helpers for explorer/drill-down
+- Web coverage includes stale-submit helper regressions for:
+  - annotation submit `404` detection by route/status
+  - staged pending-entry pruning for missing asset IDs
 - ML-specific pytest coverage added under `apps/api/tests/ml`:
   - metadata verification vs real torchvision backbones (`resnet18`, `resnet50`)
   - registry JSON generation checks for expected structure/tap entries
@@ -540,8 +572,8 @@ Supported statuses:
 - Review/QA moderation workflow not implemented
 - Geometry tooling polish pending (no polygon vertex dragging/editing yet)
 - Auth/multi-user permissions not implemented
-- MAL routes are placeholders only
+- MAL inference/generation runtime remains partial (queue + persistence + decision contracts implemented; inference quality pipeline pending)
 - Detection/segmentation training execution remains TODO (unsupported jobs fail gracefully)
 - Classification training currently supports `resnet_classifier` family only in worker runtime
 - Detection/segmentation deep evaluation dashboards are placeholders (classification analytics only in this phase)
-- Active bug investigation: intermittent annotation submit `404` can occur in stale project/asset submit contexts
+- Stale submit contexts can still occur under aggressive project/asset churn, but web submit flow now prunes missing staged assets and surfaces explicit recovery messaging.

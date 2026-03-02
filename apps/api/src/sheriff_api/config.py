@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     storage_root: str = "./data"
     redis_url: str = "redis://localhost:6379/0"
     job_queue_key: str = "pixel_sheriff:train_jobs:v1"
+    suggestion_queue_key: str = "pixel_sheriff:suggest_jobs:v1"
 
     @model_validator(mode="after")
     def apply_database_url_default(self) -> "Settings":

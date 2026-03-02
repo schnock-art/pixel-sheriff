@@ -10,7 +10,7 @@ labeling -> training -> deployment.
 - `M0` foundation: done
 - `M1` project/category management: mostly done
 - `M2` image ingestion/storage: done for local workflow
-- `M3` labeling workstation: in progress (core loop implemented, active submit-context `404` investigation)
+- `M3` labeling workstation: in progress (core loop implemented; stale-submit mitigation and regressions added, monitoring continues)
 - `M4+` review/export hardening/video/MAL: pending
 
 ## Guiding Principles
@@ -105,7 +105,7 @@ Implemented:
   - model detail shows stepper, read-only summary, and back navigation
 
 Remaining:
-- investigate intermittent annotation submit `404` during stale project/asset submit contexts
+- continue monitoring intermittent annotation submit `404` during stale project/asset submit contexts after staged-entry pruning + regression hardening
 - geometry edit tooling polish (polygon vertex editing and advanced transforms)
 - stronger submission feedback/summary UX
 - integrate editable model-builder controls and training execution
@@ -166,9 +166,9 @@ Remaining:
 
 ### P4 - Model-assisted labeling (MAL)
 
-- model registry
-- suggestion generation
-- accept/reject assist workflow
+- model registry: core endpoints implemented
+- suggestion generation: queue + persistence contracts implemented; inference pipeline still pending
+- accept/reject assist workflow: API contract implemented
 
 ### P5 - Reference-mode asset ingestion (after MAL)
 

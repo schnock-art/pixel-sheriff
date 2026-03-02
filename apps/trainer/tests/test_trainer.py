@@ -10,7 +10,7 @@ import pytest
 try:
     import torch  # noqa: F401
     from pixel_sheriff_trainer.classification.dataset import build_classification_loaders
-    from pixel_sheriff_trainer.jobs import TrainJob
+    from pixel_sheriff_trainer.jobs import TrainJob, parse_train_job
     from pixel_sheriff_trainer.runner import TrainRunner
 
     HAS_TORCH = True
@@ -18,6 +18,7 @@ except Exception:
     HAS_TORCH = False
     build_classification_loaders = None  # type: ignore[assignment]
     TrainJob = None  # type: ignore[assignment]
+    parse_train_job = None  # type: ignore[assignment]
     TrainRunner = None  # type: ignore[assignment]
 
 def _write_tiny_export_zip(root: Path, project_id: str) -> tuple[str, Path]:
@@ -239,3 +240,68 @@ def test_runner_process_writes_events_metrics_and_checkpoints(tmp_path: Path) ->
         assert predictions_meta["schema_version"] == "1"
         assert predictions_meta["attempt"] == 1
         assert predictions_meta["task"] == "classification"
+
+
+@pytest.mark.skipif(not HAS_TORCH, reason="torch is required")
+def test_queue_payload_parse_to_runner_process_persists_events_and_artifacts(tmp_path: Path) -> None:
+    if not HAS_TORCH:
+        pytest.skip("torch/torchvision not available")
+    project_id = str(uuid.uuid4())
+    experiment_id = str(uuid.uuid4())
+    job_id = str(uuid.uuid4())
+    content_hash, _zip_path = _write_tiny_export_zip(tmp_path, project_id)
+    _seed_experiment_layout(tmp_path, project_id, experiment_id, job_id)
+
+    raw_payload = json.dumps(
+        {
+            "job_id": job_id,
+            "job_version": "1",
+            "job_type": "train",
+            "attempt": 1,
+            "project_id": project_id,
+            "experiment_id": experiment_id,
+            "model_id": "model-1",
+            "task": "classification",
+            "model_config": {
+                "architecture": {
+                    "family": "resnet_classifier",
+                    "backbone": {"name": "resnet18", "pretrained": False},
+                    "head": {"num_classes": 1},
+                },
+                "input": {"input_size": [32, 32], "normalization": {"type": "none"}},
+            },
+            "training_config": {
+                "schema_version": "0.1",
+                "model_id": "model-1",
+                "dataset_version_id": "dv-1",
+                "task": "classification",
+                "optimizer": {"type": "adam", "lr": 0.001, "weight_decay": 0.0},
+                "scheduler": {"type": "none", "params": {}},
+                "epochs": 1,
+                "batch_size": 1,
+                "augmentation_profile": "none",
+                "precision": "fp32",
+                "advanced": {"seed": 1, "num_workers": 0, "grad_clip_norm": None},
+                "hpo": {"enabled": False, "strategy": "random", "budget": {"max_trials": 1}, "search_space": {}},
+            },
+            "dataset_export": {
+                "content_hash": content_hash,
+                "zip_relpath": f"exports/{project_id}/{content_hash}.zip",
+                "dataset_version_id": "dv-1",
+            },
+        }
+    )
+    job = parse_train_job(raw_payload)
+    runner = TrainRunner(str(tmp_path))
+    result = runner.process(job)
+
+    assert result in {"completed", "failed:trainer_error", "failed:unsupported_family"}
+    run_dir = tmp_path / "experiments" / project_id / experiment_id / "runs" / "1"
+    assert (run_dir / "events.jsonl").exists()
+    assert (run_dir / "metrics.jsonl").exists()
+    assert (run_dir / "checkpoints.json").exists()
+    events_lines = [line for line in (run_dir / "events.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert len(events_lines) >= 2
+    parsed_events = [json.loads(line) for line in events_lines]
+    assert parsed_events[0]["type"] == "status"
+    assert parsed_events[-1]["type"] == "done"
