@@ -1,9 +1,9 @@
-# Experiments SSE Manual QA (Phase 1)
+# Experiments SSE Manual QA (Phase 2)
 
-Use this checklist to verify create/save/start/cancel + live SSE updates.
+Use this checklist to verify create/save/start/cancel + live SSE updates + surfaced trainer failure messages.
 
 ## Preconditions
-- `docker compose up -d --build api web db redis`
+- `docker compose up -d --build api trainer web db redis`
 - Web is reachable at `http://localhost:3010`
 - API is reachable at `http://localhost:8010/api/v1/health`
 
@@ -71,12 +71,14 @@ Invoke-RestMethod -Method Post -Uri "$api/projects/$projectId/experiments/$exper
   - Verify `New run` creates and opens a new experiment.
 - On experiment page:
   - Edit `epochs`/`batch size`/`lr`, click `Save`, refresh, verify values persist.
+  - Verify default `Advanced Parameters -> Num Workers` is `0` (recommended in Docker).
   - Click `Start Training`.
   - Verify status changes to `running`.
   - Verify chart updates every epoch without page refresh.
   - Verify checkpoints (`latest`, `best_loss`, `best_metric`) update.
   - Refresh mid-run and verify history remains and updates continue.
   - Click `Cancel` during run and verify terminal status `canceled`.
+  - If run fails, verify toast shows failure reason and header shows `Last run error: ...`.
 
 ## SSE Endpoint Spot Check (raw stream)
 In a separate shell (after start), inspect SSE output:
@@ -90,4 +92,4 @@ Expected events:
 - repeated `{"type":"metric", ...}`
 - occasional `{"type":"checkpoint", ...}`
 - terminal `{"type":"done","status":"completed|canceled|failed"}`
-
+- failed done events include `message` + `error_code` fields for UI/runtime diagnostics.

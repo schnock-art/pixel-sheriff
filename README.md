@@ -102,12 +102,14 @@ Local-first CV annotation platform.
 - Experiments pages support project-scoped list/create/detail plus live training telemetry
 - Experiment detail page includes:
   - editable training params (optimizer/lr/epochs/batch/augmentation/advanced)
+  - advanced runtime defaults to `num_workers=0` (editable)
   - save gating based on light config validation
   - checkpoint panel (`best_metric`, `best_loss`, `latest`) with selection placeholder action
   - metrics chart with axis/ticks/legend/toggles
   - hover crosshair + tooltip values per epoch
   - refresh-safe history rehydration and SSE resume while running
   - queued/running/terminal state handling and attempt-aware event cursors (`from_line`, `attempt`)
+  - trainer failure reasons surfaced in UI toast and inline `Last run error`
 - Local folder import with one modal:
   - import into existing or new project
   - select task mode when creating a new project (`classification_single`, `bbox`, `segmentation`)
@@ -184,6 +186,9 @@ Local-first CV annotation platform.
   - `packages/pixel_sheriff_ml` provides shared helpers used by API + trainer (`architecture_family`, `build_resnet_classifier`)
   - trainer uses shared classifier builder for real classification runs
   - API experiment queue/start flow uses shared architecture-family resolution
+- Trainer reliability safeguards:
+  - classification dataloader defaults to `advanced.num_workers=0` for container-safe execution
+  - if a shared-memory dataloader failure occurs with `num_workers > 0`, trainer retries once with `num_workers=0`
 - Backend ML model runtime (API internal library scope) remains available:
   - `build_model(config, verify_metadata=False)` and adapter registry in `apps/api/src/sheriff_api/ml`
   - metadata verification + registry generation utilities remain unchanged

@@ -201,6 +201,9 @@ Trainer responsibilities and runtime behavior:
 - Idempotency + attempt safety:
   - validates `status.json` active job/attempt before execution
   - stale/duplicate jobs are ignored
+- Worker reliability safeguards:
+  - default `TrainingConfig v0.1` uses `advanced.num_workers = 0` for container-safe data loading
+  - if a shared-memory dataloader failure occurs with `num_workers > 0`, trainer retries once with `num_workers=0` and emits a status message event
 
 ## 4. Implemented API Surface
 
@@ -275,6 +278,7 @@ Project-scoped experiments:
 - create flow derives default `TrainingConfig v0` from model + latest `DatasetVersion` and persists in `draft`
 - start flow pins dataset export, creates run attempt metadata, enqueues Redis job, and transitions to `queued`
 - SSE events stream by tailing run-attempt `events.jsonl` with optional resume cursor (`from_line`) and run selection (`attempt`)
+- default training config sets `advanced.num_workers = 0` (user-editable in Advanced Parameters)
 
 Error response contract:
 
@@ -422,6 +426,7 @@ Workspace container components (`apps/web/src/components/workspace/*`):
   - `Cancel` supports queued cancel and running cancel-request semantics
   - checkpoints tracked as `best_metric`, `best_loss`, `latest` with selection placeholder (`Pick`)
   - metrics chart supports axis/ticks, legend, series toggles, crosshair hover, and per-epoch tooltip values
+  - trainer failure details are surfaced in UI (toast + inline `Last run error` in experiment header)
   - refresh-safe behavior: persisted history loads first, then live stream resumes for running experiments
 - Feedback behavior:
   - auto-dismiss toast message for success/error summaries
