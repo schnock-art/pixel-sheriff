@@ -103,6 +103,21 @@ Status reflects current repository behavior.
 
 ## In Progress / Next
 
+### Strategic Priorities (Tests + Consistency, Pre-MAL/Export Expansion)
+- [ ] Tests-first stabilization pass (before new MAL/model-export/curation feature work)
+  - [ ] add API + web regression coverage for stale submit contexts (`project/asset` churn leading to `404`)
+  - [ ] add MAL contract tests (queueing, suggestion persistence/retrieval, accept/reject lifecycle)
+  - [ ] add model-export contract tests (artifact generation, validation failures, deterministic behavior)
+  - [ ] add worker/trainer integration-path tests for queue -> execution -> persisted artifacts/events
+- [ ] Consistency hardening pass (targeted, no broad rewrite)
+  - [ ] standardize API error envelope usage across all routers (`api_error` with stable `error.code`)
+  - [ ] remove duplicated export selection/rebuild logic shared across `exports` and `experiments` flows
+  - [ ] keep project-scoped model records behavior stable while preparing migration from file-backed store to DB-backed table
+- [ ] Surgical decomposition of complexity hotspots
+  - [ ] split `apps/web/src/components/workspace/ProjectAssetsWorkspace.tsx` into focused subcomponents/hooks without behavior changes
+  - [ ] split `apps/api/src/sheriff_api/routers/experiments.py` by concern (analytics/start-cancel/events/evaluation) to reduce regression risk
+  - [ ] ensure each extraction is paired with regression tests in the same PR
+
 ### Open Bugfixes
 - [ ] Investigate intermittent `POST /projects/{project_id}/annotations` `404` in some submit flows:
   - [ ] identify stale project/asset context transitions that can leave invalid staged entries
