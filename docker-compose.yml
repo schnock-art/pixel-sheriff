@@ -18,7 +18,8 @@ services:
 
   api:
     build:
-      context: ./apps/api
+      context: .
+      dockerfile: apps/api/Dockerfile
     environment:
       DB_HOST: ${DB_HOST:-db}
       DB_PORT: ${DB_PORT:-5432}
@@ -26,7 +27,8 @@ services:
       DB_PASS: ${DB_PASS:-postgres}
       DB_NAME: ${DB_NAME:-pixel_sheriff}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
-      STORAGE_ROOT: ${STORAGE_ROOT:-/app/data}
+      JOB_QUEUE_KEY: ${JOB_QUEUE_KEY:-pixel_sheriff:train_jobs:v1}
+      STORAGE_ROOT: /app/data
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
     ports:
       - "${API_PORT:-8000}:8000"
@@ -35,6 +37,22 @@ services:
       - redis
     volumes:
       - ./data:/app/data
+
+  trainer:
+    build:
+      context: .
+      dockerfile: apps/trainer/Dockerfile
+    environment:
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      JOB_QUEUE_KEY: ${JOB_QUEUE_KEY:-pixel_sheriff:train_jobs:v1}
+      STORAGE_ROOT: /app/data
+      TRAINER_POLL_SECONDS: ${TRAINER_POLL_SECONDS:-5}
+    depends_on:
+      - redis
+      - db
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
 
   web:
     build:

@@ -24,9 +24,9 @@ def _default_summary() -> dict[str, Any]:
 
 def _default_checkpoints() -> list[dict[str, Any]]:
     return [
-        {"kind": "best_metric", "epoch": None, "metric_name": None, "value": None, "updated_at": None},
-        {"kind": "best_loss", "epoch": None, "metric_name": "val_loss", "value": None, "updated_at": None},
-        {"kind": "latest", "epoch": None, "metric_name": None, "value": None, "updated_at": None},
+        {"kind": "best_metric", "epoch": None, "metric_name": None, "value": None, "updated_at": None, "uri": None},
+        {"kind": "best_loss", "epoch": None, "metric_name": "val_loss", "value": None, "updated_at": None, "uri": None},
+        {"kind": "latest", "epoch": None, "metric_name": None, "value": None, "updated_at": None, "uri": None},
     ]
 
 
@@ -47,11 +47,43 @@ class ExperimentStore:
     def _status_path(self, project_id: str, experiment_id: str) -> Path:
         return self._experiment_dir(project_id, experiment_id) / "status.json"
 
-    def _metrics_path(self, project_id: str, experiment_id: str) -> Path:
+    def _legacy_metrics_path(self, project_id: str, experiment_id: str) -> Path:
         return self._experiment_dir(project_id, experiment_id) / "metrics.jsonl"
 
-    def _checkpoints_path(self, project_id: str, experiment_id: str) -> Path:
+    def _legacy_checkpoints_path(self, project_id: str, experiment_id: str) -> Path:
         return self._experiment_dir(project_id, experiment_id) / "checkpoints.json"
+
+    def _runs_dir(self, project_id: str, experiment_id: str) -> Path:
+        return self._experiment_dir(project_id, experiment_id) / "runs"
+
+    def _run_dir(self, project_id: str, experiment_id: str, attempt: int) -> Path:
+        return self._runs_dir(project_id, experiment_id) / str(attempt)
+
+    def _run_json_path(self, project_id: str, experiment_id: str, attempt: int) -> Path:
+        return self._run_dir(project_id, experiment_id, attempt) / "run.json"
+
+    def _events_path(self, project_id: str, experiment_id: str, attempt: int) -> Path:
+        return self._run_dir(project_id, experiment_id, attempt) / "events.jsonl"
+
+    def _events_meta_path(self, project_id: str, experiment_id: str, attempt: int) -> Path:
+        return self._run_dir(project_id, experiment_id, attempt) / "events.meta.json"
+
+    def _metrics_path(self, project_id: str, experiment_id: str, attempt: int) -> Path:
+        return self._run_dir(project_id, experiment_id, attempt) / "metrics.jsonl"
+
+    def _checkpoints_path(self, project_id: str, experiment_id: str, attempt: int) -> Path:
+        return self._run_dir(project_id, experiment_id, attempt) / "checkpoints.json"
+
+    def _status_default(self) -> dict[str, Any]:
+        return {
+            "status": "draft",
+            "cancel_requested": False,
+            "current_run_attempt": None,
+            "last_completed_attempt": None,
+            "active_job_id": None,
+            "error": None,
+            "updated_at": _utc_now_iso(),
+        }
 
     def _read_json(self, path: Path, default: Any) -> Any:
         if not path.exists():
@@ -75,6 +107,68 @@ class ExperimentStore:
     def _write_records(self, project_id: str, records: list[dict[str, Any]]) -> None:
         self._write_json(self._records_path(project_id), records)
 
+    def _read_status(self, project_id: str, experiment_id: str) -> dict[str, Any]:
+        payload = self._read_json(self._status_path(project_id, experiment_id), self._status_default())
+        if not isinstance(payload, dict):
+            return self._status_default()
+        merged = dict(self._status_default())
+        merged.update(payload)
+        return merged
+
+    def _write_status(self, project_id: str, experiment_id: str, status_row: dict[str, Any]) -> dict[str, Any]:
+        next_row = dict(self._status_default())
+        next_row.update(status_row)
+        next_row["updated_at"] = _utc_now_iso()
+        self._write_json(self._status_path(project_id, experiment_id), next_row)
+        return next_row
+
+    def _line_count(self, path: Path) -> int:
+        if not path.exists():
+            return 0
+        count = 0
+        try:
+            with path.open("r", encoding="utf-8") as handle:
+                for _ in handle:
+                    count += 1
+        except OSError:
+            return 0
+        return count
+
+    def _read_events_meta(self, project_id: str, experiment_id: str, attempt: int) -> dict[str, Any]:
+        meta_default = {"line_count": 0, "updated_at": None}
+        payload = self._read_json(self._events_meta_path(project_id, experiment_id, attempt), meta_default)
+        if not isinstance(payload, dict):
+            return dict(meta_default)
+        if not isinstance(payload.get("line_count"), int):
+            payload["line_count"] = 0
+        return payload
+
+    def _write_events_meta(self, project_id: str, experiment_id: str, attempt: int, line_count: int) -> None:
+        self._write_json(
+            self._events_meta_path(project_id, experiment_id, attempt),
+            {"line_count": int(max(0, line_count)), "updated_at": _utc_now_iso()},
+        )
+
+    def _resolve_attempt(self, project_id: str, experiment_id: str, attempt: int | None = None) -> int | None:
+        if isinstance(attempt, int) and attempt >= 1:
+            return attempt
+        status_row = self._read_status(project_id, experiment_id)
+        current_attempt = status_row.get("current_run_attempt")
+        if isinstance(current_attempt, int) and current_attempt >= 1:
+            return current_attempt
+        return None
+
+    def _read_checkpoints_for_attempt(self, project_id: str, experiment_id: str, attempt: int | None) -> list[dict[str, Any]]:
+        if isinstance(attempt, int) and attempt >= 1:
+            payload = self._read_json(self._checkpoints_path(project_id, experiment_id, attempt), _default_checkpoints())
+            if isinstance(payload, list):
+                return payload
+            return _default_checkpoints()
+        payload = self._read_json(self._legacy_checkpoints_path(project_id, experiment_id), _default_checkpoints())
+        if isinstance(payload, list):
+            return payload
+        return _default_checkpoints()
+
     def _update_record(
         self,
         *,
@@ -96,7 +190,20 @@ class ExperimentStore:
         records = self._read_records(project_id)
         if model_id:
             records = [row for row in records if str(row.get("model_id")) == model_id]
-        return sorted(records, key=lambda item: str(item.get("updated_at", "")), reverse=True)
+        hydrated: list[dict[str, Any]] = []
+        for row in records:
+            experiment_id = str(row.get("id") or "")
+            if not experiment_id:
+                continue
+            status_row = self._read_status(project_id, experiment_id)
+            merged = dict(row)
+            merged["status"] = str(status_row.get("status", row.get("status", "draft")))
+            merged["current_run_attempt"] = status_row.get("current_run_attempt")
+            merged["last_completed_attempt"] = status_row.get("last_completed_attempt")
+            merged["active_job_id"] = status_row.get("active_job_id")
+            merged["error"] = status_row.get("error")
+            hydrated.append(merged)
+        return sorted(hydrated, key=lambda item: str(item.get("updated_at", "")), reverse=True)
 
     def get_index_record(self, project_id: str, experiment_id: str) -> dict[str, Any] | None:
         for row in self._read_records(project_id):
@@ -104,20 +211,32 @@ class ExperimentStore:
                 return row
         return None
 
-    def get(self, project_id: str, experiment_id: str, *, metrics_limit: int | None = None) -> dict[str, Any] | None:
+    def get(
+        self,
+        project_id: str,
+        experiment_id: str,
+        *,
+        metrics_limit: int | None = None,
+        attempt: int | None = None,
+    ) -> dict[str, Any] | None:
         index_record = self.get_index_record(project_id, experiment_id)
         if index_record is None:
             return None
 
         config = self._read_json(self._config_path(project_id, experiment_id), index_record.get("config_json", {}))
-        status_row = self._read_json(self._status_path(project_id, experiment_id), {})
-        checkpoints = self._read_json(self._checkpoints_path(project_id, experiment_id), _default_checkpoints())
-        metrics = self.read_metrics(project_id, experiment_id, limit=metrics_limit)
+        status_row = self._read_status(project_id, experiment_id)
+        resolved_attempt = self._resolve_attempt(project_id, experiment_id, attempt)
+        checkpoints = self._read_checkpoints_for_attempt(project_id, experiment_id, resolved_attempt)
+        metrics = self.read_metrics(project_id, experiment_id, limit=metrics_limit, attempt=resolved_attempt)
 
         payload = dict(index_record)
         payload["config_json"] = config if isinstance(config, dict) else {}
-        payload["status"] = status_row.get("status", index_record.get("status", "draft"))
-        payload["checkpoints"] = checkpoints if isinstance(checkpoints, list) else _default_checkpoints()
+        payload["status"] = str(status_row.get("status", index_record.get("status", "draft")))
+        payload["current_run_attempt"] = status_row.get("current_run_attempt")
+        payload["last_completed_attempt"] = status_row.get("last_completed_attempt")
+        payload["active_job_id"] = status_row.get("active_job_id")
+        payload["error"] = status_row.get("error")
+        payload["checkpoints"] = checkpoints
         payload["metrics"] = metrics
         return payload
 
@@ -149,12 +268,21 @@ class ExperimentStore:
         self._write_records(project_id, records)
 
         self._write_json(self._config_path(project_id, experiment_id), config_json)
-        self._write_json(
-            self._status_path(project_id, experiment_id),
-            {"status": status, "cancel_requested": False, "updated_at": timestamp},
+        self._write_status(
+            project_id,
+            experiment_id,
+            {
+                "status": status,
+                "cancel_requested": False,
+                "current_run_attempt": None,
+                "last_completed_attempt": None,
+                "active_job_id": None,
+                "error": None,
+                "updated_at": timestamp,
+            },
         )
-        self._write_json(self._checkpoints_path(project_id, experiment_id), _default_checkpoints())
-        metrics_path = self._metrics_path(project_id, experiment_id)
+        self._write_json(self._legacy_checkpoints_path(project_id, experiment_id), _default_checkpoints())
+        metrics_path = self._legacy_metrics_path(project_id, experiment_id)
         metrics_path.parent.mkdir(parents=True, exist_ok=True)
         metrics_path.write_text("", encoding="utf-8")
 
@@ -188,7 +316,14 @@ class ExperimentStore:
             self._write_json(self._config_path(project_id, experiment_id), config_json)
         return self.get(project_id, experiment_id)
 
-    def set_status(self, *, project_id: str, experiment_id: str, status: str) -> dict[str, Any] | None:
+    def set_status(
+        self,
+        *,
+        project_id: str,
+        experiment_id: str,
+        status: str,
+        error: str | None = None,
+    ) -> dict[str, Any] | None:
         updated = self._update_record(
             project_id=project_id,
             experiment_id=experiment_id,
@@ -197,32 +332,41 @@ class ExperimentStore:
         if updated is None:
             return None
 
-        status_path = self._status_path(project_id, experiment_id)
-        status_row = self._read_json(status_path, {})
-        if not isinstance(status_row, dict):
-            status_row = {}
+        status_row = self._read_status(project_id, experiment_id)
         status_row["status"] = status
-        status_row["updated_at"] = _utc_now_iso()
-        self._write_json(status_path, status_row)
+        status_row["error"] = error
+        if status in {"completed", "failed", "canceled"}:
+            attempt = status_row.get("current_run_attempt")
+            if isinstance(attempt, int) and attempt >= 1:
+                status_row["last_completed_attempt"] = attempt
+            status_row["active_job_id"] = None
+        self._write_status(project_id, experiment_id, status_row)
         return self.get(project_id, experiment_id)
 
-    def set_cancel_requested(self, *, project_id: str, experiment_id: str, cancel_requested: bool) -> None:
-        status_path = self._status_path(project_id, experiment_id)
-        status_row = self._read_json(status_path, {})
-        if not isinstance(status_row, dict):
-            status_row = {}
+    def get_status_row(self, project_id: str, experiment_id: str) -> dict[str, Any]:
+        return self._read_status(project_id, experiment_id)
+
+    def set_cancel_requested(self, *, project_id: str, experiment_id: str, cancel_requested: bool) -> dict[str, Any]:
+        status_row = self._read_status(project_id, experiment_id)
         status_row["cancel_requested"] = bool(cancel_requested)
-        status_row["updated_at"] = _utc_now_iso()
-        self._write_json(status_path, status_row)
+        return self._write_status(project_id, experiment_id, status_row)
 
     def is_cancel_requested(self, *, project_id: str, experiment_id: str) -> bool:
-        status_row = self._read_json(self._status_path(project_id, experiment_id), {})
-        if not isinstance(status_row, dict):
-            return False
+        status_row = self._read_status(project_id, experiment_id)
         return bool(status_row.get("cancel_requested", False))
 
-    def read_metrics(self, project_id: str, experiment_id: str, *, limit: int | None = None) -> list[dict[str, Any]]:
-        path = self._metrics_path(project_id, experiment_id)
+    def read_metrics(
+        self,
+        project_id: str,
+        experiment_id: str,
+        *,
+        limit: int | None = None,
+        attempt: int | None = None,
+    ) -> list[dict[str, Any]]:
+        if isinstance(attempt, int) and attempt >= 1:
+            path = self._metrics_path(project_id, experiment_id, attempt)
+        else:
+            path = self._legacy_metrics_path(project_id, experiment_id)
         if not path.exists():
             return []
         rows: list[dict[str, Any]] = []
@@ -245,15 +389,15 @@ class ExperimentStore:
             return rows[-limit:]
         return rows
 
-    def append_metric(self, *, project_id: str, experiment_id: str, metric_row: dict[str, Any]) -> None:
-        path = self._metrics_path(project_id, experiment_id)
+    def append_metric(self, *, project_id: str, experiment_id: str, attempt: int, metric_row: dict[str, Any]) -> None:
+        path = self._metrics_path(project_id, experiment_id, attempt)
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(metric_row, sort_keys=True))
             handle.write("\n")
 
-    def set_checkpoints(self, *, project_id: str, experiment_id: str, checkpoints: list[dict[str, Any]]) -> None:
-        self._write_json(self._checkpoints_path(project_id, experiment_id), checkpoints)
+    def set_checkpoints(self, *, project_id: str, experiment_id: str, attempt: int, checkpoints: list[dict[str, Any]]) -> None:
+        self._write_json(self._checkpoints_path(project_id, experiment_id, attempt), checkpoints)
 
     def set_summary(self, *, project_id: str, experiment_id: str, summary_json: dict[str, Any]) -> dict[str, Any] | None:
         updated = self._update_record(
@@ -265,9 +409,148 @@ class ExperimentStore:
             return None
         return self.get(project_id, experiment_id)
 
+    def init_run_attempt(
+        self,
+        *,
+        project_id: str,
+        experiment_id: str,
+        job_id: str,
+        dataset_export: dict[str, Any],
+        task: str,
+        model_family: str,
+    ) -> dict[str, Any] | None:
+        index_record = self.get_index_record(project_id, experiment_id)
+        if index_record is None:
+            return None
+
+        status_row = self._read_status(project_id, experiment_id)
+        previous_attempt = status_row.get("current_run_attempt")
+        attempt = (previous_attempt if isinstance(previous_attempt, int) and previous_attempt >= 1 else 0) + 1
+
+        run_dir = self._run_dir(project_id, experiment_id, attempt)
+        run_dir.mkdir(parents=True, exist_ok=True)
+        (run_dir / "checkpoints").mkdir(parents=True, exist_ok=True)
+
+        self._write_json(
+            self._run_json_path(project_id, experiment_id, attempt),
+            {
+                "attempt": attempt,
+                "job_id": job_id,
+                "dataset_export": dataset_export,
+                "task": task,
+                "model_family": model_family,
+                "started_at": None,
+                "ended_at": None,
+            },
+        )
+        self._events_path(project_id, experiment_id, attempt).write_text("", encoding="utf-8")
+        self._write_events_meta(project_id, experiment_id, attempt, 0)
+        self._metrics_path(project_id, experiment_id, attempt).write_text("", encoding="utf-8")
+        self._write_json(self._checkpoints_path(project_id, experiment_id, attempt), _default_checkpoints())
+
+        def _record_mutator(record: dict[str, Any]) -> None:
+            record["status"] = "queued"
+            artifacts = record.get("artifacts_json")
+            if not isinstance(artifacts, dict):
+                artifacts = {}
+            artifacts["last_dataset_export"] = dataset_export
+            record["artifacts_json"] = artifacts
+
+        self._update_record(
+            project_id=project_id,
+            experiment_id=experiment_id,
+            mutator=_record_mutator,
+        )
+        status_row.update(
+            {
+                "status": "queued",
+                "cancel_requested": False,
+                "current_run_attempt": attempt,
+                "active_job_id": job_id,
+                "error": None,
+            }
+        )
+        self._write_status(project_id, experiment_id, status_row)
+        return self.get(project_id, experiment_id, attempt=attempt)
+
+    def set_run_started_at(self, *, project_id: str, experiment_id: str, attempt: int) -> None:
+        run_path = self._run_json_path(project_id, experiment_id, attempt)
+        run_row = self._read_json(run_path, {})
+        if not isinstance(run_row, dict):
+            run_row = {}
+        run_row["started_at"] = _utc_now_iso()
+        self._write_json(run_path, run_row)
+
+    def set_run_ended_at(self, *, project_id: str, experiment_id: str, attempt: int) -> None:
+        run_path = self._run_json_path(project_id, experiment_id, attempt)
+        run_row = self._read_json(run_path, {})
+        if not isinstance(run_row, dict):
+            run_row = {}
+        run_row["ended_at"] = _utc_now_iso()
+        self._write_json(run_path, run_row)
+
+    def append_event(self, *, project_id: str, experiment_id: str, attempt: int, event: dict[str, Any]) -> int:
+        path = self._events_path(project_id, experiment_id, attempt)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(event, sort_keys=True))
+            handle.write("\n")
+
+        meta = self._read_events_meta(project_id, experiment_id, attempt)
+        next_line = int(meta.get("line_count") or 0) + 1
+        self._write_events_meta(project_id, experiment_id, attempt, next_line)
+        return next_line
+
+    def read_events(
+        self,
+        *,
+        project_id: str,
+        experiment_id: str,
+        attempt: int,
+        from_line: int = 0,
+    ) -> list[dict[str, Any]]:
+        path = self._events_path(project_id, experiment_id, attempt)
+        if not path.exists():
+            return []
+        rows: list[dict[str, Any]] = []
+        start = max(0, int(from_line))
+        try:
+            with path.open("r", encoding="utf-8") as handle:
+                for idx, line in enumerate(handle, start=1):
+                    if idx <= start:
+                        continue
+                    parsed: Any
+                    try:
+                        parsed = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if not isinstance(parsed, dict):
+                        continue
+                    rows.append({"line": idx, "attempt": attempt, "event": parsed})
+        except OSError:
+            return []
+        return rows
+
+    def get_event_line_count(self, *, project_id: str, experiment_id: str, attempt: int) -> int:
+        meta = self._read_events_meta(project_id, experiment_id, attempt)
+        line_count = meta.get("line_count")
+        if isinstance(line_count, int) and line_count >= 0:
+            return line_count
+        line_count = self._line_count(self._events_path(project_id, experiment_id, attempt))
+        self._write_events_meta(project_id, experiment_id, attempt, line_count)
+        return line_count
+
+    def events_path(self, *, project_id: str, experiment_id: str, attempt: int) -> Path:
+        return self._events_path(project_id, experiment_id, attempt)
+
+    def run_metadata(self, *, project_id: str, experiment_id: str, attempt: int) -> dict[str, Any]:
+        payload = self._read_json(self._run_json_path(project_id, experiment_id, attempt), {})
+        if isinstance(payload, dict):
+            return payload
+        return {}
+
     def delete_project_tree(self, project_id: str) -> None:
         try:
             self._storage.delete_tree(f"experiments/{project_id}")
         except ValueError:
             return
-

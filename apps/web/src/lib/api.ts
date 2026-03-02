@@ -226,10 +226,12 @@ export interface ExperimentCheckpoint {
   epoch: number | null;
   metric_name: string | null;
   value: number | null;
+  uri?: string | null;
   updated_at: string | null;
 }
 
 export interface ExperimentMetricPoint {
+  attempt?: number | null;
   epoch: number;
   train_loss?: number;
   val_loss?: number;
@@ -248,6 +250,10 @@ export interface ProjectExperimentSummary {
   updated_at: string;
   status: ExperimentStatus;
   summary_json: ExperimentSummaryJson;
+  current_run_attempt?: number | null;
+  last_completed_attempt?: number | null;
+  active_job_id?: string | null;
+  error?: string | null;
 }
 
 export interface ProjectExperimentRecord extends ProjectExperimentSummary {
@@ -275,16 +281,26 @@ export interface ProjectExperimentUpdatePayload {
 
 export interface ExperimentActionResponse {
   ok: boolean;
+  status?: ExperimentStatus | null;
+  attempt?: number | null;
+  job_id?: string | null;
 }
 
 export type ExperimentEvent =
-  | { type: "status"; status: ExperimentStatus }
-  | ({ type: "metric" } & ExperimentMetricPoint)
-  | ({ type: "checkpoint" } & ExperimentCheckpoint)
-  | { type: "done"; status: ExperimentStatus; message?: string };
+  | { type: "status"; status: ExperimentStatus; attempt?: number; job_id?: string; ts?: string; message?: string }
+  | ({ type: "metric"; attempt?: number; ts?: string } & ExperimentMetricPoint)
+  | ({ type: "checkpoint"; attempt?: number; ts?: string } & ExperimentCheckpoint)
+  | { type: "done"; status: ExperimentStatus; attempt?: number; job_id?: string; ts?: string; message?: string; error_code?: string };
+
+export interface ExperimentEventEnvelope {
+  line: number;
+  attempt: number | null;
+  event: ExperimentEvent;
+}
 
 export interface StreamExperimentHandlers {
   onEvent?: (event: ExperimentEvent) => void;
+  onEnvelope?: (payload: ExperimentEventEnvelope) => void;
   onError?: (event: Event) => void;
 }
 
@@ -445,16 +461,31 @@ export function cancelExperiment(projectId: string, experimentId: string): Promi
 export function streamExperimentEvents(
   projectId: string,
   experimentId: string,
+  options: { fromLine?: number; attempt?: number } = {},
   handlers: StreamExperimentHandlers,
 ): () => void {
   const urlBase = API_BASE.endsWith("/") ? API_BASE.slice(0, -1) : API_BASE;
-  const url = `${urlBase}/api/v1/projects/${encodeURIComponent(projectId)}/experiments/${encodeURIComponent(experimentId)}/events`;
+  const params = new URLSearchParams();
+  if (typeof options.fromLine === "number" && Number.isFinite(options.fromLine) && options.fromLine >= 0) {
+    params.set("from_line", String(Math.floor(options.fromLine)));
+  }
+  if (typeof options.attempt === "number" && Number.isFinite(options.attempt) && options.attempt >= 1) {
+    params.set("attempt", String(Math.floor(options.attempt)));
+  }
+  const query = params.toString();
+  const url = `${urlBase}/api/v1/projects/${encodeURIComponent(projectId)}/experiments/${encodeURIComponent(experimentId)}/events${query ? `?${query}` : ""}`;
   const source = new EventSource(url);
 
   source.onmessage = (event) => {
     try {
-      const parsed = JSON.parse(event.data) as ExperimentEvent;
-      handlers.onEvent?.(parsed);
+      const parsed = JSON.parse(event.data) as ExperimentEvent | ExperimentEventEnvelope;
+      if (parsed && typeof parsed === "object" && "event" in parsed && "line" in parsed) {
+        const envelope = parsed as ExperimentEventEnvelope;
+        handlers.onEnvelope?.(envelope);
+        handlers.onEvent?.(envelope.event);
+      } else {
+        handlers.onEvent?.(parsed as ExperimentEvent);
+      }
     } catch {
       return;
     }

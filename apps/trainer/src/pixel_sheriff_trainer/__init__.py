@@ -1,0 +1,2 @@
+"""Pixel Sheriff trainer worker."""
+

@@ -59,7 +59,8 @@ Local-first CV annotation platform.
   - model detail `Train Model` CTA supports `Continue` or `New run`
   - training config draft save/edit in `draft`/`failed` states
   - `start`/`cancel` lifecycle APIs
-  - simulated async runner with persisted metrics/checkpoints
+  - Redis-queued trainer worker execution with persisted metrics/checkpoints
+  - run-attempt isolation under `runs/{attempt}` to avoid metric/event/checkpoint mixing across restarts
   - live SSE stream consumed by web chart UI
   - chart includes axes, legend, toggles, and hover value tooltip
 - Backend ML model-building layer (v0) is now implemented under `apps/api/src/sheriff_api/ml`:
@@ -72,7 +73,7 @@ Local-first CV annotation platform.
 
 - `apps/web`: Next.js labeling UI
 - `apps/api`: FastAPI backend
-- `apps/worker`: worker scaffold/placeholders
+- `apps/trainer`: Redis worker that executes classification training jobs
 - Postgres + Redis via Docker Compose
 - Local filesystem storage under `./data`
 
@@ -106,6 +107,7 @@ Local-first CV annotation platform.
   - metrics chart with axis/ticks/legend/toggles
   - hover crosshair + tooltip values per epoch
   - refresh-safe history rehydration and SSE resume while running
+  - queued/running/terminal state handling and attempt-aware event cursors (`from_line`, `attempt`)
 - Local folder import with one modal:
   - import into existing or new project
   - select task mode when creating a new project (`classification_single`, `bbox`, `segmentation`)
@@ -178,12 +180,13 @@ Local-first CV annotation platform.
   - classification exports keep `coco_instances.json` with empty `annotations`
   - detection/segmentation exports include geometry records with validated `bbox`/`segmentation` and computed `area`
   - configurable detection/segmentation negative-image policy through `selection_criteria_json.include_negative_images` (`true` by default)
-- Backend ML model runtime (library scope, not route-wired yet):
-  - `build_model(config, verify_metadata=False)` returns composed `nn.Module` + output names + label map
-  - adapter families available: `resnet_classifier`, `retinanet`, `deeplabv3`
-  - aux output composition supports deterministic ONNX output ordering and projections (`none`, `pool_linear`, `mlp`)
-  - tap compatibility alias maintained: `backbone.avgpool -> backbone.global_pool`
-  - metadata verification utility compares registry specs against real torchvision forward-pass outputs
+- Shared ML model utilities:
+  - `packages/pixel_sheriff_ml` provides shared helpers used by API + trainer (`architecture_family`, `build_resnet_classifier`)
+  - trainer uses shared classifier builder for real classification runs
+  - API experiment queue/start flow uses shared architecture-family resolution
+- Backend ML model runtime (API internal library scope) remains available:
+  - `build_model(config, verify_metadata=False)` and adapter registry in `apps/api/src/sheriff_api/ml`
+  - metadata verification + registry generation utilities remain unchanged
 
 ## Run Locally
 
@@ -209,7 +212,7 @@ docker compose up --build
 
 - Start/rebuild: `docker compose up --build`
 - Stop: `docker compose down`
-- Logs: `docker compose logs -f web api`
+- Logs: `docker compose logs -f web api trainer`
 - Status: `docker compose ps`
 - Web tests: `cd apps/web && npm test`
 - Web build check: `cd apps/web && npm run build`
@@ -278,7 +281,7 @@ docker compose up --build
 - Review/QA workflow
 - Geometry tooling polish (no polygon vertex dragging/edit yet)
 - Deploy section is still a placeholder in the project shell
-- Real training backend is not implemented yet (current experiment runner is simulated)
+- Detection/segmentation trainer implementations are not yet available (classification only for now)
 - MAL implementation beyond placeholder endpoints
 - Shared-asset reference mode (upload-once/link-many)
 

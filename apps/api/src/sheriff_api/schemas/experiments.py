@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 ExperimentStatus = Literal["draft", "queued", "running", "completed", "failed", "canceled"]
@@ -11,27 +11,37 @@ TrainingTask = Literal["classification", "detection", "segmentation"]
 
 
 class TrainingOptimizer(BaseModel):
-    type: Literal["adam", "sgd"] = "adam"
+    model_config = ConfigDict(extra="allow")
+
+    type: Literal["adam", "adamw", "sgd"] = "adam"
     lr: float = Field(default=0.001, gt=0)
     weight_decay: float = Field(default=0.0, ge=0)
 
 
 class TrainingScheduler(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     type: Literal["none", "step", "cosine"] = "none"
     params: dict[str, Any] = Field(default_factory=dict)
 
 
 class TrainingAdvanced(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     seed: int = 1337
-    num_workers: int = Field(default=4, ge=0)
+    num_workers: int = Field(default=0, ge=0)
     grad_clip_norm: float | None = None
 
 
 class TrainingHpoBudget(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     max_trials: int = Field(default=10, ge=1)
 
 
 class TrainingHpo(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     enabled: bool = False
     strategy: Literal["random", "grid", "bayes"] = "random"
     budget: TrainingHpoBudget = Field(default_factory=TrainingHpoBudget)
@@ -39,6 +49,8 @@ class TrainingHpo(BaseModel):
 
 
 class TrainingConfigV0(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     schema_version: Literal["0.1"] = "0.1"
     model_id: str
     dataset_version_id: str
@@ -61,6 +73,7 @@ class ExperimentSummaryJson(BaseModel):
 
 
 class ExperimentMetricPoint(BaseModel):
+    attempt: int | None = Field(default=None, ge=1)
     epoch: int = Field(ge=1)
     train_loss: float | None = None
     val_loss: float | None = None
@@ -75,6 +88,7 @@ class ExperimentCheckpoint(BaseModel):
     epoch: int | None = None
     metric_name: str | None = None
     value: float | None = None
+    uri: str | None = None
     updated_at: datetime | None = None
 
 
@@ -87,6 +101,10 @@ class ProjectExperimentSummary(BaseModel):
     updated_at: datetime
     status: ExperimentStatus
     summary_json: ExperimentSummaryJson = Field(default_factory=ExperimentSummaryJson)
+    current_run_attempt: int | None = None
+    last_completed_attempt: int | None = None
+    active_job_id: str | None = None
+    error: str | None = None
 
 
 class ProjectExperimentListResponse(BaseModel):
@@ -114,4 +132,6 @@ class ProjectExperimentUpdate(BaseModel):
 
 class ProjectExperimentActionResponse(BaseModel):
     ok: bool = True
-
+    status: ExperimentStatus | None = None
+    attempt: int | None = None
+    job_id: str | None = None

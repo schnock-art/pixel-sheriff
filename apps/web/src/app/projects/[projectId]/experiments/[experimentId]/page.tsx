@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useProjectNavigationGuard } from "../../../../../components/workspace/ProjectNavigationContext";
 import {
@@ -124,14 +124,17 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
   const [isCanceling, setIsCanceling] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [lastRunMessage, setLastRunMessage] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [toastTone, setToastTone] = useState<"success" | "error">("success");
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [showValLoss, setShowValLoss] = useState(true);
   const [showPrimary, setShowPrimary] = useState(true);
   const [hoveredEpoch, setHoveredEpoch] = useState<number | null>(null);
+  const [activeAttempt, setActiveAttempt] = useState<number | null>(null);
+  const eventCursorRef = useRef(0);
 
-  const isEditable = status === "draft" || status === "failed";
+  const isEditable = status === "draft" || status === "failed" || status === "canceled";
   const task = (typeof draftConfig?.task === "string" ? draftConfig.task : "classification") as string;
   const primaryMetricKey = metricKeyForTask(task);
   const primaryMetricLabel = primaryMetricKey.replace("val_", "val ");
@@ -145,6 +148,11 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
   }, [draftConfig, draftName, savedRecord]);
 
   const checkpointIndex = useMemo(() => indexCheckpointsByKind(checkpoints), [checkpoints]);
+  const surfacedRunError = useMemo(() => {
+    if (typeof savedRecord?.error === "string" && savedRecord.error.trim()) return savedRecord.error.trim();
+    if (typeof lastRunMessage === "string" && lastRunMessage.trim()) return lastRunMessage.trim();
+    return null;
+  }, [lastRunMessage, savedRecord?.error]);
 
   const chartKeys = useMemo(() => {
     const keys: string[] = [];
@@ -318,6 +326,10 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
       setMetrics(record.metrics ?? []);
       setCheckpoints(record.checkpoints ?? []);
       setStatus(record.status);
+      setLastRunMessage(typeof record.error === "string" && record.error.trim() ? record.error.trim() : null);
+      const attempt = typeof record.current_run_attempt === "number" ? record.current_run_attempt : null;
+      setActiveAttempt(attempt);
+      eventCursorRef.current = 0;
       setModelName(resolvedModelName);
     } catch (error) {
       setErrorMessage(parseApiErrorMessage(error, "Failed to load experiment"));
@@ -343,15 +355,32 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
   }, [toastMessage]);
 
   useEffect(() => {
-    if (status !== "running") return;
-    const stop = streamExperimentEvents(projectId, experimentId, {
-      onEvent: (event) => {
+    if (status !== "running" && status !== "queued") return;
+    const stop = streamExperimentEvents(
+      projectId,
+      experimentId,
+      {
+        fromLine: eventCursorRef.current,
+        attempt: activeAttempt ?? undefined,
+      },
+      {
+        onEnvelope: (payload) => {
+          if (typeof payload.line === "number" && payload.line > eventCursorRef.current) {
+            eventCursorRef.current = payload.line;
+          }
+          if (typeof payload.attempt === "number") {
+            setActiveAttempt(payload.attempt);
+          }
+        },
+        onEvent: (event) => {
         if (event.type === "status") {
-          setStatus(event.status);
+          if (event.status) setStatus(event.status);
+          if (typeof event.attempt === "number") setActiveAttempt(event.attempt);
           return;
         }
         if (event.type === "metric") {
           setMetrics((current) => mergeMetricPoints(current as any[], [event as any]) as ExperimentMetricPoint[]);
+          if (typeof event.attempt === "number") setActiveAttempt(event.attempt);
           return;
         }
         if (event.type === "checkpoint") {
@@ -363,16 +392,30 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
             else next.push(row);
             return next;
           });
+          if (typeof event.attempt === "number") setActiveAttempt(event.attempt);
           return;
         }
         if (event.type === "done") {
-          setStatus(event.status);
+          if (event.status) setStatus(event.status);
+          if (typeof event.attempt === "number") setActiveAttempt(event.attempt);
+          if (event.status === "failed") {
+            const reason = typeof event.message === "string" && event.message.trim()
+              ? event.message.trim()
+              : "Unknown trainer error";
+            setLastRunMessage(reason);
+            setToastTone("error");
+            setToastMessage(`Training failed: ${reason}`);
+          } else if (event.status === "completed") {
+            setLastRunMessage(null);
+            setToastTone("success");
+            setToastMessage("Training completed");
+          }
           void loadDetail();
         }
       },
     });
     return () => stop();
-  }, [experimentId, loadDetail, projectId, status]);
+  }, [activeAttempt, experimentId, loadDetail, projectId, status]);
 
   function patchConfig(mutator: (next: Record<string, unknown>) => void) {
     setDraftConfig((current) => {
@@ -413,8 +456,11 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
   async function handleStart() {
     setIsStarting(true);
     try {
-      await startExperiment(projectId, experimentId);
-      setStatus("running");
+      setLastRunMessage(null);
+      const started = await startExperiment(projectId, experimentId);
+      if (started.status) setStatus(started.status);
+      if (typeof started.attempt === "number") setActiveAttempt(started.attempt);
+      eventCursorRef.current = 0;
       setToastTone("success");
       setToastMessage("Training started");
       void loadDetail();
@@ -430,10 +476,11 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
   async function handleCancel() {
     setIsCanceling(true);
     try {
-      await cancelExperiment(projectId, experimentId);
-      setStatus("canceled");
+      const canceled = await cancelExperiment(projectId, experimentId);
+      if (canceled.status) setStatus(canceled.status);
+      if (typeof canceled.attempt === "number") setActiveAttempt(canceled.attempt);
       setToastTone("success");
-      setToastMessage("Training canceled");
+      setToastMessage(canceled.status === "running" ? "Cancel requested" : "Training canceled");
       void loadDetail();
     } catch (error) {
       const message = parseApiErrorMessage(error, "Failed to cancel experiment");
@@ -467,7 +514,7 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
   const augmentationProfile = typeof draftConfig?.augmentation_profile === "string" ? draftConfig.augmentation_profile : "light";
   const precision = typeof draftConfig?.precision === "string" ? draftConfig.precision : "fp32";
   const seed = typeof advanced.seed === "number" ? String(advanced.seed) : "1337";
-  const numWorkers = typeof advanced.num_workers === "number" ? String(advanced.num_workers) : "4";
+  const numWorkers = typeof advanced.num_workers === "number" ? String(advanced.num_workers) : "0";
 
   return (
     <>
@@ -479,6 +526,7 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
               <p>
                 Model: <strong>{modelName ?? modelId}</strong>
               </p>
+              {activeAttempt ? <p>Run #{activeAttempt}</p> : null}
             </div>
             <Link href={backToModelHref} className="ghost-button">
               Back to Model
@@ -509,6 +557,7 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
                     <span className={`status-pill status-${status}`}>{status}</span>
                     <span>Updated: {formatDateTime(savedRecord?.updated_at)}</span>
                   </div>
+                  {surfacedRunError ? <p className="project-field-error">Last run error: {surfacedRunError}</p> : null}
                 </div>
 
                 <div className="experiment-card">
@@ -531,6 +580,7 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
                       }
                     >
                       <option value="adam">adam</option>
+                      <option value="adamw">adamw</option>
                       <option value="sgd">sgd</option>
                     </select>
                   </label>
@@ -868,9 +918,9 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
               >
                 {isSaving ? "Saving..." : "Save"}
               </button>
-              {status === "running" ? (
+              {status === "running" || status === "queued" ? (
                 <button type="button" className="ghost-button" disabled={isCanceling} onClick={() => void handleCancel()}>
-                  {isCanceling ? "Canceling..." : "Cancel"}
+                  {isCanceling ? "Canceling..." : status === "queued" ? "Cancel Queue" : "Cancel"}
                 </button>
               ) : (
                 <button

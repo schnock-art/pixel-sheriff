@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:3000"
     storage_root: str = "./data"
     redis_url: str = "redis://localhost:6379/0"
+    job_queue_key: str = "pixel_sheriff:train_jobs:v1"
 
     @model_validator(mode="after")
     def apply_database_url_default(self) -> "Settings":

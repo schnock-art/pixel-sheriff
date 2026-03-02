@@ -2,10 +2,11 @@
 
 ## 1. System Overview
 
-Pixel Sheriff is a local-first image annotation system with three active runtime layers:
+Pixel Sheriff is a local-first image annotation system with four active runtime layers:
 
 - Web app (`apps/web`, Next.js App Router)
 - API (`apps/api`, FastAPI + SQLAlchemy async)
+- Trainer worker (`apps/trainer`, Redis queue consumer)
 - Local infra services (Postgres + Redis via Docker Compose)
 
 Primary workflow:
@@ -17,7 +18,7 @@ Primary workflow:
    - active mode is locked per project by `project.task_type`
 5. Submit staged edits (or submit single-image edits directly).
 6. Generate and download a deterministic dataset export zip (manifest v1.2 + COCO companion).
-7. Create experiments from project models, tune training params, and run simulated training with live SSE metrics + checkpoints.
+7. Create experiments from project models, tune training params, and run worker-executed training with live SSE metrics + checkpoints.
 
 ## 2. Runtime Topology
 
@@ -25,13 +26,14 @@ Compose services and default host ports:
 
 - `web` -> `WEB_PORT` (default `3010`)
 - `api` -> `API_PORT` (default `8010`)
+- `trainer` -> background worker service (no host port)
 - `db` -> `POSTGRES_PORT` (default `5433`)
 - `redis` -> `REDIS_PORT` (default `6380`)
 
 Persistence:
 
 - DB data in `postgres_data` volume
-- Binary assets + export zips in repo-local `./data` (mounted to `/app/data` in API container)
+- Binary assets + export zips in repo-local `./data` (mounted to `/app/data` in API and trainer containers)
 
 Network behavior:
 
@@ -57,12 +59,15 @@ Defined in `apps/api/src/sheriff_api/db/models.py`:
 - Project-scoped model drafts (Phase 1 scaffold) are stored via file-backed records under storage root:
   - `models/{project_id}/records.json`
   - implementation: `apps/api/src/sheriff_api/services/model_store.py`
-- Project-scoped experiment runs (Phase 1) are stored via file-backed records under storage root:
+- Project-scoped experiment runs are stored via file-backed records under storage root:
   - `experiments/{project_id}/records.json`
   - `experiments/{project_id}/{experiment_id}/config.json`
   - `experiments/{project_id}/{experiment_id}/status.json`
-  - `experiments/{project_id}/{experiment_id}/metrics.jsonl`
-  - `experiments/{project_id}/{experiment_id}/checkpoints.json`
+  - run-attempt scoped artifacts under `experiments/{project_id}/{experiment_id}/runs/{attempt}/...`
+    - `run.json`
+    - `events.jsonl` + `events.meta.json`
+    - `metrics.jsonl`
+    - `checkpoints.json` + checkpoint files
   - implementation: `apps/api/src/sheriff_api/services/experiment_store.py`
 
 Key invariants:
@@ -167,8 +172,35 @@ Web-facing generated metadata:
 
 Current integration scope:
 
-- ML builder layer is backend-internal for now and not yet invoked by API routes.
+- ML builder layer remains backend-internal for model config authoring/validation and metadata workflows.
 - Existing project model CRUD endpoints still manage `config_json` draft lifecycle and schema validation only.
+
+### Shared Model Utilities (`packages/pixel_sheriff_ml`)
+
+Shared model helpers used across API/trainer runtime:
+
+- `packages/pixel_sheriff_ml/src/pixel_sheriff_ml/model_factory.py`
+  - `architecture_family(model_config)` for canonical family resolution
+  - `build_resnet_classifier(model_config, num_classes_override=...)` for classification training model construction
+- API experiment start flow uses shared family resolution when building queue jobs
+- Trainer classification execution uses shared classifier build helpers
+
+### Trainer Worker Architecture (`apps/trainer`)
+
+Trainer responsibilities and runtime behavior:
+
+- Worker entrypoint: `apps/trainer/src/pixel_sheriff_trainer/main.py`
+- Queue contract: Redis `RPUSH/BLPOP` on `pixel_sheriff:train_jobs:v1`
+- Job dispatcher: `apps/trainer/src/pixel_sheriff_trainer/runner.py`
+- Classification implementation:
+  - export-zip dataset loader (`classification/dataset.py`)
+  - epoch train/eval loops (`classification/train.py`, `classification/eval.py`)
+- Shared experiment-file contract:
+  - reads/writes run-attempt files under `experiments/{project_id}/{experiment_id}/runs/{attempt}/...`
+  - appends `events.jsonl` for SSE tail streaming
+- Idempotency + attempt safety:
+  - validates `status.json` active job/attempt before execution
+  - stale/duplicate jobs are ignored
 
 ## 4. Implemented API Surface
 
@@ -241,7 +273,8 @@ Project-scoped experiments:
 - `POST /api/v1/projects/{project_id}/experiments/{experiment_id}/cancel`
 - `GET /api/v1/projects/{project_id}/experiments/{experiment_id}/events` (SSE)
 - create flow derives default `TrainingConfig v0` from model + latest `DatasetVersion` and persists in `draft`
-- start flow launches async simulated runner and appends per-epoch metrics/checkpoints
+- start flow pins dataset export, creates run attempt metadata, enqueues Redis job, and transitions to `queued`
+- SSE events stream by tailing run-attempt `events.jsonl` with optional resume cursor (`from_line`) and run selection (`attempt`)
 
 Error response contract:
 
@@ -385,8 +418,8 @@ Workspace container components (`apps/web/src/components/workspace/*`):
 - Experiment training behavior:
   - experiments list shows status and best metric summary per run
   - experiment detail supports editable training params in `draft`/`failed` states
-  - `Start Training` launches simulated runner and streams live updates via SSE
-  - `Cancel` stops running experiments and transitions to `canceled`
+  - `Start Training` enqueues worker job and transitions `queued -> running -> terminal`
+  - `Cancel` supports queued cancel and running cancel-request semantics
   - checkpoints tracked as `best_metric`, `best_loss`, `latest` with selection placeholder (`Pick`)
   - metrics chart supports axis/ticks, legend, series toggles, crosshair hover, and per-epoch tooltip values
   - refresh-safe behavior: persisted history loads first, then live stream resumes for running experiments
@@ -448,6 +481,6 @@ Supported statuses:
 - Geometry tooling polish pending (no polygon vertex dragging/editing yet)
 - Auth/multi-user permissions not implemented
 - MAL routes are placeholders only
-- Real trainer integration is not implemented yet (current experiment runner is simulated)
-- ML `ModelFactory` is not yet wired into training/execution API flows (currently buildable as backend library only)
+- Detection/segmentation training execution remains TODO (unsupported jobs fail gracefully)
+- Classification training currently supports `resnet_classifier` family only in worker runtime
 - Active bug investigation: intermittent annotation submit `404` can occur in stale project/asset submit contexts

@@ -1130,23 +1130,36 @@ async def test_experiment_start_generates_metrics_and_checkpoints(client: AsyncC
     assert created.status_code == 200
     experiment_id = created.json()["id"]
 
+    import sheriff_api.routers.experiments as experiments_router
+
+    calls: list[dict] = []
+
+    async def _enqueue(job_payload: dict) -> None:
+        calls.append(job_payload)
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(experiments_router.train_queue, "enqueue_train_job", _enqueue)
     started = await client.post(f"/api/v1/projects/{project_id}/experiments/{experiment_id}/start")
+    monkeypatch.undo()
+
     assert started.status_code == 200
     assert started.json()["ok"] is True
+    payload = started.json()
+    assert payload["status"] == "queued"
+    assert isinstance(payload["attempt"], int) and payload["attempt"] >= 1
+    assert payload["job_id"]
+    assert len(calls) == 1
+    assert calls[0]["job_id"] == payload["job_id"]
+    assert calls[0]["attempt"] == payload["attempt"]
+    assert calls[0]["job_type"] == "train"
 
-    detail_payload = None
-    for _ in range(20):
-        await asyncio.sleep(0.2)
-        detail = await client.get(f"/api/v1/projects/{project_id}/experiments/{experiment_id}")
-        assert detail.status_code == 200
-        detail_payload = detail.json()
-        if len(detail_payload["metrics"]) > 0:
-            break
-
-    assert detail_payload is not None
-    assert len(detail_payload["metrics"]) > 0
-    assert any(row["kind"] == "latest" and row["epoch"] is not None for row in detail_payload["checkpoints"])
-    assert detail_payload["summary_json"]["last_epoch"] is not None
+    detail = await client.get(f"/api/v1/projects/{project_id}/experiments/{experiment_id}")
+    assert detail.status_code == 200
+    detail_payload = detail.json()
+    assert detail_payload["status"] == "queued"
+    assert detail_payload["current_run_attempt"] == payload["attempt"]
+    assert detail_payload["active_job_id"] == payload["job_id"]
+    assert detail_payload["metrics"] == []
 
 
 @pytest.mark.asyncio
@@ -1158,26 +1171,41 @@ async def test_experiment_events_sse_smoke(client: AsyncClient) -> None:
     )
     assert created.status_code == 200
     experiment_id = created.json()["id"]
+    import sheriff_api.routers.experiments as experiments_router
+
+    async def _enqueue(_job_payload: dict) -> None:
+        return None
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(experiments_router.train_queue, "enqueue_train_job", _enqueue)
     start = await client.post(f"/api/v1/projects/{project_id}/experiments/{experiment_id}/start")
+    monkeypatch.undo()
     assert start.status_code == 200
+    attempt = start.json()["attempt"]
 
     saw_status = False
-    saw_metric = False
-    async with client.stream("GET", f"/api/v1/projects/{project_id}/experiments/{experiment_id}/events") as response:
+    saw_line = False
+    async with client.stream(
+        "GET",
+        f"/api/v1/projects/{project_id}/experiments/{experiment_id}/events?attempt={attempt}&from_line=0&follow=false",
+    ) as response:
         assert response.status_code == 200
         async for line in response.aiter_lines():
             if not line.startswith("data: "):
                 continue
             event = json.loads(line[6:])
-            event_type = event.get("type")
+            assert "line" in event
+            assert "event" in event
+            saw_line = True
+            event_type = event["event"].get("type")
             if event_type == "status":
                 saw_status = True
-            if event_type == "metric":
-                saw_metric = True
+                break
+            if saw_status:
                 break
 
     assert saw_status is True
-    assert saw_metric is True
+    assert saw_line is True
 
 
 @pytest.mark.asyncio
@@ -1190,16 +1218,55 @@ async def test_experiment_cancel_stops_run(client: AsyncClient) -> None:
     assert created.status_code == 200
     experiment_id = created.json()["id"]
 
+    import sheriff_api.routers.experiments as experiments_router
+
+    async def _enqueue(_job_payload: dict) -> None:
+        return None
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(experiments_router.train_queue, "enqueue_train_job", _enqueue)
     started = await client.post(f"/api/v1/projects/{project_id}/experiments/{experiment_id}/start")
+    monkeypatch.undo()
     assert started.status_code == 200
 
     canceled = await client.post(f"/api/v1/projects/{project_id}/experiments/{experiment_id}/cancel")
     assert canceled.status_code == 200
     assert canceled.json()["ok"] is True
+    assert canceled.json()["status"] == "canceled"
 
     detail = await client.get(f"/api/v1/projects/{project_id}/experiments/{experiment_id}")
     assert detail.status_code == 200
     assert detail.json()["status"] == "canceled"
+
+
+@pytest.mark.asyncio
+async def test_experiment_cancel_running_sets_cancel_requested(client: AsyncClient) -> None:
+    project_id, model_id = await _create_project_model(client, project_name="exp-cancel-running")
+    created = await client.post(
+        f"/api/v1/projects/{project_id}/experiments",
+        json={"model_id": model_id, "config_overrides": {"epochs": 2}},
+    )
+    assert created.status_code == 200
+    experiment_id = created.json()["id"]
+
+    import sheriff_api.routers.experiments as experiments_router
+
+    async def _enqueue(_job_payload: dict) -> None:
+        return None
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(experiments_router.train_queue, "enqueue_train_job", _enqueue)
+    started = await client.post(f"/api/v1/projects/{project_id}/experiments/{experiment_id}/start")
+    monkeypatch.undo()
+    assert started.status_code == 200
+
+    experiments_router.experiment_store.set_status(project_id=project_id, experiment_id=experiment_id, status="running")
+    canceled = await client.post(f"/api/v1/projects/{project_id}/experiments/{experiment_id}/cancel")
+    assert canceled.status_code == 200
+    assert canceled.json()["status"] == "running"
+
+    status_row = experiments_router.experiment_store.get_status_row(project_id, experiment_id)
+    assert status_row["cancel_requested"] is True
 
 
 @pytest.mark.asyncio
