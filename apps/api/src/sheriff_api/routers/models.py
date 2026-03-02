@@ -29,13 +29,13 @@ from sheriff_api.services.model_config_factory import (
     collect_model_config_issues,
     validate_model_config,
 )
-from sheriff_api.services.model_store import ModelStore
+from sheriff_api.services.model_store import ProjectModelStore, create_project_model_store
 from sheriff_api.services.storage import LocalStorage
 from sheriff_api.services.suggestion_queue import SuggestionQueue
 
 router = APIRouter(tags=["models"])
 settings = get_settings()
-model_store = ModelStore(settings.storage_root)
+model_store: ProjectModelStore = create_project_model_store(settings.storage_root)
 storage = LocalStorage(settings.storage_root)
 suggestion_queue = SuggestionQueue()
 

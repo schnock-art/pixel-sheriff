@@ -1,9 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sheriff_api.db.models import Category
 from sheriff_api.db.session import get_db
+from sheriff_api.errors import api_error
 from sheriff_api.schemas.categories import CategoryCreate, CategoryRead, CategoryUpdate
 
 router = APIRouter(tags=["categories"])
@@ -28,7 +29,12 @@ async def list_categories(project_id: str, db: AsyncSession = Depends(get_db)) -
 async def patch_category(category_id: int, payload: CategoryUpdate, db: AsyncSession = Depends(get_db)) -> Category:
     category = await db.get(Category, category_id)
     if not category:
-        raise HTTPException(status_code=404, detail="Category not found")
+        raise api_error(
+            status_code=404,
+            code="category_not_found",
+            message="Category not found",
+            details={"category_id": category_id},
+        )
     for field in ["name", "display_order", "is_active"]:
         value = getattr(payload, field)
         if value is not None:

@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 import uuid
 
 
@@ -11,7 +11,21 @@ def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-class ModelStore:
+class ProjectModelStore(Protocol):
+    def list_by_project(self, project_id: str) -> list[dict[str, Any]]:
+        ...
+
+    def get(self, project_id: str, model_id: str) -> dict[str, Any] | None:
+        ...
+
+    def create(self, *, project_id: str, name: str, config_json: dict[str, Any]) -> dict[str, Any]:
+        ...
+
+    def update_config(self, *, project_id: str, model_id: str, config_json: dict[str, Any]) -> dict[str, Any] | None:
+        ...
+
+
+class FileProjectModelStore:
     """Temporary file-backed model store.
 
     TODO: replace with DB-backed project model table once migrations are in place.
@@ -76,3 +90,11 @@ class ModelStore:
             self._write_records(project_id, records)
             return record
         return None
+
+
+def create_project_model_store(storage_root: str) -> ProjectModelStore:
+    return FileProjectModelStore(storage_root)
+
+
+class ModelStore(FileProjectModelStore):
+    """Backward-compatible alias for legacy imports."""

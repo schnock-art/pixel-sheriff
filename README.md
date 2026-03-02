@@ -282,13 +282,18 @@ docker compose up --build
 - Status: `docker compose ps`
 - Web tests: `cd apps/web && npm test`
 - Web build check: `cd apps/web && npm run build`
-- API tests (local):
-  - `cd apps/api && python -m pytest tests -q`
-- ML tests only (local, avoids API async fixtures):
-  - `cd apps/api && python -m pytest tests/ml -q --confcutdir=tests/ml`
+- API tests (local, full suite):
+  - `docker compose up -d db redis`
+  - `cd apps/api && python3 -m pip install -e ".[dev,ml]"`
+  - `cd apps/api && DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5433/pixel_sheriff STORAGE_ROOT=/tmp/pixel_sheriff_test_data python3 -m pytest -s tests`
+- API tests (local, non-ML only):
+  - `cd apps/api && python3 -m pip install -e ".[dev]"`
+  - `cd apps/api && DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5433/pixel_sheriff STORAGE_ROOT=/tmp/pixel_sheriff_test_data python3 -m pytest -s tests/test_api.py tests/test_model_store.py`
+- ML tests only (local):
+  - `cd apps/api && python3 -m pytest tests/ml -q --confcutdir=tests/ml`
 - API tests (container):
   - `docker compose cp apps/api/tests api:/app/tests`
-  - `docker compose exec api python -m pytest /app/tests -q`
+  - `docker compose exec api python3 -m pytest /app/tests -q`
   - note: API container image installs runtime deps only; install pytest/httpx in-container if needed before running this command
 - Manual QA checklist for experiment SSE flow:
   - `docu/experiments_sse_manual_qa.md`

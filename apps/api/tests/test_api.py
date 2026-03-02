@@ -8,6 +8,7 @@ import zipfile
 from httpx import AsyncClient
 import pytest
 import sheriff_api.routers.assets as assets_router
+import sheriff_api.routers.exports as exports_router
 import sheriff_api.routers.models as models_router
 from sheriff_api.config import get_settings
 
@@ -112,6 +113,46 @@ async def test_upload_rejects_unknown_project(client: AsyncClient) -> None:
         files={"file": ("sample.jpg", b"fake-image-bytes", "image/jpeg")},
     )
     assert_api_error(upload, status_code=404, code="project_not_found", message="Project not found")
+
+
+@pytest.mark.asyncio
+async def test_get_project_returns_project_not_found_error_code(client: AsyncClient) -> None:
+    missing_project_id = str(uuid.uuid4())
+    response = await client.get(f"/api/v1/projects/{missing_project_id}")
+    assert_api_error(response, status_code=404, code="project_not_found", message="Project not found")
+
+
+@pytest.mark.asyncio
+async def test_delete_project_returns_project_not_found_error_code(client: AsyncClient) -> None:
+    missing_project_id = str(uuid.uuid4())
+    response = await client.delete(f"/api/v1/projects/{missing_project_id}")
+    assert_api_error(response, status_code=404, code="project_not_found", message="Project not found")
+
+
+@pytest.mark.asyncio
+async def test_patch_category_returns_category_not_found_error_code(client: AsyncClient) -> None:
+    response = await client.patch("/api/v1/categories/999999", json={"name": "does-not-exist"})
+    assert_api_error(response, status_code=404, code="category_not_found", message="Category not found")
+
+
+@pytest.mark.asyncio
+async def test_export_download_returns_export_file_not_found_error_code(client: AsyncClient) -> None:
+    response = await client.get(f"/api/v1/projects/{uuid.uuid4()}/exports/{uuid.uuid4().hex}/download")
+    assert_api_error(response, status_code=404, code="export_file_not_found", message="Export file not found")
+
+
+@pytest.mark.asyncio
+async def test_export_download_returns_export_path_invalid_error_code(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _raise_value_error(_storage_uri: str) -> Path:
+        raise ValueError("bad export relpath")
+
+    monkeypatch.setattr(exports_router.storage, "resolve", _raise_value_error)
+    response = await client.get(f"/api/v1/projects/{uuid.uuid4()}/exports/{uuid.uuid4().hex}/download")
+    payload = assert_api_error(response, status_code=400, code="export_path_invalid", message="Invalid export path")
+    assert payload["error"]["details"]["reason"] == "bad export relpath"
 
 
 @pytest.mark.asyncio
@@ -1481,6 +1522,47 @@ async def test_experiment_start_generates_metrics_and_checkpoints(client: AsyncC
     assert detail_payload["current_run_attempt"] == payload["attempt"]
     assert detail_payload["active_job_id"] == payload["job_id"]
     assert detail_payload["metrics"] == []
+
+
+@pytest.mark.asyncio
+async def test_experiment_start_rebuilds_missing_dataset_zip(client: AsyncClient) -> None:
+    project_id, model_id = await _create_project_model(client, project_name="exp-rebuild-zip")
+
+    export_rows = await client.get(f"/api/v1/projects/{project_id}/exports")
+    assert export_rows.status_code == 200
+    exports_payload = export_rows.json()
+    assert len(exports_payload) == 1
+    content_hash = exports_payload[0]["hash"]
+
+    settings = get_settings()
+    zip_path = Path(settings.storage_root) / "exports" / project_id / f"{content_hash}.zip"
+    assert zip_path.exists()
+    zip_path.unlink()
+    assert zip_path.exists() is False
+
+    created = await client.post(
+        f"/api/v1/projects/{project_id}/experiments",
+        json={"model_id": model_id, "name": "rebuild-missing-zip"},
+    )
+    assert created.status_code == 200
+    experiment_id = created.json()["id"]
+
+    import sheriff_api.routers.experiments as experiments_router
+
+    calls: list[dict] = []
+
+    async def _enqueue(job_payload: dict) -> None:
+        calls.append(job_payload)
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(experiments_router.train_queue, "enqueue_train_job", _enqueue)
+    started = await client.post(f"/api/v1/projects/{project_id}/experiments/{experiment_id}/start")
+    monkeypatch.undo()
+
+    assert started.status_code == 200
+    assert started.json()["ok"] is True
+    assert len(calls) == 1
+    assert zip_path.exists()
 
 
 @pytest.mark.asyncio

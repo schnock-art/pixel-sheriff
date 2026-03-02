@@ -109,10 +109,11 @@ Status reflects current repository behavior.
   - [x] add MAL contract tests (queueing, suggestion persistence/retrieval, accept/reject lifecycle)
   - [x] add model-export contract tests (artifact generation, validation failures, deterministic behavior)
   - [x] add worker/trainer integration-path tests for queue -> execution -> persisted artifacts/events
-- [ ] Consistency hardening pass (targeted, no broad rewrite)
-  - [ ] standardize API error envelope usage across all routers (`api_error` with stable `error.code`)
-  - [ ] remove duplicated export selection/rebuild logic shared across `exports` and `experiments` flows
-  - [ ] keep project-scoped model records behavior stable while preparing migration from file-backed store to DB-backed table
+- [x] Consistency hardening pass (targeted, no broad rewrite)
+  - [x] standardize API error envelope usage across all routers (`api_error` with stable `error.code`)
+  - [x] remove duplicated export selection/rebuild logic shared across `exports` and `experiments` flows
+  - [x] keep project-scoped model records behavior stable while preparing migration from file-backed store to DB-backed table
+  - [x] verify targeted regressions + full API test suite on Postgres-backed local test runtime
 - [ ] Surgical decomposition of complexity hotspots
   - [ ] split `apps/web/src/components/workspace/ProjectAssetsWorkspace.tsx` into focused subcomponents/hooks without behavior changes
   - [ ] split `apps/api/src/sheriff_api/routers/experiments.py` by concern (analytics/start-cancel/events/evaluation) to reduce regression risk

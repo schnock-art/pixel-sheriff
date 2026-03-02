@@ -1,10 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, Response, status
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sheriff_api.config import get_settings
 from sheriff_api.db.models import Annotation, Asset, Category, DatasetVersion, Project, Suggestion
 from sheriff_api.db.session import get_db
+from sheriff_api.errors import api_error
 from sheriff_api.schemas.projects import ProjectCreate, ProjectRead
 from sheriff_api.services.storage import LocalStorage
 
@@ -32,7 +33,12 @@ async def list_projects(db: AsyncSession = Depends(get_db)) -> list[Project]:
 async def get_project(project_id: str, db: AsyncSession = Depends(get_db)) -> Project:
     project = await db.get(Project, project_id)
     if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+        raise api_error(
+            status_code=404,
+            code="project_not_found",
+            message="Project not found",
+            details={"project_id": project_id},
+        )
     return project
 
 
@@ -40,7 +46,12 @@ async def get_project(project_id: str, db: AsyncSession = Depends(get_db)) -> Pr
 async def delete_project(project_id: str, db: AsyncSession = Depends(get_db)) -> Response:
     project = await db.get(Project, project_id)
     if project is None:
-        raise HTTPException(status_code=404, detail="Project not found")
+        raise api_error(
+            status_code=404,
+            code="project_not_found",
+            message="Project not found",
+            details={"project_id": project_id},
+        )
 
     asset_rows = list(
         (

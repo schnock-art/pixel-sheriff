@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- Consistency hardening pass:
+  - standardized project/category/export-download router failures onto `api_error` with stable domain codes (`project_not_found`, `category_not_found`, `export_path_invalid`, `export_file_not_found`)
+  - extracted shared dataset export pipeline service used by both exports and experiments flows to remove duplicated selection/rebuild logic
+  - introduced project-model store interface seam (`ProjectModelStore`) with file-backed implementation factory for migration prep
+  - added API regressions for error-code contracts + missing-export-zip rebuild on experiment start
+  - added model-store contract tests for project isolation, ordering, corrupt-record fallback, and missing-update behavior
+  - validated with full API + ML pytest suite against project Postgres (`65 passed`)
 - Initial MAL contract expansion:
   - `POST /api/v1/projects/{project_id}/suggestions/batch` now queues batch suggestion jobs and persists per-asset pending suggestion rows
   - `GET /api/v1/assets/{asset_id}/suggestions` now returns normalized suggestion status (`pending`/`accepted`/`rejected`)
