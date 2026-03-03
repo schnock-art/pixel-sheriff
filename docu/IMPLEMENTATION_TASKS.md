@@ -40,6 +40,10 @@ Status reflects current repository behavior.
   - [x] `GET /projects/{project_id}/experiments/{experiment_id}/logs?from_byte=&max_bytes=`
   - [x] stable `runtime_not_found` / `training_log_not_found` error codes on missing artifacts
 - [x] Experiment analytics payload now includes optional runtime summary (`device_selected`) for list-view badges
+- [x] ONNX artifact serving for experiments:
+  - [x] `GET /projects/{project_id}/experiments/{experiment_id}/onnx` (metadata + artifact URLs)
+  - [x] `GET /projects/{project_id}/experiments/{experiment_id}/onnx/download?file=model|metadata`
+  - [x] stable `onnx_not_found` error code for absent ONNX artifacts
 
 ### Web (`apps/web`)
 - [x] Root route now redirects to `/projects`
@@ -105,6 +109,11 @@ Status reflects current repository behavior.
   - [x] refresh + auto-refresh polling for logs while status is `queued`/`running`
   - [x] status-adjacent runtime badge in detail view (`CUDA`/`CPU`/`MPS`)
   - [x] runtime badge surfaced in experiments list table
+- [x] Experiment ONNX export panel:
+  - [x] ONNX status card on experiment detail (`Exported`/`Pending`/`Failed`)
+  - [x] model + metadata download actions
+  - [x] ONNX metadata display (input shape, class order, validation badge)
+  - [x] SSE-driven ONNX refresh on `onnx_export` events
 
 ### Trainer (`apps/trainer`)
 - [x] Classification-first trainer scalability/efficiency pass:
@@ -121,6 +130,14 @@ Status reflects current repository behavior.
   - [x] numeric parsing hardening for zero-valid fields (`lr`, `weight_decay`, scheduler values)
   - [x] run artifacts: per-attempt `training.log` and `runtime.json` + latest runtime mirror
   - [x] trainer Docker CUDA baseline moved to `cu129` for RTX 50-series (`sm_120`) compatibility
+- [x] Post-training ONNX export flow:
+  - [x] export best checkpoint via `torch.onnx.export` (opset 17)
+  - [x] dynamic batch axes (`input`/`output`)
+  - [x] per-run ONNX artifact location: `experiments/{project}/{experiment}/runs/{attempt}/onnx/model.onnx`
+  - [x] ONNX metadata artifact (`onnx.metadata.json`) with class/preprocess/input-shape context
+  - [x] ONNX + ONNXRuntime validation pass (dummy inference, batch size 1 and 4)
+  - [x] SSE event emission for ONNX export completion/failure
+  - [x] dependency updates: `onnx`, `onnxruntime`, `onnxscript`
 
 ### Docs
 - [x] README aligned with implemented stack/workflow
@@ -234,6 +251,10 @@ Status reflects current repository behavior.
   - [x] trainer tests for eval cadence, BN small-batch guardrails, checkpoint payload policy, resume transparency, runtime/log artifact writes
   - [x] API tests for runtime endpoint, log-tail cursor behavior, and missing-artifact error codes
   - [x] web tests for runtime badge formatting/rendering and log-tail cursor helpers
+- [x] Add ONNX coverage:
+  - [x] trainer ONNX export test (artifact + dynamic batch validation path)
+  - [x] API ONNX endpoint/download/not-found contract tests
+  - [x] web ONNX summary helper tests
 
 ### Bounding Boxes + Segmentation (Design-First, End-to-End)
 - [x] Lock annotation contract v2 (backward-compatible with current classification payloads):

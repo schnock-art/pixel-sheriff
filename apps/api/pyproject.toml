@@ -27,6 +27,7 @@ dev = [
 ml = [
   "torch>=2.0",
   "torchvision>=0.15",
+  "onnxscript>=0.1.0",
 ]
 
 [tool.pytest.ini_options]

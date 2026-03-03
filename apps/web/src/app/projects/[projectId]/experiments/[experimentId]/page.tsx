@@ -10,9 +10,11 @@ import {
   getExperiment,
   getExperimentEvaluation,
   getExperimentLogs,
+  getExperimentOnnx,
   getExperimentRuntime,
   listExperimentSamples,
   listProjectModels,
+  resolveAssetUri,
   startExperiment,
   streamExperimentEvents,
   updateExperiment,
@@ -20,6 +22,7 @@ import {
   type ExperimentEvaluationPayload,
   type ExperimentEvaluationSampleRow,
   type ExperimentMetricPoint,
+  type ExperimentOnnxPayload,
   type ExperimentRuntimePayload,
   type ExperimentStatus,
   type ProjectExperimentRecord,
@@ -35,6 +38,7 @@ import {
   metricKeyForTask,
 } from "../../../../../lib/workspace/experimentMetrics";
 import { filterPredictionRows, normalizeConfusion } from "../../../../../lib/workspace/experimentDashboard";
+import { onnxClassNamesText, onnxInputShapeText, onnxStatusLabel, onnxValidationText } from "../../../../../lib/workspace/experimentOnnx";
 import { mergeLogChunk, runtimeBadgeLabel } from "../../../../../lib/workspace/experimentRuntime";
 
 interface ExperimentDetailPageProps {
@@ -159,6 +163,9 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
   const [isEvaluationLoading, setIsEvaluationLoading] = useState(false);
   const [runtimeInfo, setRuntimeInfo] = useState<ExperimentRuntimePayload | null>(null);
   const [runtimeError, setRuntimeError] = useState<string | null>(null);
+  const [onnxInfo, setOnnxInfo] = useState<ExperimentOnnxPayload | null>(null);
+  const [onnxError, setOnnxError] = useState<string | null>(null);
+  const [isOnnxLoading, setIsOnnxLoading] = useState(false);
   const [logsContent, setLogsContent] = useState("");
   const [logsCursor, setLogsCursor] = useState(0);
   const [logsError, setLogsError] = useState<string | null>(null);
@@ -185,6 +192,10 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
   const isRunningLike = status === "running" || status === "queued";
   const task = (typeof draftConfig?.task === "string" ? draftConfig.task : "classification") as string;
   const runtimeBadge = useMemo(() => runtimeBadgeLabel(runtimeInfo), [runtimeInfo]);
+  const onnxStatus = onnxStatusLabel(onnxInfo, status);
+  const onnxInputShape = onnxInputShapeText(onnxInfo);
+  const onnxClassSummary = onnxClassNamesText(onnxInfo);
+  const onnxValidationSummary = onnxValidationText(onnxInfo);
   const primaryMetricKey = metricKeyForTask(task);
   const primaryMetricLabel = primaryMetricKey.replace("val_", "val ");
   const primaryColor = "#2f6fca";
@@ -452,6 +463,25 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
     }
   }, [experimentId, projectId]);
 
+  const loadOnnx = useCallback(async () => {
+    setIsOnnxLoading(true);
+    try {
+      const payload = await getExperimentOnnx(projectId, experimentId);
+      setOnnxInfo(payload);
+      setOnnxError(null);
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 404) {
+        setOnnxInfo(null);
+        setOnnxError(null);
+      } else {
+        setOnnxInfo(null);
+        setOnnxError(parseApiErrorMessage(error, "Failed to load ONNX export"));
+      }
+    } finally {
+      setIsOnnxLoading(false);
+    }
+  }, [experimentId, projectId]);
+
   const fetchLogsChunk = useCallback(
     async (reset = false) => {
       setIsLogsLoading(true);
@@ -492,6 +522,10 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
   useEffect(() => {
     void loadRuntime();
   }, [loadRuntime, status]);
+
+  useEffect(() => {
+    void loadOnnx();
+  }, [loadOnnx, status]);
 
   useEffect(() => {
     logsCursorRef.current = 0;
@@ -563,6 +597,11 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
           if (typeof event.attempt === "number") setActiveAttempt(event.attempt);
           return;
         }
+        if (event.type === "onnx_export") {
+          if (typeof event.attempt === "number") setActiveAttempt(event.attempt);
+          void loadOnnx();
+          return;
+        }
         if (event.type === "done") {
           if (event.status) setStatus(event.status);
           if (typeof event.attempt === "number") setActiveAttempt(event.attempt);
@@ -583,7 +622,7 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
       },
     });
     return () => stop();
-  }, [activeAttempt, experimentId, isRunningLike, loadDetail, projectId]);
+  }, [activeAttempt, experimentId, isRunningLike, loadDetail, loadOnnx, projectId]);
 
   function patchConfig(mutator: (next: Record<string, unknown>) => void) {
     setDraftConfig((current) => {
@@ -1159,6 +1198,50 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
                       </button>
                     </div>
                   </div>
+                </div>
+
+                <div className="experiment-card">
+                  <h3>Exported Model (ONNX)</h3>
+                  <div className="experiment-status-row">
+                    <span className="status-pill">{onnxStatus}</span>
+                    {onnxInfo?.attempt ? <span>Run #{onnxInfo.attempt}</span> : null}
+                  </div>
+                  <div className="experiment-onnx-grid">
+                    <span>Input shape</span>
+                    <strong>{onnxInputShape}</strong>
+                    <span>Class order</span>
+                    <strong title={onnxClassSummary}>{onnxClassSummary}</strong>
+                    <span>Validation</span>
+                    <strong>{onnxValidationSummary}</strong>
+                  </div>
+                  <div className="experiment-logs-toolbar">
+                    {onnxInfo?.model_onnx_url ? (
+                      <a className="ghost-button" href={resolveAssetUri(onnxInfo.model_onnx_url)}>
+                        Download ONNX Model
+                      </a>
+                    ) : (
+                      <button type="button" className="ghost-button" disabled>
+                        Download ONNX Model
+                      </button>
+                    )}
+                    {onnxInfo?.metadata_url ? (
+                      <a className="ghost-button" href={resolveAssetUri(onnxInfo.metadata_url)}>
+                        Download Metadata
+                      </a>
+                    ) : (
+                      <button type="button" className="ghost-button" disabled>
+                        Download Metadata
+                      </button>
+                    )}
+                    <button type="button" className="ghost-button" onClick={() => void loadOnnx()} disabled={isOnnxLoading}>
+                      {isOnnxLoading ? "Refreshing..." : "Refresh ONNX"}
+                    </button>
+                  </div>
+                  {onnxError ? <p className="project-field-error">{onnxError}</p> : null}
+                  {onnxInfo?.status === "failed" && onnxInfo.error ? <p className="project-field-error">{onnxInfo.error}</p> : null}
+                  {!onnxInfo && !onnxError && status === "completed" ? (
+                    <p className="experiment-log-cursor">ONNX export is not available yet.</p>
+                  ) : null}
                 </div>
 
                 <div className="experiment-card">

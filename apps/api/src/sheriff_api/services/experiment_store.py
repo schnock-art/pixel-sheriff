@@ -89,6 +89,15 @@ class ExperimentStore:
     def _training_log_path(self, project_id: str, experiment_id: str, attempt: int) -> Path:
         return self._run_dir(project_id, experiment_id, attempt) / "training.log"
 
+    def _onnx_dir(self, project_id: str, experiment_id: str, attempt: int) -> Path:
+        return self._run_dir(project_id, experiment_id, attempt) / "onnx"
+
+    def _onnx_model_path(self, project_id: str, experiment_id: str, attempt: int) -> Path:
+        return self._onnx_dir(project_id, experiment_id, attempt) / "model.onnx"
+
+    def _onnx_metadata_path(self, project_id: str, experiment_id: str, attempt: int) -> Path:
+        return self._onnx_dir(project_id, experiment_id, attempt) / "onnx.metadata.json"
+
     def _latest_evaluation_path(self, project_id: str, experiment_id: str) -> Path:
         return self._experiment_dir(project_id, experiment_id) / "evaluation.json"
 
@@ -471,6 +480,36 @@ class ExperimentStore:
 
     def latest_attempt_with_runtime(self, project_id: str, experiment_id: str) -> int | None:
         return self._latest_attempt_with_file(project_id, experiment_id, "runtime.json")
+
+    def latest_attempt_with_onnx(self, project_id: str, experiment_id: str) -> int | None:
+        for attempt in self._candidate_attempts(project_id, experiment_id):
+            model_path = self._onnx_model_path(project_id, experiment_id, attempt)
+            metadata_path = self._onnx_metadata_path(project_id, experiment_id, attempt)
+            if (model_path.exists() and model_path.is_file()) or (metadata_path.exists() and metadata_path.is_file()):
+                return attempt
+        return None
+
+    def get_onnx_path(self, project_id: str, experiment_id: str, attempt: int, *, file_name: str = "model.onnx") -> Path:
+        normalized = file_name.strip().lower()
+        if normalized == "model.onnx":
+            return self._onnx_model_path(project_id, experiment_id, attempt)
+        if normalized == "onnx.metadata.json":
+            return self._onnx_metadata_path(project_id, experiment_id, attempt)
+        raise ValueError(f"Unsupported ONNX artifact file: {file_name}")
+
+    def get_latest_onnx(self, project_id: str, experiment_id: str) -> dict[str, Any] | None:
+        attempt = self.latest_attempt_with_onnx(project_id, experiment_id)
+        if not isinstance(attempt, int) or attempt < 1:
+            return None
+        model_path = self._onnx_model_path(project_id, experiment_id, attempt)
+        metadata_path = self._onnx_metadata_path(project_id, experiment_id, attempt)
+        if not model_path.exists() and not metadata_path.exists():
+            return None
+        return {
+            "attempt": attempt,
+            "model_path": model_path if model_path.exists() else None,
+            "metadata_path": metadata_path if metadata_path.exists() else None,
+        }
 
     def read_evaluation(self, project_id: str, experiment_id: str, *, attempt: int | None = None) -> tuple[int, dict[str, Any]] | None:
         resolved_attempt = attempt if isinstance(attempt, int) and attempt >= 1 else self.latest_attempt_with_evaluation(project_id, experiment_id)

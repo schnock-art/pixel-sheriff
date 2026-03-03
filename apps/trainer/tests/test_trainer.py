@@ -9,17 +9,33 @@ import pytest
 
 try:
     import torch  # noqa: F401
+    from pixel_sheriff_ml.model_factory import build_resnet_classifier
     from pixel_sheriff_trainer.classification.dataset import build_classification_loaders
+    from pixel_sheriff_trainer.export_onnx import export_best_classification_onnx
+    from pixel_sheriff_trainer.io.checkpoints import save_checkpoint
+    from pixel_sheriff_trainer.io.storage import ExperimentStorage
     from pixel_sheriff_trainer.jobs import TrainJob, parse_train_job
     from pixel_sheriff_trainer.runner import TrainRunner
 
     HAS_TORCH = True
 except Exception:
     HAS_TORCH = False
+    build_resnet_classifier = None  # type: ignore[assignment]
     build_classification_loaders = None  # type: ignore[assignment]
+    export_best_classification_onnx = None  # type: ignore[assignment]
+    save_checkpoint = None  # type: ignore[assignment]
+    ExperimentStorage = None  # type: ignore[assignment]
     TrainJob = None  # type: ignore[assignment]
     parse_train_job = None  # type: ignore[assignment]
     TrainRunner = None  # type: ignore[assignment]
+
+try:
+    import numpy as np  # noqa: F401
+    import onnxruntime as ort  # noqa: F401
+
+    HAS_ONNX_RUNTIME = True
+except Exception:
+    HAS_ONNX_RUNTIME = False
 
 def _write_tiny_export_zip(root: Path, project_id: str) -> tuple[str, Path]:
     from PIL import Image
@@ -484,3 +500,73 @@ def test_runner_fails_fast_for_batchnorm_small_batch(tmp_path: Path) -> None:
     runner = TrainRunner(str(tmp_path))
     result = runner.process(job)
     assert result == "failed:batchnorm_small_batch_unsupported"
+
+
+@pytest.mark.skipif(not HAS_TORCH or not HAS_ONNX_RUNTIME, reason="torch + onnxruntime are required")
+def test_export_best_classification_onnx_supports_dynamic_batch(tmp_path: Path) -> None:
+    storage = ExperimentStorage(str(tmp_path))
+    project_id = str(uuid.uuid4())
+    experiment_id = str(uuid.uuid4())
+    attempt = 1
+    num_classes = 3
+    model_config = {
+        "architecture": {
+            "family": "resnet_classifier",
+            "backbone": {"name": "resnet18", "pretrained": False},
+            "head": {"num_classes": num_classes},
+        },
+        "input": {"input_size": [32, 32], "normalization": {"type": "none"}},
+    }
+    model = build_resnet_classifier(model_config, num_classes_override=num_classes)
+    checkpoint_state = {
+        "epoch": 1,
+        "model_state_dict": model.state_dict(),
+    }
+    save_checkpoint(
+        storage,
+        project_id=project_id,
+        experiment_id=experiment_id,
+        attempt=attempt,
+        kind="best_metric",
+        epoch=1,
+        metric_name="val_accuracy",
+        value=0.8,
+        state_dict=checkpoint_state,
+    )
+
+    result = export_best_classification_onnx(
+        storage,
+        project_id=project_id,
+        experiment_id=experiment_id,
+        attempt=attempt,
+        model_config=model_config,
+        num_classes=num_classes,
+        class_names=["cat", "dog", "bird"],
+        class_order=[1, 2, 3],
+    )
+
+    assert result.status == "exported"
+    assert result.model_uri is not None
+    model_path = storage.resolve(result.model_uri)
+    metadata_path = storage.resolve(result.metadata_uri)
+    assert model_path.exists()
+    assert metadata_path.exists()
+
+    metadata_payload = json.loads(metadata_path.read_text(encoding="utf-8"))
+    assert metadata_payload["status"] == "exported"
+    assert metadata_payload["input_shape"] == [3, 32, 32]
+    assert metadata_payload["class_names"] == ["cat", "dog", "bird"]
+    assert metadata_payload["validation"]["status"] == "passed"
+
+    import numpy as np
+    import onnxruntime as ort
+
+    providers = ort.get_available_providers()
+    if providers:
+        session = ort.InferenceSession(str(model_path), providers=providers)
+    else:
+        session = ort.InferenceSession(str(model_path))
+    for batch_size in (1, 4):
+        dummy = np.random.randn(batch_size, 3, 32, 32).astype(np.float32)
+        output = session.run(["output"], {"input": dummy})[0]
+        assert int(output.shape[0]) == batch_size

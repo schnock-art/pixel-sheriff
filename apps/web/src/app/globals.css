@@ -1681,6 +1681,19 @@ button {
   color: #254468;
 }
 
+.experiment-onnx-grid {
+  display: grid;
+  grid-template-columns: minmax(120px, auto) minmax(0, 1fr);
+  gap: 6px 10px;
+  align-items: center;
+  font-size: 13px;
+  color: #3e5575;
+}
+
+.experiment-onnx-grid strong {
+  color: #254468;
+}
+
 .experiment-logs-toolbar {
   display: flex;
   align-items: center;

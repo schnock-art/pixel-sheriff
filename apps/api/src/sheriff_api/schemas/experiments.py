@@ -246,3 +246,18 @@ class ExperimentLogsChunkResponse(BaseModel):
     from_byte: int = Field(ge=0)
     to_byte: int = Field(ge=0)
     content: str
+
+
+class ExperimentOnnxResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    attempt: int = Field(ge=1)
+    status: Literal["exported", "failed"]
+    model_onnx_url: str | None = None
+    metadata_url: str
+    input_shape: list[int] = Field(default_factory=list)
+    class_names: list[str] = Field(default_factory=list)
+    class_order: list[str] = Field(default_factory=list)
+    preprocess: dict[str, Any] = Field(default_factory=dict)
+    validation: dict[str, Any] | None = None
+    error: str | None = None

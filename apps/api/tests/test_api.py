@@ -1327,6 +1327,8 @@ def _seed_experiment_run_artifacts(
     experiment_id: str,
     attempt: int = 1,
     metrics_rows: list[dict] | None = None,
+    include_onnx: bool = False,
+    onnx_status: str = "exported",
 ) -> None:
     settings = get_settings()
     experiment_dir = Path(settings.storage_root) / "experiments" / project_id / experiment_id
@@ -1435,6 +1437,33 @@ def _seed_experiment_run_artifacts(
         "epoch=2 train_loss=0.70 val_loss=0.60 val_accuracy=0.65\n",
         encoding="utf-8",
     )
+
+    if include_onnx:
+        onnx_dir = run_dir / "onnx"
+        onnx_dir.mkdir(parents=True, exist_ok=True)
+        if onnx_status == "exported":
+            (onnx_dir / "model.onnx").write_bytes(b"fake-onnx-binary-content")
+        (onnx_dir / "onnx.metadata.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": "1",
+                    "status": onnx_status,
+                    "attempt": attempt,
+                    "input_shape": [3, 224, 224],
+                    "class_order": ["one", "two"],
+                    "class_names": ["one", "two"],
+                    "preprocess": {
+                        "resize": {"width": 224, "height": 224},
+                        "normalization": {"type": "imagenet"},
+                    },
+                    "validation": {"status": "passed" if onnx_status == "exported" else "failed"},
+                    "error": None if onnx_status == "exported" else "onnxruntime validation failed",
+                },
+                indent=2,
+                sort_keys=True,
+            ),
+            encoding="utf-8",
+        )
 
     status_path = experiment_dir / "status.json"
     status_payload = {}
@@ -1690,6 +1719,83 @@ async def test_experiment_runtime_endpoint_returns_not_found_when_missing(client
         status_code=404,
         code="runtime_not_found",
         message="Runtime not available for this experiment",
+    )
+
+
+@pytest.mark.asyncio
+async def test_experiment_onnx_endpoint_returns_metadata_and_urls(client: AsyncClient) -> None:
+    project_id, model_id = await _create_project_model(client, project_name="exp-onnx")
+    created = await client.post(
+        f"/api/v1/projects/{project_id}/experiments",
+        json={"model_id": model_id, "name": "onnx-run"},
+    )
+    assert created.status_code == 200
+    experiment_id = created.json()["id"]
+    _seed_experiment_run_artifacts(
+        project_id=project_id,
+        experiment_id=experiment_id,
+        attempt=2,
+        include_onnx=True,
+        onnx_status="exported",
+    )
+
+    response = await client.get(f"/api/v1/projects/{project_id}/experiments/{experiment_id}/onnx")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["attempt"] == 2
+    assert payload["status"] == "exported"
+    assert payload["model_onnx_url"].endswith("/onnx/download?file=model")
+    assert payload["metadata_url"].endswith("/onnx/download?file=metadata")
+    assert payload["input_shape"] == [3, 224, 224]
+    assert payload["class_names"] == ["one", "two"]
+
+
+@pytest.mark.asyncio
+async def test_experiment_onnx_download_endpoints_stream_model_and_metadata(client: AsyncClient) -> None:
+    project_id, model_id = await _create_project_model(client, project_name="exp-onnx-download")
+    created = await client.post(
+        f"/api/v1/projects/{project_id}/experiments",
+        json={"model_id": model_id, "name": "onnx-download"},
+    )
+    assert created.status_code == 200
+    experiment_id = created.json()["id"]
+    _seed_experiment_run_artifacts(
+        project_id=project_id,
+        experiment_id=experiment_id,
+        attempt=1,
+        include_onnx=True,
+        onnx_status="exported",
+    )
+
+    model_response = await client.get(f"/api/v1/projects/{project_id}/experiments/{experiment_id}/onnx/download?file=model")
+    assert model_response.status_code == 200
+    assert model_response.headers["content-type"].startswith("application/octet-stream")
+    assert model_response.content == b"fake-onnx-binary-content"
+
+    metadata_response = await client.get(f"/api/v1/projects/{project_id}/experiments/{experiment_id}/onnx/download?file=metadata")
+    assert metadata_response.status_code == 200
+    assert metadata_response.headers["content-type"].startswith("application/json")
+    metadata_payload = metadata_response.json()
+    assert metadata_payload["status"] == "exported"
+    assert metadata_payload["input_shape"] == [3, 224, 224]
+
+
+@pytest.mark.asyncio
+async def test_experiment_onnx_endpoint_returns_not_found_when_missing(client: AsyncClient) -> None:
+    project_id, model_id = await _create_project_model(client, project_name="exp-onnx-missing")
+    created = await client.post(
+        f"/api/v1/projects/{project_id}/experiments",
+        json={"model_id": model_id, "name": "onnx-missing"},
+    )
+    assert created.status_code == 200
+    experiment_id = created.json()["id"]
+
+    response = await client.get(f"/api/v1/projects/{project_id}/experiments/{experiment_id}/onnx")
+    assert_api_error(
+        response,
+        status_code=404,
+        code="onnx_not_found",
+        message="ONNX export not available for this experiment",
     )
 
 

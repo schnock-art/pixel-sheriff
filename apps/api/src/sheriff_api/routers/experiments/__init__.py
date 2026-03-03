@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from . import analytics, crud, evaluation, runs
+from . import analytics, crud, evaluation, onnx, runs
 from .shared import (
     experiment_store,
     model_store,
@@ -15,6 +15,7 @@ from .shared import (
 router = APIRouter(tags=["experiments"])
 router.include_router(analytics.router, tags=["experiments"])
 router.include_router(evaluation.router, tags=["experiments"])
+router.include_router(onnx.router, tags=["experiments"])
 router.include_router(runs.router, tags=["experiments"])
 router.include_router(crud.router, tags=["experiments"])
 

@@ -395,6 +395,19 @@ export interface ExperimentRuntimePayload {
   persistent_workers: boolean;
 }
 
+export interface ExperimentOnnxPayload {
+  attempt: number;
+  status: "exported" | "failed";
+  model_onnx_url?: string | null;
+  metadata_url: string;
+  input_shape?: number[];
+  class_names?: string[];
+  class_order?: string[];
+  preprocess?: Record<string, unknown>;
+  validation?: Record<string, unknown> | null;
+  error?: string | null;
+}
+
 export interface ExperimentLogsChunk {
   from_byte: number;
   to_byte: number;
@@ -405,6 +418,7 @@ export type ExperimentEvent =
   | { type: "status"; status: ExperimentStatus; attempt?: number; job_id?: string; ts?: string; message?: string }
   | ({ type: "metric"; attempt?: number; ts?: string } & ExperimentMetricPoint)
   | ({ type: "checkpoint"; attempt?: number; ts?: string } & ExperimentCheckpoint)
+  | { type: "onnx_export"; status: "exported" | "failed"; attempt?: number; model_uri?: string; metadata_uri?: string; error?: string; ts?: string }
   | { type: "done"; status: ExperimentStatus; attempt?: number; job_id?: string; ts?: string; message?: string; error_code?: string };
 
 export interface ExperimentEventEnvelope {
@@ -567,6 +581,10 @@ export function getExperimentEvaluation(projectId: string, experimentId: string)
 
 export function getExperimentRuntime(projectId: string, experimentId: string): Promise<ExperimentRuntimePayload> {
   return apiGet<ExperimentRuntimePayload>(`/projects/${projectId}/experiments/${experimentId}/runtime`);
+}
+
+export function getExperimentOnnx(projectId: string, experimentId: string): Promise<ExperimentOnnxPayload> {
+  return apiGet<ExperimentOnnxPayload>(`/projects/${projectId}/experiments/${experimentId}/onnx`);
 }
 
 export function getExperimentLogs(

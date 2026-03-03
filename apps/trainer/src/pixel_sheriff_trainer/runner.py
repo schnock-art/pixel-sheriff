@@ -9,6 +9,7 @@ from pixel_sheriff_trainer.classification.train import (
     resolve_runtime_info,
     run_training,
 )
+from pixel_sheriff_trainer.export_onnx import export_best_classification_onnx
 from pixel_sheriff_trainer.io.checkpoints import AsyncCheckpointWriter, read_checkpoints
 from pixel_sheriff_trainer.io.evaluation import write_classification_evaluation
 from pixel_sheriff_trainer.io.events import EventLog
@@ -443,6 +444,35 @@ class TrainRunner:
                     class_names=loaded.class_names,
                     evaluation=final_evaluation,
                 )
+
+            onnx_result = export_best_classification_onnx(
+                self.storage,
+                project_id=job.project_id,
+                experiment_id=job.experiment_id,
+                attempt=job.attempt,
+                model_config=job.model_config,
+                num_classes=loaded.num_classes,
+                class_names=loaded.class_names,
+                class_order=loaded.class_order,
+            )
+            onnx_event: dict[str, Any] = {
+                "type": "onnx_export",
+                "status": onnx_result.status,
+                "attempt": job.attempt,
+                "metadata_uri": onnx_result.metadata_uri,
+                "ts": utc_now_iso(),
+            }
+            if onnx_result.model_uri:
+                onnx_event["model_uri"] = onnx_result.model_uri
+            if onnx_result.error:
+                onnx_event["error"] = onnx_result.error
+            self.events.append(job.project_id, job.experiment_id, job.attempt, onnx_event)
+            if onnx_result.status == "exported":
+                run_logger.log(
+                    f"onnx_export status=exported model_uri={onnx_result.model_uri} metadata_uri={onnx_result.metadata_uri}"
+                )
+            else:
+                run_logger.log(f"onnx_export status=failed error={onnx_result.error}")
 
             self.storage.set_experiment_status(job.project_id, job.experiment_id, "completed")
             self.events.append(
