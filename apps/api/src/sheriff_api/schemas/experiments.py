@@ -33,6 +33,42 @@ class TrainingAdvanced(BaseModel):
     grad_clip_norm: float | None = None
 
 
+class TrainingBatching(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    drop_last: bool = True
+
+
+class TrainingEvaluation(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    eval_interval_epochs: int = Field(default=1, ge=1)
+
+
+class TrainingRuntime(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    device: Literal["auto", "cpu", "cuda", "mps"] = "auto"
+    num_workers: int = Field(default=0, ge=0)
+    pin_memory: bool | None = None
+    persistent_workers: bool | None = None
+
+
+class TrainingLogging(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    save_every_epochs: int = Field(default=1, ge=1)
+    keep_last: int = Field(default=1, ge=1)
+    keep_best: bool = True
+
+
+class TrainingResume(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    enabled: bool = False
+    checkpoint_kind: Literal["latest", "best_loss", "best_metric"] = "latest"
+
+
 class TrainingHpoBudget(BaseModel):
     model_config = ConfigDict(extra="allow")
 
@@ -62,6 +98,11 @@ class TrainingConfigV0(BaseModel):
     augmentation_profile: Literal["none", "light", "medium", "heavy"] = "light"
     precision: Literal["fp32", "amp"] = "fp32"
     advanced: TrainingAdvanced = Field(default_factory=TrainingAdvanced)
+    training: TrainingBatching = Field(default_factory=TrainingBatching)
+    evaluation: TrainingEvaluation = Field(default_factory=TrainingEvaluation)
+    runtime: TrainingRuntime = Field(default_factory=TrainingRuntime)
+    logging: TrainingLogging = Field(default_factory=TrainingLogging)
+    resume: TrainingResume = Field(default_factory=TrainingResume)
     hpo: TrainingHpo = Field(default_factory=TrainingHpo)
 
 
@@ -93,6 +134,8 @@ class ExperimentCheckpoint(BaseModel):
     value: float | None = None
     uri: str | None = None
     updated_at: datetime | None = None
+    status: Literal["pending", "ok", "error"] | None = None
+    error: str | None = None
 
 
 class ProjectExperimentSummary(BaseModel):
@@ -157,6 +200,7 @@ class ExperimentAnalyticsItem(BaseModel):
     best: ExperimentAnalyticsBest = Field(default_factory=ExperimentAnalyticsBest)
     final: dict[str, float | None] = Field(default_factory=dict)
     series: dict[str, Any] = Field(default_factory=dict)
+    runtime: dict[str, Any] | None = None
 
 
 class ProjectExperimentAnalyticsResponse(BaseModel):
@@ -183,3 +227,22 @@ class ExperimentSamplesResponse(BaseModel):
     mode: Literal["misclassified", "lowest_confidence_correct", "highest_confidence_wrong"]
     items: list[ExperimentSampleItem] = Field(default_factory=list)
     message: str | None = None
+
+
+class ExperimentRuntimeResponse(BaseModel):
+    attempt: int = Field(ge=1)
+    device_selected: str
+    cuda_available: bool
+    mps_available: bool
+    amp_enabled: bool
+    torch_version: str
+    torchvision_version: str
+    num_workers: int
+    pin_memory: bool
+    persistent_workers: bool
+
+
+class ExperimentLogsChunkResponse(BaseModel):
+    from_byte: int = Field(ge=0)
+    to_byte: int = Field(ge=0)
+    content: str

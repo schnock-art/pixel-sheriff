@@ -34,6 +34,11 @@ Status reflects current repository behavior.
   - [x] temporary file-backed model persistence (`models/{project_id}/records.json`)
 - [x] Local storage safety checks (path containment)
 - [x] API packaging fixes for `src` layout Docker builds
+- [x] Experiment runtime/log observability endpoints:
+  - [x] `GET /projects/{project_id}/experiments/{experiment_id}/runtime`
+  - [x] `GET /projects/{project_id}/experiments/{experiment_id}/logs?from_byte=&max_bytes=`
+  - [x] stable `runtime_not_found` / `training_log_not_found` error codes on missing artifacts
+- [x] Experiment analytics payload now includes optional runtime summary (`device_selected`) for list-view badges
 
 ### Web (`apps/web`)
 - [x] Root route now redirects to `/projects`
@@ -94,6 +99,26 @@ Status reflects current repository behavior.
   - [x] multi-image delete mode and selection
   - [x] folder/subfolder delete from tree
   - [x] toast-style delete summaries with counts
+- [x] Experiment runtime/log observability UI:
+  - [x] experiment detail `Runtime & Logs` panel with runtime summary and collapsible training-log viewer
+  - [x] refresh + auto-refresh polling for logs while status is `queued`/`running`
+  - [x] status-adjacent runtime badge in detail view (`CUDA`/`CPU`/`MPS`)
+  - [x] runtime badge surfaced in experiments list table
+
+### Trainer (`apps/trainer`)
+- [x] Classification-first trainer scalability/efficiency pass:
+  - [x] BN safety via train-loader `drop_last=True` default (no per-batch BN mode toggling fallback)
+  - [x] explicit fail-fast guard for invalid BN small-batch config combinations
+  - [x] configurable evaluation cadence (`evaluation.eval_interval_epochs`) with null `val_*` metrics on skipped epochs
+  - [x] checkpoint payload policy split:
+    - [x] `latest` resumable checkpoint includes optimizer/scheduler state
+    - [x] `best_loss` / `best_metric` checkpoints store model-only weights + metadata
+  - [x] async bounded checkpoint writer queue with `latest`-drop policy under backpressure
+  - [x] checkpoint write failures downgraded to warnings/metadata (no run-failure escalation)
+  - [x] CUDA throughput defaults (`pin_memory`, `non_blocking` copies, runtime worker knobs)
+  - [x] resume support (`resume.enabled`, `resume.checkpoint_kind`) with explicit transparency logs/events on success or invalid resume state
+  - [x] numeric parsing hardening for zero-valid fields (`lr`, `weight_decay`, scheduler values)
+  - [x] run artifacts: per-attempt `training.log` and `runtime.json` + latest runtime mirror
 
 ### Docs
 - [x] README aligned with implemented stack/workflow
@@ -203,6 +228,10 @@ Status reflects current repository behavior.
 - [x] Add API tests for upload destination + relative path behavior
 - [x] Add web integration tests for import -> label -> submit workflow
 - [x] Add regression tests for edit mode + staged persistence
+- [x] Add trainer/API/web coverage for experiment runtime/log features:
+  - [x] trainer tests for eval cadence, BN small-batch guardrails, checkpoint payload policy, resume transparency, runtime/log artifact writes
+  - [x] API tests for runtime endpoint, log-tail cursor behavior, and missing-artifact error codes
+  - [x] web tests for runtime badge formatting/rendering and log-tail cursor helpers
 
 ### Bounding Boxes + Segmentation (Design-First, End-to-End)
 - [x] Lock annotation contract v2 (backward-compatible with current classification payloads):

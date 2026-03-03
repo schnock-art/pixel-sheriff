@@ -1416,6 +1416,26 @@ def _seed_experiment_run_artifacts(
     for target in [run_dir / "predictions.meta.json", experiment_dir / "predictions.meta.json"]:
         target.write_text(json.dumps(predictions_meta, indent=2, sort_keys=True), encoding="utf-8")
 
+    runtime_payload = {
+        "device_selected": "cuda",
+        "cuda_available": True,
+        "mps_available": False,
+        "amp_enabled": True,
+        "torch_version": "2.x",
+        "torchvision_version": "0.x",
+        "num_workers": 4,
+        "pin_memory": True,
+        "persistent_workers": True,
+    }
+    for target in [run_dir / "runtime.json", experiment_dir / "runtime.json"]:
+        target.write_text(json.dumps(runtime_payload, indent=2, sort_keys=True), encoding="utf-8")
+
+    (run_dir / "training.log").write_text(
+        "epoch=1 train_loss=0.90 val_loss=0.80 val_accuracy=0.50\n"
+        "epoch=2 train_loss=0.70 val_loss=0.60 val_accuracy=0.65\n",
+        encoding="utf-8",
+    )
+
     status_path = experiment_dir / "status.json"
     status_payload = {}
     if status_path.exists():
@@ -1586,6 +1606,7 @@ async def test_experiment_analytics_endpoint_returns_series_and_honors_max_point
     assert item["series"]["epochs"] == [2, 3]
     assert len(item["series"]["val_accuracy"]) == 2
     assert "val_accuracy" in payload["available_series"]
+    assert item["runtime"]["device_selected"] == "cuda"
 
 
 @pytest.mark.asyncio
@@ -1623,6 +1644,112 @@ async def test_experiment_evaluation_endpoint_returns_not_found_when_missing(cli
         status_code=404,
         code="evaluation_not_found",
         message="Evaluation not available for this experiment",
+    )
+
+
+@pytest.mark.asyncio
+async def test_experiment_runtime_endpoint_returns_runtime_payload(client: AsyncClient) -> None:
+    project_id, model_id = await _create_project_model(client, project_name="exp-runtime")
+    created = await client.post(
+        f"/api/v1/projects/{project_id}/experiments",
+        json={"model_id": model_id, "name": "runtime-run"},
+    )
+    assert created.status_code == 200
+    experiment_id = created.json()["id"]
+    _seed_experiment_run_artifacts(project_id=project_id, experiment_id=experiment_id, attempt=2)
+
+    response = await client.get(f"/api/v1/projects/{project_id}/experiments/{experiment_id}/runtime")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["attempt"] == 2
+    assert payload["device_selected"] == "cuda"
+    assert payload["amp_enabled"] is True
+
+
+@pytest.mark.asyncio
+async def test_experiment_runtime_endpoint_returns_not_found_when_missing(client: AsyncClient) -> None:
+    project_id, model_id = await _create_project_model(client, project_name="exp-runtime-missing")
+    created = await client.post(
+        f"/api/v1/projects/{project_id}/experiments",
+        json={"model_id": model_id, "name": "runtime-missing"},
+    )
+    assert created.status_code == 200
+    experiment_id = created.json()["id"]
+    _seed_experiment_run_artifacts(project_id=project_id, experiment_id=experiment_id, attempt=1)
+
+    settings = get_settings()
+    experiment_dir = Path(settings.storage_root) / "experiments" / project_id / experiment_id
+    run_dir = experiment_dir / "runs" / "1"
+    for runtime_path in [run_dir / "runtime.json", experiment_dir / "runtime.json"]:
+        if runtime_path.exists():
+            runtime_path.unlink()
+
+    response = await client.get(f"/api/v1/projects/{project_id}/experiments/{experiment_id}/runtime")
+    assert_api_error(
+        response,
+        status_code=404,
+        code="runtime_not_found",
+        message="Runtime not available for this experiment",
+    )
+
+
+@pytest.mark.asyncio
+async def test_experiment_logs_endpoint_returns_chunk_and_cursor(client: AsyncClient) -> None:
+    project_id, model_id = await _create_project_model(client, project_name="exp-logs")
+    created = await client.post(
+        f"/api/v1/projects/{project_id}/experiments",
+        json={"model_id": model_id, "name": "logs-run"},
+    )
+    assert created.status_code == 200
+    experiment_id = created.json()["id"]
+    _seed_experiment_run_artifacts(project_id=project_id, experiment_id=experiment_id, attempt=1)
+
+    response = await client.get(
+        f"/api/v1/projects/{project_id}/experiments/{experiment_id}/logs?from_byte=0&max_bytes=32"
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["from_byte"] == 0
+    assert payload["to_byte"] > 0
+    assert "epoch=1" in payload["content"]
+
+
+@pytest.mark.asyncio
+async def test_experiment_logs_endpoint_resets_cursor_when_from_byte_exceeds_file(client: AsyncClient) -> None:
+    project_id, model_id = await _create_project_model(client, project_name="exp-logs-reset")
+    created = await client.post(
+        f"/api/v1/projects/{project_id}/experiments",
+        json={"model_id": model_id, "name": "logs-reset"},
+    )
+    assert created.status_code == 200
+    experiment_id = created.json()["id"]
+    _seed_experiment_run_artifacts(project_id=project_id, experiment_id=experiment_id, attempt=1)
+
+    response = await client.get(
+        f"/api/v1/projects/{project_id}/experiments/{experiment_id}/logs?from_byte=99999&max_bytes=32"
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["from_byte"] == 0
+    assert payload["to_byte"] > 0
+
+
+@pytest.mark.asyncio
+async def test_experiment_logs_endpoint_returns_not_found_when_missing(client: AsyncClient) -> None:
+    project_id, model_id = await _create_project_model(client, project_name="exp-logs-missing")
+    created = await client.post(
+        f"/api/v1/projects/{project_id}/experiments",
+        json={"model_id": model_id, "name": "logs-missing"},
+    )
+    assert created.status_code == 200
+    experiment_id = created.json()["id"]
+
+    response = await client.get(f"/api/v1/projects/{project_id}/experiments/{experiment_id}/logs")
+    assert_api_error(
+        response,
+        status_code=404,
+        code="logs_not_found",
+        message="Training logs not available for this experiment",
     )
 
 

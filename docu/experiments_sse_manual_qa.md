@@ -4,6 +4,7 @@ Use this checklist to verify:
 - create/save/start/cancel + live SSE updates + surfaced trainer failure messages
 - classification analytics and deep-dive dashboard data flows
 - attempt-aware evaluation artifacts + API responses
+- runtime/log observability APIs + runtime badges/log tail UI
 
 ## Preconditions
 - `docker compose up -d --build api trainer web db redis`
@@ -68,12 +69,23 @@ Invoke-RestMethod -Method Post -Uri "$api/projects/$projectId/experiments/$exper
 # 7) Check analytics/evaluation/samples contracts
 $analytics = Invoke-RestMethod -Method Get -Uri "$api/projects/$projectId/experiments/analytics?max_points=50"
 "analytics_items=$($analytics.items.Count), available_series=$($analytics.available_series -join ',')"
+"runtime_device_on_first_item=$($analytics.items[0].runtime.device_selected)"
 
 $evaluation = Invoke-RestMethod -Method Get -Uri "$api/projects/$projectId/experiments/$experimentId/evaluation"
 "evaluation_attempt=$($evaluation.attempt), task=$($evaluation.task), num_samples=$($evaluation.num_samples)"
 
 $samples = Invoke-RestMethod -Method Get -Uri "$api/projects/$projectId/experiments/$experimentId/samples?mode=misclassified&limit=25"
 "samples_attempt=$($samples.attempt), samples_count=$($samples.items.Count)"
+
+# 8) Runtime/log observability contracts
+$runtime = Invoke-RestMethod -Method Get -Uri "$api/projects/$projectId/experiments/$experimentId/runtime"
+"runtime_device=$($runtime.device_selected), amp=$($runtime.amp_enabled), torch=$($runtime.torch_version)"
+
+$logChunk1 = Invoke-RestMethod -Method Get -Uri "$api/projects/$projectId/experiments/$experimentId/logs?from_byte=0&max_bytes=4096"
+"logs_chunk_1 from=$($logChunk1.from_byte) to=$($logChunk1.to_byte) bytes=$($logChunk1.content.Length)"
+
+$logChunk2 = Invoke-RestMethod -Method Get -Uri "$api/projects/$projectId/experiments/$experimentId/logs?from_byte=$($logChunk1.to_byte)&max_bytes=4096"
+"logs_chunk_2 from=$($logChunk2.from_byte) to=$($logChunk2.to_byte) bytes=$($logChunk2.content.Length)"
 ```
 
 ## Browser SSE Checklist
@@ -87,15 +99,23 @@ $samples = Invoke-RestMethod -Method Get -Uri "$api/projects/$projectId/experime
   - Verify default `Advanced Parameters -> Num Workers` is `0` (recommended in Docker).
   - Click `Start Training`.
   - Verify status changes to `running`.
+  - Verify runtime badge appears beside status (`CUDA`/`CPU`/`MPS`) once runtime info is available.
   - Verify chart updates every epoch without page refresh.
+  - If `evaluation.eval_interval_epochs > 1`, verify skipped epochs still render a metric point and `val_*` is empty/null for those rows.
   - Verify checkpoints (`latest`, `best_loss`, `best_metric`) update.
   - Refresh mid-run and verify history remains and updates continue.
+  - Open `Runtime & Logs` panel:
+    - verify runtime fields are populated (`device`, `cuda_available`, `amp_enabled`, torch/torchvision versions)
+    - enable auto-refresh while run is active and verify log content keeps appending
+    - verify refresh button appends content and cursor moves forward (`from_byte -> to_byte`)
+    - complete/cancel run and verify auto-refresh stops on terminal status
   - Click `Cancel` during run and verify terminal status `canceled`.
   - If run fails, verify toast shows failure reason and header shows `Last run error: ...`.
 
 ## Browser Analytics + Dashboard Checklist
 - Open `http://localhost:3010/projects/{projectId}/experiments`.
 - Verify analytics section appears above the experiments table.
+- Verify each experiment row can show runtime badge (`CUDA`/`CPU`/`MPS`) when runtime data exists.
 - Verify summary cards show:
   - `Best accuracy`
   - `Lowest val loss`
@@ -146,6 +166,9 @@ After a completed classification run, verify files exist under storage root:
 - `experiments/{project_id}/{experiment_id}/runs/{attempt}/evaluation.json`
 - `experiments/{project_id}/{experiment_id}/runs/{attempt}/predictions.jsonl`
 - `experiments/{project_id}/{experiment_id}/runs/{attempt}/predictions.meta.json`
+- `experiments/{project_id}/{experiment_id}/runs/{attempt}/runtime.json`
+- `experiments/{project_id}/{experiment_id}/runs/{attempt}/training.log`
 - `experiments/{project_id}/{experiment_id}/evaluation.json` (latest mirror)
 - `experiments/{project_id}/{experiment_id}/predictions.jsonl` (latest mirror)
 - `experiments/{project_id}/{experiment_id}/predictions.meta.json` (latest mirror)
+- `experiments/{project_id}/{experiment_id}/runtime.json` (latest mirror)

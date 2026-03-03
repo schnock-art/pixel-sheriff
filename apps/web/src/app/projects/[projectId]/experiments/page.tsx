@@ -23,6 +23,7 @@ import {
   formatTick,
   isBoundedMetricKey,
 } from "../../../../lib/workspace/experimentMetrics";
+import { runtimeBadgeLabel } from "../../../../lib/workspace/experimentRuntime";
 
 interface ExperimentsPageProps {
   params: {
@@ -565,6 +566,7 @@ export default function ExperimentsPage({ params }: ExperimentsPageProps) {
                 {visibleItems.map((experiment) => {
                   const metricName = experiment.best?.metric_name ?? null;
                   const metricValue = typeof experiment.best?.metric_value === "number" ? experiment.best.metric_value : null;
+                  const runtimeBadge = runtimeBadgeLabel(experiment.runtime ?? null);
                   const bestLabel =
                     metricName && metricValue != null
                       ? `${metricName}: ${metricValue.toFixed(4)}${experiment.best?.epoch ? ` (ep ${experiment.best.epoch})` : ""}`
@@ -581,6 +583,7 @@ export default function ExperimentsPage({ params }: ExperimentsPageProps) {
                       <td>{experiment.model_name}</td>
                       <td>
                         <span className={`status-pill status-${experiment.status}`}>{experiment.status}</span>
+                        {runtimeBadge ? <span className="runtime-pill">{runtimeBadge}</span> : null}
                       </td>
                       <td>{bestLabel}</td>
                       <td>{formatDateTime(experiment.updated_at)}</td>

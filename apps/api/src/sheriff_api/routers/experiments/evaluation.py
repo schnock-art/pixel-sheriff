@@ -9,6 +9,8 @@ from sheriff_api.db.session import get_db
 from sheriff_api.errors import api_error
 from sheriff_api.schemas.experiments import (
     ExperimentEvaluationResponse,
+    ExperimentLogsChunkResponse,
+    ExperimentRuntimeResponse,
     ExperimentSamplesResponse,
 )
 
@@ -20,6 +22,80 @@ from .shared import (
 )
 
 router = APIRouter()
+
+
+@router.get(
+    "/projects/{project_id}/experiments/{experiment_id}/runtime",
+    response_model=ExperimentRuntimeResponse,
+)
+async def get_project_experiment_runtime(
+    project_id: str,
+    experiment_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> ExperimentRuntimeResponse:
+    await require_project(db, project_id)
+    current = experiment_store.get(project_id, experiment_id, metrics_limit=1)
+    if current is None:
+        raise api_error(
+            status_code=404,
+            code="experiment_not_found",
+            message="Experiment not found in project",
+            details={"project_id": project_id, "experiment_id": experiment_id},
+        )
+
+    loaded = experiment_store.read_runtime(project_id, experiment_id)
+    if loaded is None:
+        raise api_error(
+            status_code=404,
+            code="runtime_not_found",
+            message="Runtime not available for this experiment",
+            details={"project_id": project_id, "experiment_id": experiment_id},
+        )
+    attempt, payload = loaded
+    response_payload = dict(payload)
+    response_payload["attempt"] = attempt
+    return ExperimentRuntimeResponse.model_validate(response_payload)
+
+
+@router.get(
+    "/projects/{project_id}/experiments/{experiment_id}/logs",
+    response_model=ExperimentLogsChunkResponse,
+)
+async def get_project_experiment_logs(
+    project_id: str,
+    experiment_id: str,
+    from_byte: int = Query(default=0, ge=0),
+    max_bytes: int = Query(default=65536, ge=1, le=524288),
+    db: AsyncSession = Depends(get_db),
+) -> ExperimentLogsChunkResponse:
+    await require_project(db, project_id)
+    current = experiment_store.get(project_id, experiment_id, metrics_limit=1)
+    if current is None:
+        raise api_error(
+            status_code=404,
+            code="experiment_not_found",
+            message="Experiment not found in project",
+            details={"project_id": project_id, "experiment_id": experiment_id},
+        )
+
+    payload = experiment_store.read_training_log_chunk(
+        project_id,
+        experiment_id,
+        from_byte=from_byte,
+        max_bytes=max_bytes,
+    )
+    if payload is None:
+        raise api_error(
+            status_code=404,
+            code="logs_not_found",
+            message="Training logs not available for this experiment",
+            details={"project_id": project_id, "experiment_id": experiment_id},
+        )
+    return ExperimentLogsChunkResponse(
+        from_byte=int(payload.get("from_byte", 0)),
+        to_byte=int(payload.get("to_byte", 0)),
+        content=str(payload.get("content", "")),
+    )
 
 
 @router.get(

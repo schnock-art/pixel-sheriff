@@ -228,6 +228,8 @@ export interface ExperimentCheckpoint {
   value: number | null;
   uri?: string | null;
   updated_at: string | null;
+  status?: "pending" | "ok" | "error" | null;
+  error?: string | null;
 }
 
 export interface ExperimentMetricPoint {
@@ -313,6 +315,7 @@ export interface ExperimentAnalyticsItem {
   best: ExperimentAnalyticsBest;
   final: Record<string, number | null>;
   series: Record<string, unknown>;
+  runtime?: { device_selected?: string } | null;
 }
 
 export interface ProjectExperimentAnalyticsResponse {
@@ -377,6 +380,25 @@ export interface ExperimentSamplesResponse {
   mode: "misclassified" | "lowest_confidence_correct" | "highest_confidence_wrong";
   items: ExperimentEvaluationSampleRow[];
   message?: string | null;
+}
+
+export interface ExperimentRuntimePayload {
+  attempt: number;
+  device_selected: string;
+  cuda_available: boolean;
+  mps_available: boolean;
+  amp_enabled: boolean;
+  torch_version: string;
+  torchvision_version: string;
+  num_workers: number;
+  pin_memory: boolean;
+  persistent_workers: boolean;
+}
+
+export interface ExperimentLogsChunk {
+  from_byte: number;
+  to_byte: number;
+  content: string;
 }
 
 export type ExperimentEvent =
@@ -541,6 +563,28 @@ export function getExperiment(projectId: string, experimentId: string): Promise<
 
 export function getExperimentEvaluation(projectId: string, experimentId: string): Promise<ExperimentEvaluationPayload> {
   return apiGet<ExperimentEvaluationPayload>(`/projects/${projectId}/experiments/${experimentId}/evaluation`);
+}
+
+export function getExperimentRuntime(projectId: string, experimentId: string): Promise<ExperimentRuntimePayload> {
+  return apiGet<ExperimentRuntimePayload>(`/projects/${projectId}/experiments/${experimentId}/runtime`);
+}
+
+export function getExperimentLogs(
+  projectId: string,
+  experimentId: string,
+  options: { fromByte?: number; maxBytes?: number } = {},
+): Promise<ExperimentLogsChunk> {
+  const params = new URLSearchParams();
+  if (typeof options.fromByte === "number" && Number.isFinite(options.fromByte) && options.fromByte >= 0) {
+    params.set("from_byte", String(Math.floor(options.fromByte)));
+  }
+  if (typeof options.maxBytes === "number" && Number.isFinite(options.maxBytes) && options.maxBytes >= 1) {
+    params.set("max_bytes", String(Math.floor(options.maxBytes)));
+  }
+  const suffix = params.toString();
+  return apiGet<ExperimentLogsChunk>(
+    `/projects/${projectId}/experiments/${experimentId}/logs${suffix ? `?${suffix}` : ""}`,
+  );
 }
 
 export function listExperimentSamples(

@@ -186,6 +186,7 @@ def build_classification_loaders(
     workdir: Path,
     model_config: dict[str, Any],
     training_config: dict[str, Any],
+    device_type: str | None = None,
 ) -> LoadedClassificationData:
     dataset_dir = _extract_if_missing(export_zip_path, workdir)
     manifest_path = dataset_dir / "manifest.json"
@@ -249,16 +250,58 @@ def build_classification_loaders(
         val_steps.append(transforms.Normalize(mean=mean, std=std))
     val_transform = transforms.Compose(val_steps)
 
-    batch_size = int(training_config.get("batch_size") or 16)
+    batch_size = int(training_config.get("batch_size", 16))
+    if batch_size < 1:
+        batch_size = 16
+
+    runtime = training_config.get("runtime")
     advanced = training_config.get("advanced")
     num_workers = 0
-    if isinstance(advanced, dict) and isinstance(advanced.get("num_workers"), int):
+    if isinstance(runtime, dict) and isinstance(runtime.get("num_workers"), int):
+        num_workers = max(0, int(runtime["num_workers"]))
+    elif isinstance(advanced, dict) and isinstance(advanced.get("num_workers"), int):
         num_workers = max(0, int(advanced["num_workers"]))
+
+    resolved_device_type = str(device_type or "cpu").strip().lower()
+    pin_memory_default = resolved_device_type == "cuda"
+    pin_memory = pin_memory_default
+    if isinstance(runtime, dict) and isinstance(runtime.get("pin_memory"), bool):
+        pin_memory = bool(runtime["pin_memory"])
+
+    persistent_workers = num_workers > 0
+    if isinstance(runtime, dict) and isinstance(runtime.get("persistent_workers"), bool):
+        persistent_workers = bool(runtime["persistent_workers"])
+    if num_workers < 1:
+        persistent_workers = False
+
+    training_block = training_config.get("training")
+    drop_last = True
+    if isinstance(training_block, dict) and isinstance(training_block.get("drop_last"), bool):
+        drop_last = bool(training_block.get("drop_last"))
 
     train_dataset = ClassificationDataset(train_samples, train_transform)
     val_dataset = ClassificationDataset(val_samples, val_transform)
-    train_loader: DataLoader[Any] = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers)
-    val_loader: DataLoader[Any] = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers)
+
+    train_loader_kwargs: dict[str, Any] = {
+        "batch_size": batch_size,
+        "shuffle": True,
+        "num_workers": num_workers,
+        "drop_last": drop_last,
+        "pin_memory": pin_memory,
+    }
+    val_loader_kwargs: dict[str, Any] = {
+        "batch_size": batch_size,
+        "shuffle": False,
+        "num_workers": num_workers,
+        "drop_last": False,
+        "pin_memory": pin_memory,
+    }
+    if num_workers > 0:
+        train_loader_kwargs["persistent_workers"] = persistent_workers
+        val_loader_kwargs["persistent_workers"] = persistent_workers
+
+    train_loader: DataLoader[Any] = DataLoader(train_dataset, **train_loader_kwargs)
+    val_loader: DataLoader[Any] = DataLoader(val_dataset, **val_loader_kwargs)
     return LoadedClassificationData(
         train_loader=train_loader,
         val_loader=val_loader,

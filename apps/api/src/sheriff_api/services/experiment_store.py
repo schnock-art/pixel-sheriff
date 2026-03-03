@@ -24,9 +24,9 @@ def _default_summary() -> dict[str, Any]:
 
 def _default_checkpoints() -> list[dict[str, Any]]:
     return [
-        {"kind": "best_metric", "epoch": None, "metric_name": None, "value": None, "updated_at": None, "uri": None},
-        {"kind": "best_loss", "epoch": None, "metric_name": "val_loss", "value": None, "updated_at": None, "uri": None},
-        {"kind": "latest", "epoch": None, "metric_name": None, "value": None, "updated_at": None, "uri": None},
+        {"kind": "best_metric", "epoch": None, "metric_name": None, "value": None, "updated_at": None, "uri": None, "status": "pending", "error": None},
+        {"kind": "best_loss", "epoch": None, "metric_name": "val_loss", "value": None, "updated_at": None, "uri": None, "status": "pending", "error": None},
+        {"kind": "latest", "epoch": None, "metric_name": None, "value": None, "updated_at": None, "uri": None, "status": "pending", "error": None},
     ]
 
 
@@ -83,6 +83,12 @@ class ExperimentStore:
     def _predictions_meta_path(self, project_id: str, experiment_id: str, attempt: int) -> Path:
         return self._run_dir(project_id, experiment_id, attempt) / "predictions.meta.json"
 
+    def _runtime_path(self, project_id: str, experiment_id: str, attempt: int) -> Path:
+        return self._run_dir(project_id, experiment_id, attempt) / "runtime.json"
+
+    def _training_log_path(self, project_id: str, experiment_id: str, attempt: int) -> Path:
+        return self._run_dir(project_id, experiment_id, attempt) / "training.log"
+
     def _latest_evaluation_path(self, project_id: str, experiment_id: str) -> Path:
         return self._experiment_dir(project_id, experiment_id) / "evaluation.json"
 
@@ -91,6 +97,9 @@ class ExperimentStore:
 
     def _latest_predictions_meta_path(self, project_id: str, experiment_id: str) -> Path:
         return self._experiment_dir(project_id, experiment_id) / "predictions.meta.json"
+
+    def _latest_runtime_path(self, project_id: str, experiment_id: str) -> Path:
+        return self._experiment_dir(project_id, experiment_id) / "runtime.json"
 
     def _status_default(self) -> dict[str, Any]:
         return {
@@ -460,6 +469,9 @@ class ExperimentStore:
     def latest_attempt_with_evaluation(self, project_id: str, experiment_id: str) -> int | None:
         return self._latest_attempt_with_file(project_id, experiment_id, "evaluation.json")
 
+    def latest_attempt_with_runtime(self, project_id: str, experiment_id: str) -> int | None:
+        return self._latest_attempt_with_file(project_id, experiment_id, "runtime.json")
+
     def read_evaluation(self, project_id: str, experiment_id: str, *, attempt: int | None = None) -> tuple[int, dict[str, Any]] | None:
         resolved_attempt = attempt if isinstance(attempt, int) and attempt >= 1 else self.latest_attempt_with_evaluation(project_id, experiment_id)
         if isinstance(resolved_attempt, int) and resolved_attempt >= 1:
@@ -478,6 +490,65 @@ class ExperimentStore:
                 fallback_attempt = 1
             return int(fallback_attempt), fallback_payload
         return None
+
+    def read_runtime(self, project_id: str, experiment_id: str, *, attempt: int | None = None) -> tuple[int, dict[str, Any]] | None:
+        resolved_attempt = attempt if isinstance(attempt, int) and attempt >= 1 else self.latest_attempt_with_runtime(project_id, experiment_id)
+        if isinstance(resolved_attempt, int) and resolved_attempt >= 1:
+            payload = self._read_json(self._runtime_path(project_id, experiment_id, resolved_attempt), None)
+            if isinstance(payload, dict):
+                return resolved_attempt, payload
+
+        fallback_payload = self._read_json(self._latest_runtime_path(project_id, experiment_id), None)
+        if isinstance(fallback_payload, dict):
+            status_row = self._read_status(project_id, experiment_id)
+            fallback_attempt = status_row.get("last_completed_attempt")
+            if not isinstance(fallback_attempt, int) or fallback_attempt < 1:
+                fallback_attempt = status_row.get("current_run_attempt")
+            if not isinstance(fallback_attempt, int) or fallback_attempt < 1:
+                fallback_attempt = 1
+            return int(fallback_attempt), fallback_payload
+        return None
+
+    def read_training_log_chunk(
+        self,
+        project_id: str,
+        experiment_id: str,
+        *,
+        from_byte: int = 0,
+        max_bytes: int = 65536,
+        attempt: int | None = None,
+    ) -> dict[str, Any] | None:
+        resolved_attempt = attempt if isinstance(attempt, int) and attempt >= 1 else self._latest_attempt_with_file(project_id, experiment_id, "training.log")
+        if not isinstance(resolved_attempt, int) or resolved_attempt < 1:
+            return None
+        path = self._training_log_path(project_id, experiment_id, resolved_attempt)
+        if not path.exists() or not path.is_file():
+            return None
+        try:
+            file_size = path.stat().st_size
+        except OSError:
+            return None
+
+        safe_max_bytes = max(1, min(int(max_bytes), 512 * 1024))
+        requested_start = max(0, int(from_byte))
+        start = requested_start
+        if start > file_size:
+            start = 0
+        read_limit = max(0, file_size - start)
+        to_read = min(safe_max_bytes, read_limit)
+        try:
+            with path.open("rb") as handle:
+                handle.seek(start)
+                payload = handle.read(to_read)
+        except OSError:
+            return None
+
+        return {
+            "attempt": resolved_attempt,
+            "from_byte": int(start),
+            "to_byte": int(start + len(payload)),
+            "content": payload.decode("utf-8", errors="replace"),
+        }
 
     def read_predictions(
         self,

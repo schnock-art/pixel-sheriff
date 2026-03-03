@@ -129,6 +129,14 @@ async def project_experiments_analytics(
         if not isinstance(updated_at, str):
             updated_at = utc_now_iso()
 
+        runtime_loaded = experiment_store.read_runtime(project_id, experiment_id)
+        runtime_payload = runtime_loaded[1] if isinstance(runtime_loaded, tuple) else None
+        runtime_summary: dict[str, Any] | None = None
+        if isinstance(runtime_payload, dict):
+            device_selected = runtime_payload.get("device_selected")
+            if isinstance(device_selected, str) and device_selected.strip():
+                runtime_summary = {"device_selected": device_selected.strip().lower()}
+
         items.append(
             ExperimentAnalyticsItem(
                 experiment_id=experiment_id,
@@ -145,6 +153,7 @@ async def project_experiments_analytics(
                 ),
                 final=final,
                 series=series,
+                runtime=runtime_summary,
             )
         )
 

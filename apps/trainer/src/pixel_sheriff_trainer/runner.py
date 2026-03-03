@@ -3,11 +3,18 @@ from __future__ import annotations
 from typing import Any
 
 from pixel_sheriff_trainer.classification.dataset import build_classification_loaders
-from pixel_sheriff_trainer.classification.train import EpochMetrics, run_training
-from pixel_sheriff_trainer.io.checkpoints import save_checkpoint
+from pixel_sheriff_trainer.classification.train import (
+    EpochMetrics,
+    resolve_device,
+    resolve_runtime_info,
+    run_training,
+)
+from pixel_sheriff_trainer.io.checkpoints import AsyncCheckpointWriter, read_checkpoints
 from pixel_sheriff_trainer.io.evaluation import write_classification_evaluation
 from pixel_sheriff_trainer.io.events import EventLog
 from pixel_sheriff_trainer.io.metrics import append_metric
+from pixel_sheriff_trainer.io.run_logging import RunLogger
+from pixel_sheriff_trainer.io.runtime import write_runtime_info
 from pixel_sheriff_trainer.io.storage import ExperimentStorage
 from pixel_sheriff_trainer.jobs import TrainJob
 from pixel_sheriff_trainer.utils.seed import seed_everything
@@ -19,8 +26,17 @@ class TrainRunner:
         self.storage = ExperimentStorage(storage_root)
         self.events = EventLog(self.storage)
 
-    def _status_summary(self, status: str, attempt: int, job_id: str) -> dict[str, Any]:
-        return {"type": "status", "status": status, "attempt": attempt, "job_id": job_id, "ts": utc_now_iso()}
+    def _status_summary(self, status: str, attempt: int, job_id: str, message: str | None = None) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "type": "status",
+            "status": status,
+            "attempt": attempt,
+            "job_id": job_id,
+            "ts": utc_now_iso(),
+        }
+        if message:
+            payload["message"] = message
+        return payload
 
     def _done_event(
         self,
@@ -46,19 +62,93 @@ class TrainRunner:
 
     @staticmethod
     def _num_workers_from_config(training_config: dict[str, Any]) -> int:
+        runtime = training_config.get("runtime")
+        if isinstance(runtime, dict) and runtime.get("num_workers") is not None:
+            try:
+                return max(0, int(runtime.get("num_workers")))
+            except (TypeError, ValueError):
+                return 0
         advanced = training_config.get("advanced")
-        if isinstance(advanced, dict) and isinstance(advanced.get("num_workers"), int):
-            return max(0, int(advanced["num_workers"]))
+        if isinstance(advanced, dict) and advanced.get("num_workers") is not None:
+            try:
+                return max(0, int(advanced.get("num_workers")))
+            except (TypeError, ValueError):
+                return 0
         return 0
 
     @staticmethod
     def _config_with_num_workers(training_config: dict[str, Any], num_workers: int) -> dict[str, Any]:
         next_config = dict(training_config)
+
+        runtime = next_config.get("runtime")
+        next_runtime = dict(runtime) if isinstance(runtime, dict) else {}
+        next_runtime["num_workers"] = max(0, int(num_workers))
+        next_config["runtime"] = next_runtime
+
         advanced = next_config.get("advanced")
         next_advanced = dict(advanced) if isinstance(advanced, dict) else {}
         next_advanced["num_workers"] = max(0, int(num_workers))
         next_config["advanced"] = next_advanced
         return next_config
+
+    @staticmethod
+    def _checkpoint_settings(training_config: dict[str, Any]) -> tuple[int, int]:
+        logging_cfg = training_config.get("logging")
+        if not isinstance(logging_cfg, dict):
+            logging_cfg = {}
+        save_every = logging_cfg.get("save_every_epochs", 1)
+        keep_last = logging_cfg.get("keep_last", 1)
+        try:
+            save_every_int = max(1, int(save_every))
+        except (TypeError, ValueError):
+            save_every_int = 1
+        try:
+            keep_last_int = max(1, int(keep_last))
+        except (TypeError, ValueError):
+            keep_last_int = 1
+        return save_every_int, keep_last_int
+
+    def _try_load_resume_state(
+        self,
+        *,
+        project_id: str,
+        experiment_id: str,
+        attempt: int,
+        training_config: dict[str, Any],
+    ) -> tuple[dict[str, Any] | None, str | None]:
+        resume_cfg = training_config.get("resume")
+        if not isinstance(resume_cfg, dict):
+            return None, None
+        if not bool(resume_cfg.get("enabled", False)):
+            return None, None
+
+        resume_kind = str(resume_cfg.get("checkpoint_kind", "latest") or "latest").strip().lower()
+        if resume_kind not in {"latest", "best_loss", "best_metric"}:
+            resume_kind = "latest"
+
+        rows = read_checkpoints(
+            self.storage,
+            project_id=project_id,
+            experiment_id=experiment_id,
+            attempt=attempt,
+        )
+        row = next((item for item in rows if str(item.get("kind")) == resume_kind), None)
+        uri = str(row.get("uri") or "") if isinstance(row, dict) else ""
+        if not uri:
+            return None, "resume requested but checkpoint invalid; starting fresh"
+
+        try:
+            import torch
+
+            checkpoint_path = self.storage.resolve(uri)
+            payload = torch.load(checkpoint_path, map_location="cpu")
+            if not isinstance(payload, dict) or not isinstance(payload.get("model_state_dict"), dict):
+                return None, "resume requested but checkpoint invalid; starting fresh"
+            loaded_epoch = payload.get("epoch")
+            epoch_label = int(loaded_epoch) if isinstance(loaded_epoch, int) else "unknown"
+            return payload, f"resume applied from {resume_kind} checkpoint (epoch={epoch_label})"
+        except Exception:
+            return None, "resume requested but checkpoint invalid; starting fresh"
 
     def process(self, job: TrainJob) -> str:
         status_row = self.storage.read_status(job.project_id, job.experiment_id)
@@ -85,12 +175,43 @@ class TrainRunner:
         self.storage.set_run_started(job.project_id, job.experiment_id, job.attempt)
         self.events.append(job.project_id, job.experiment_id, job.attempt, self._status_summary("running", job.attempt, job.job_id))
 
+        run_logger = RunLogger(self.storage.training_log_path(job.project_id, job.experiment_id, job.attempt))
+        run_logger.log(f"run_started project={job.project_id} experiment={job.experiment_id} attempt={job.attempt}")
+
         summary: dict[str, Any] = {
             "best_metric_name": None,
             "best_metric_value": None,
             "best_epoch": None,
             "last_epoch": None,
         }
+
+        checkpoint_writer: AsyncCheckpointWriter | None = None
+
+        def emit_status(message: str) -> None:
+            self.events.append(
+                job.project_id,
+                job.experiment_id,
+                job.attempt,
+                self._status_summary("running", job.attempt, job.job_id, message=message),
+            )
+            run_logger.log(message)
+
+        def drain_checkpoint_results() -> None:
+            if checkpoint_writer is None:
+                return
+            for result in checkpoint_writer.drain_results():
+                if result.dropped:
+                    emit_status("checkpoint latest dropped due to full writer queue")
+                    continue
+                if result.ok and isinstance(result.row, dict):
+                    self.events.append(job.project_id, job.experiment_id, job.attempt, {"type": "checkpoint", **result.row})
+                    run_logger.log(
+                        f"checkpoint_written kind={result.kind} epoch={result.epoch} uri={result.row.get('uri')} status={result.row.get('status')}"
+                    )
+                    continue
+                if isinstance(result.row, dict):
+                    self.events.append(job.project_id, job.experiment_id, job.attempt, {"type": "checkpoint", **result.row})
+                emit_status(f"checkpoint write failed kind={result.kind} epoch={result.epoch}: {result.error}")
 
         def should_cancel() -> bool:
             return self.storage.is_cancel_requested(job.project_id, job.experiment_id)
@@ -109,6 +230,33 @@ class TrainRunner:
                 seed = int(advanced["seed"])
             seed_everything(seed)
 
+            device = resolve_device(job.training_config)
+            runtime_info = resolve_runtime_info(job.training_config, device=device)
+            runtime_payload = {
+                "device_selected": runtime_info.device_selected,
+                "cuda_available": runtime_info.cuda_available,
+                "mps_available": runtime_info.mps_available,
+                "amp_enabled": runtime_info.amp_enabled,
+                "torch_version": runtime_info.torch_version,
+                "torchvision_version": runtime_info.torchvision_version,
+                "num_workers": runtime_info.num_workers,
+                "pin_memory": runtime_info.pin_memory,
+                "persistent_workers": runtime_info.persistent_workers,
+            }
+            write_runtime_info(
+                self.storage,
+                project_id=job.project_id,
+                experiment_id=job.experiment_id,
+                attempt=job.attempt,
+                payload=runtime_payload,
+            )
+            run_logger.log(
+                "runtime "
+                f"device={runtime_info.device_selected} amp={runtime_info.amp_enabled} "
+                f"cuda_available={runtime_info.cuda_available} mps_available={runtime_info.mps_available} "
+                f"torch={runtime_info.torch_version} torchvision={runtime_info.torchvision_version}"
+            )
+
             zip_relpath = str(job.dataset_export.get("zip_relpath") or "")
             if not zip_relpath:
                 raise ValueError("dataset_export_missing")
@@ -120,33 +268,43 @@ class TrainRunner:
                 workdir=workdir,
                 model_config=job.model_config,
                 training_config=effective_training_config,
+                device_type=device.type,
             )
+            run_logger.log(f"dataset train_count={loaded.train_count} val_count={loaded.val_count}")
 
             if loaded.skipped_unlabeled > 0:
-                self.events.append(
-                    job.project_id,
-                    job.experiment_id,
-                    job.attempt,
-                    {
-                        "type": "status",
-                        "status": "running",
-                        "attempt": job.attempt,
-                        "job_id": job.job_id,
-                        "ts": utc_now_iso(),
-                        "message": f"skipped_unlabeled={loaded.skipped_unlabeled}",
-                    },
-                )
+                emit_status(f"skipped_unlabeled={loaded.skipped_unlabeled}")
+
+            _save_every, keep_last = self._checkpoint_settings(effective_training_config)
+            checkpoint_writer = AsyncCheckpointWriter(
+                self.storage,
+                project_id=job.project_id,
+                experiment_id=job.experiment_id,
+                attempt=job.attempt,
+                keep_last=keep_last,
+                max_queue_size=8,
+            )
+            checkpoint_writer.start()
 
             def on_epoch(epoch_metrics: EpochMetrics) -> None:
                 metric_row: dict[str, Any] = {
                     "attempt": job.attempt,
                     "epoch": int(epoch_metrics.epoch),
                     "train_loss": float(epoch_metrics.train_loss),
-                    "val_loss": float(epoch_metrics.val_loss),
-                    "val_accuracy": float(epoch_metrics.val_accuracy),
-                    "val_macro_f1": float(epoch_metrics.val_macro_f1),
-                    "val_macro_precision": float(epoch_metrics.val_macro_precision),
-                    "val_macro_recall": float(epoch_metrics.val_macro_recall),
+                    "val_loss": float(epoch_metrics.val_loss) if isinstance(epoch_metrics.val_loss, (int, float)) else None,
+                    "val_accuracy": float(epoch_metrics.val_accuracy) if isinstance(epoch_metrics.val_accuracy, (int, float)) else None,
+                    "val_macro_f1": float(epoch_metrics.val_macro_f1)
+                    if isinstance(epoch_metrics.val_macro_f1, (int, float))
+                    else None,
+                    "val_macro_precision": float(epoch_metrics.val_macro_precision)
+                    if isinstance(epoch_metrics.val_macro_precision, (int, float))
+                    else None,
+                    "val_macro_recall": float(epoch_metrics.val_macro_recall)
+                    if isinstance(epoch_metrics.val_macro_recall, (int, float))
+                    else None,
+                    "lr": float(epoch_metrics.lr),
+                    "epoch_seconds": float(epoch_metrics.epoch_seconds),
+                    "evaluated": bool(epoch_metrics.evaluated),
                     "created_at": utc_now_iso(),
                 }
                 append_metric(
@@ -164,25 +322,39 @@ class TrainRunner:
                 )
                 summary["last_epoch"] = int(epoch_metrics.epoch)
                 self.storage.set_summary(job.project_id, job.experiment_id, summary)
+                run_logger.log(
+                    "epoch="
+                    f"{epoch_metrics.epoch} train_loss={epoch_metrics.train_loss:.6f} "
+                    f"val_loss={metric_row['val_loss']} val_accuracy={metric_row['val_accuracy']} "
+                    f"lr={epoch_metrics.lr:.8f} seconds={epoch_metrics.epoch_seconds:.3f}"
+                )
+                drain_checkpoint_results()
 
             def on_checkpoint(kind: str, epoch: int, metric_name: str | None, value: float | None, state: dict[str, Any]) -> None:
-                row = save_checkpoint(
-                    self.storage,
-                    project_id=job.project_id,
-                    experiment_id=job.experiment_id,
-                    attempt=job.attempt,
+                if kind == "best_metric":
+                    summary["best_metric_name"] = metric_name
+                    summary["best_metric_value"] = value
+                    summary["best_epoch"] = epoch
+                    self.storage.set_summary(job.project_id, job.experiment_id, summary)
+
+                if checkpoint_writer is None:
+                    return
+                checkpoint_writer.enqueue(
                     kind=kind,
                     epoch=epoch,
                     metric_name=metric_name,
                     value=value,
                     state_dict=state,
                 )
-                if kind == "best_metric":
-                    summary["best_metric_name"] = metric_name
-                    summary["best_metric_value"] = value
-                    summary["best_epoch"] = epoch
-                    self.storage.set_summary(job.project_id, job.experiment_id, summary)
-                self.events.append(job.project_id, job.experiment_id, job.attempt, {"type": "checkpoint", **row})
+
+            resume_state, resume_message = self._try_load_resume_state(
+                project_id=job.project_id,
+                experiment_id=job.experiment_id,
+                attempt=job.attempt,
+                training_config=effective_training_config,
+            )
+            if resume_message:
+                emit_status(resume_message)
 
             final_evaluation = None
             try:
@@ -195,30 +367,42 @@ class TrainRunner:
                     should_cancel=should_cancel,
                     on_epoch=on_epoch,
                     on_checkpoint=on_checkpoint,
+                    device=device,
+                    resume_state=resume_state,
                 )
             except RuntimeError as exc:
                 message = str(exc)
                 if "shared memory" not in message.lower() or self._num_workers_from_config(effective_training_config) <= 0:
                     raise
                 effective_training_config = self._config_with_num_workers(effective_training_config, 0)
-                self.events.append(
-                    job.project_id,
-                    job.experiment_id,
-                    job.attempt,
-                    {
-                        "type": "status",
-                        "status": "running",
-                        "attempt": job.attempt,
-                        "job_id": job.job_id,
-                        "ts": utc_now_iso(),
-                        "message": "shared-memory error detected; retrying with num_workers=0",
-                    },
+                emit_status("shared-memory error detected; retrying with num_workers=0")
+
+                runtime_info = resolve_runtime_info(effective_training_config, device=device)
+                runtime_payload = {
+                    "device_selected": runtime_info.device_selected,
+                    "cuda_available": runtime_info.cuda_available,
+                    "mps_available": runtime_info.mps_available,
+                    "amp_enabled": runtime_info.amp_enabled,
+                    "torch_version": runtime_info.torch_version,
+                    "torchvision_version": runtime_info.torchvision_version,
+                    "num_workers": runtime_info.num_workers,
+                    "pin_memory": runtime_info.pin_memory,
+                    "persistent_workers": runtime_info.persistent_workers,
+                }
+                write_runtime_info(
+                    self.storage,
+                    project_id=job.project_id,
+                    experiment_id=job.experiment_id,
+                    attempt=job.attempt,
+                    payload=runtime_payload,
                 )
+
                 loaded = build_classification_loaders(
                     export_zip_path=zip_path,
                     workdir=workdir,
                     model_config=job.model_config,
                     training_config=effective_training_config,
+                    device_type=device.type,
                 )
                 run_status, final_evaluation = run_training(
                     model_config=job.model_config,
@@ -229,7 +413,14 @@ class TrainRunner:
                     should_cancel=should_cancel,
                     on_epoch=on_epoch,
                     on_checkpoint=on_checkpoint,
+                    device=device,
+                    resume_state=resume_state,
                 )
+
+            if checkpoint_writer is not None:
+                checkpoint_writer.flush_and_stop()
+            drain_checkpoint_results()
+
             if run_status == "canceled":
                 self.storage.set_experiment_status(job.project_id, job.experiment_id, "canceled")
                 self.events.append(
@@ -239,6 +430,7 @@ class TrainRunner:
                     self._done_event("canceled", job.attempt, job.job_id),
                 )
                 self.storage.set_run_ended(job.project_id, job.experiment_id, job.attempt)
+                run_logger.log("run_finished status=canceled")
                 return "canceled"
 
             if final_evaluation is not None:
@@ -260,6 +452,7 @@ class TrainRunner:
                 self._done_event("completed", job.attempt, job.job_id),
             )
             self.storage.set_run_ended(job.project_id, job.experiment_id, job.attempt)
+            run_logger.log("run_finished status=completed")
             return "completed"
         except ValueError as exc:
             code = str(exc)
@@ -267,8 +460,13 @@ class TrainRunner:
                 message = "Only classification training is supported in this phase"
             elif code == "unsupported_family":
                 message = "Only resnet_classifier models are supported in this phase"
+            elif code == "batchnorm_small_batch_unsupported":
+                message = "BatchNorm training requires effective batch size >= 2. Increase batch size or enable training.drop_last"
             else:
                 message = code
+            if checkpoint_writer is not None:
+                checkpoint_writer.flush_and_stop()
+                drain_checkpoint_results()
             self.storage.set_experiment_status(job.project_id, job.experiment_id, "failed", error=message)
             self.events.append(
                 job.project_id,
@@ -277,8 +475,12 @@ class TrainRunner:
                 self._done_event("failed", job.attempt, job.job_id, error_code=code, message=message),
             )
             self.storage.set_run_ended(job.project_id, job.experiment_id, job.attempt)
+            run_logger.log(f"run_finished status=failed code={code} message={message}")
             return f"failed:{code}"
         except Exception as exc:
+            if checkpoint_writer is not None:
+                checkpoint_writer.flush_and_stop()
+                drain_checkpoint_results()
             self.storage.set_experiment_status(job.project_id, job.experiment_id, "failed", error=str(exc))
             self.events.append(
                 job.project_id,
@@ -287,4 +489,5 @@ class TrainRunner:
                 self._done_event("failed", job.attempt, job.job_id, error_code="trainer_error", message=str(exc)),
             )
             self.storage.set_run_ended(job.project_id, job.experiment_id, job.attempt)
+            run_logger.log(f"run_finished status=failed code=trainer_error message={exc}")
             return f"failed:trainer_error:{exc}"

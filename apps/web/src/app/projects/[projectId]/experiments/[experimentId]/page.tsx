@@ -9,6 +9,8 @@ import {
   cancelExperiment,
   getExperiment,
   getExperimentEvaluation,
+  getExperimentLogs,
+  getExperimentRuntime,
   listExperimentSamples,
   listProjectModels,
   startExperiment,
@@ -18,6 +20,7 @@ import {
   type ExperimentEvaluationPayload,
   type ExperimentEvaluationSampleRow,
   type ExperimentMetricPoint,
+  type ExperimentRuntimePayload,
   type ExperimentStatus,
   type ProjectExperimentRecord,
 } from "../../../../../lib/api";
@@ -32,6 +35,7 @@ import {
   metricKeyForTask,
 } from "../../../../../lib/workspace/experimentMetrics";
 import { filterPredictionRows, normalizeConfusion } from "../../../../../lib/workspace/experimentDashboard";
+import { mergeLogChunk, runtimeBadgeLabel } from "../../../../../lib/workspace/experimentRuntime";
 
 interface ExperimentDetailPageProps {
   params: {
@@ -95,6 +99,12 @@ function patchNumber(value: string): number | null {
   return parsed;
 }
 
+function asYesNo(value: boolean | null | undefined): string {
+  if (value === true) return "yes";
+  if (value === false) return "no";
+  return "-";
+}
+
 function asEpoch(value: unknown): number | null {
   const parsed = typeof value === "number" ? value : Number.parseInt(String(value), 10);
   if (!Number.isFinite(parsed) || parsed < 1) return null;
@@ -147,6 +157,14 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
   const [evaluation, setEvaluation] = useState<ExperimentEvaluationPayload | null>(null);
   const [evaluationError, setEvaluationError] = useState<string | null>(null);
   const [isEvaluationLoading, setIsEvaluationLoading] = useState(false);
+  const [runtimeInfo, setRuntimeInfo] = useState<ExperimentRuntimePayload | null>(null);
+  const [runtimeError, setRuntimeError] = useState<string | null>(null);
+  const [logsContent, setLogsContent] = useState("");
+  const [logsCursor, setLogsCursor] = useState(0);
+  const [logsError, setLogsError] = useState<string | null>(null);
+  const [isLogsLoading, setIsLogsLoading] = useState(false);
+  const [isLogsExpanded, setIsLogsExpanded] = useState(true);
+  const [logsAutoRefresh, setLogsAutoRefresh] = useState(true);
   const [dashboardChartTab, setDashboardChartTab] = useState<"loss" | "accuracy" | "prf">("loss");
   const [dashboardLogScale, setDashboardLogScale] = useState(false);
   const [confusionNormalize, setConfusionNormalize] = useState<"none" | "by_true" | "by_pred">("none");
@@ -160,9 +178,13 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
   const [cellSamplesMessage, setCellSamplesMessage] = useState<string | null>(null);
   const [selectedSampleImage, setSelectedSampleImage] = useState<ExperimentEvaluationSampleRow | null>(null);
   const eventCursorRef = useRef(0);
+  const logsCursorRef = useRef(0);
+  const logsContentRef = useRef("");
 
   const isEditable = status === "draft" || status === "failed" || status === "canceled";
+  const isRunningLike = status === "running" || status === "queued";
   const task = (typeof draftConfig?.task === "string" ? draftConfig.task : "classification") as string;
+  const runtimeBadge = useMemo(() => runtimeBadgeLabel(runtimeInfo), [runtimeInfo]);
   const primaryMetricKey = metricKeyForTask(task);
   const primaryMetricLabel = primaryMetricKey.replace("val_", "val ");
   const primaryColor = "#2f6fca";
@@ -414,9 +436,79 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
     }
   }, [experimentId, projectId]);
 
+  const loadRuntime = useCallback(async () => {
+    try {
+      const payload = await getExperimentRuntime(projectId, experimentId);
+      setRuntimeInfo(payload);
+      setRuntimeError(null);
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 404) {
+        setRuntimeInfo(null);
+        setRuntimeError(null);
+      } else {
+        setRuntimeInfo(null);
+        setRuntimeError(parseApiErrorMessage(error, "Failed to load runtime info"));
+      }
+    }
+  }, [experimentId, projectId]);
+
+  const fetchLogsChunk = useCallback(
+    async (reset = false) => {
+      setIsLogsLoading(true);
+      try {
+        const chunk = await getExperimentLogs(projectId, experimentId, {
+          fromByte: reset ? 0 : logsCursorRef.current,
+          maxBytes: 65536,
+        });
+        setLogsError(null);
+        const merged = mergeLogChunk(reset ? "" : logsContentRef.current, chunk, { maxBytes: 200 * 1024, maxLines: 5000 });
+        logsContentRef.current = merged.content;
+        logsCursorRef.current = merged.cursor;
+        setLogsContent(merged.content);
+        setLogsCursor(merged.cursor);
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 404) {
+          if (reset) {
+            logsContentRef.current = "";
+            logsCursorRef.current = 0;
+            setLogsCursor(0);
+            setLogsContent("");
+          }
+          setLogsError(null);
+        } else {
+          setLogsError(parseApiErrorMessage(error, "Failed to load training logs"));
+        }
+      } finally {
+        setIsLogsLoading(false);
+      }
+    },
+    [experimentId, projectId],
+  );
+
   useEffect(() => {
     void loadDetail();
   }, [loadDetail]);
+
+  useEffect(() => {
+    void loadRuntime();
+  }, [loadRuntime, status]);
+
+  useEffect(() => {
+    logsCursorRef.current = 0;
+    logsContentRef.current = "";
+    setLogsCursor(0);
+    setLogsContent("");
+    setLogsError(null);
+    void fetchLogsChunk(true);
+  }, [experimentId, fetchLogsChunk]);
+
+  useEffect(() => {
+    if (!logsAutoRefresh || !isRunningLike) return;
+    const timer = window.setInterval(() => {
+      void fetchLogsChunk(false);
+    }, 2000);
+    return () => window.clearInterval(timer);
+  }, [fetchLogsChunk, isRunningLike, logsAutoRefresh]);
 
   useEffect(() => {
     setHasUnsavedDrafts(isEditable && isDirty);
@@ -431,7 +523,7 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
   }, [toastMessage]);
 
   useEffect(() => {
-    if (status !== "running" && status !== "queued") return;
+    if (!isRunningLike) return;
     const stop = streamExperimentEvents(
       projectId,
       experimentId,
@@ -491,7 +583,7 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
       },
     });
     return () => stop();
-  }, [activeAttempt, experimentId, loadDetail, projectId, status]);
+  }, [activeAttempt, experimentId, isRunningLike, loadDetail, projectId]);
 
   function patchConfig(mutator: (next: Record<string, unknown>) => void) {
     setDraftConfig((current) => {
@@ -500,6 +592,10 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
       mutator(next);
       return next;
     });
+  }
+
+  async function handleRefreshLogs() {
+    await fetchLogsChunk(false);
   }
 
   async function handleSave() {
@@ -819,6 +915,7 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
                   </label>
                   <div className="experiment-status-row">
                     <span className={`status-pill status-${status}`}>{status}</span>
+                    {runtimeBadge ? <span className="runtime-pill">{runtimeBadge}</span> : null}
                     <span>Updated: {formatDateTime(savedRecord?.updated_at)}</span>
                   </div>
                   {surfacedRunError ? <p className="project-field-error">Last run error: {surfacedRunError}</p> : null}
@@ -977,6 +1074,51 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
               </section>
 
               <section className="experiment-right-panel">
+                <div className="experiment-card">
+                  <h3>Runtime & Logs</h3>
+                  <div className="experiment-runtime-grid">
+                    <span>Device selected</span>
+                    <strong>{runtimeInfo ? (runtimeBadge ?? runtimeInfo.device_selected.toUpperCase()) : "-"}</strong>
+                    <span>CUDA available</span>
+                    <strong>{asYesNo(runtimeInfo?.cuda_available)}</strong>
+                    <span>MPS available</span>
+                    <strong>{asYesNo(runtimeInfo?.mps_available)}</strong>
+                    <span>AMP enabled</span>
+                    <strong>{asYesNo(runtimeInfo?.amp_enabled)}</strong>
+                    <span>torch</span>
+                    <strong>{runtimeInfo?.torch_version ?? "-"}</strong>
+                    <span>torchvision</span>
+                    <strong>{runtimeInfo?.torchvision_version ?? "-"}</strong>
+                    <span>num_workers</span>
+                    <strong>{runtimeInfo?.num_workers ?? "-"}</strong>
+                    <span>pin_memory</span>
+                    <strong>{asYesNo(runtimeInfo?.pin_memory)}</strong>
+                  </div>
+                  {runtimeError ? <p className="project-field-error">{runtimeError}</p> : null}
+                  <div className="experiment-logs-toolbar">
+                    <button type="button" className="ghost-button" onClick={() => void handleRefreshLogs()} disabled={isLogsLoading}>
+                      {isLogsLoading ? "Refreshing..." : "Refresh logs"}
+                    </button>
+                    <label className="model-builder-checkbox">
+                      <input
+                        type="checkbox"
+                        checked={logsAutoRefresh}
+                        onChange={(event) => setLogsAutoRefresh(event.target.checked)}
+                        disabled={!isRunningLike}
+                      />
+                      <span>Auto-refresh (2s)</span>
+                    </label>
+                    <button type="button" className="ghost-button" onClick={() => setIsLogsExpanded((value) => !value)}>
+                      {isLogsExpanded ? "Collapse logs" : "Expand logs"}
+                    </button>
+                  </div>
+                  {logsError ? <p className="project-field-error">{logsError}</p> : null}
+                  {isLogsExpanded ? (
+                    <pre className="experiment-log-viewer">{logsContent || "No training logs available yet."}</pre>
+                  ) : null}
+                  <p className="experiment-log-cursor">Cursor: {logsCursor}</p>
+                </div>
+
                 <div className="experiment-card">
                   <h3>Checkpoints</h3>
                   <div className="experiment-checkpoint-grid">

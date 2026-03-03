@@ -61,6 +61,14 @@ class ExperimentStorage:
     def checkpoints_dir(self, project_id: str, experiment_id: str, attempt: int) -> Path:
         return self.run_dir(project_id, experiment_id, attempt) / "checkpoints"
 
+    def runtime_path(self, project_id: str, experiment_id: str, attempt: int | None = None) -> Path:
+        if isinstance(attempt, int) and attempt >= 1:
+            return self.run_dir(project_id, experiment_id, attempt) / "runtime.json"
+        return self.experiment_dir(project_id, experiment_id) / "runtime.json"
+
+    def training_log_path(self, project_id: str, experiment_id: str, attempt: int) -> Path:
+        return self.run_dir(project_id, experiment_id, attempt) / "training.log"
+
     def evaluation_path(self, project_id: str, experiment_id: str, attempt: int | None = None) -> Path:
         if isinstance(attempt, int) and attempt >= 1:
             return self.run_dir(project_id, experiment_id, attempt) / "evaluation.json"

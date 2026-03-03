@@ -1550,6 +1550,10 @@ button {
   min-width: 86px;
 }
 
+.experiments-table td .runtime-pill {
+  margin-left: 6px;
+}
+
 .status-pill {
   display: inline-flex;
   align-items: center;
@@ -1562,6 +1566,21 @@ button {
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
+  font-weight: 700;
+}
+
+.runtime-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid #b8c7db;
+  background: #f5f8fc;
+  color: #3a5679;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
   font-weight: 700;
 }
 
@@ -1632,9 +1651,10 @@ button {
 
 .experiment-status-row {
   display: flex;
-  justify-content: space-between;
+  justify-content: flex-start;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
   font-size: 12px;
   color: #496080;
 }
@@ -1646,6 +1666,49 @@ button {
 .experiment-advanced-fields {
   display: grid;
   gap: 8px;
+}
+
+.experiment-runtime-grid {
+  display: grid;
+  grid-template-columns: minmax(120px, auto) minmax(0, 1fr);
+  gap: 6px 10px;
+  align-items: center;
+  font-size: 13px;
+  color: #3e5575;
+}
+
+.experiment-runtime-grid strong {
+  color: #254468;
+}
+
+.experiment-logs-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.experiment-log-viewer {
+  margin: 0;
+  border: 1px solid #d2dae8;
+  border-radius: 10px;
+  background: #f4f7fc;
+  padding: 10px;
+  min-height: 140px;
+  max-height: 280px;
+  overflow: auto;
+  font-family: "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.45;
+  color: #233954;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.experiment-log-cursor {
+  margin: 0;
+  font-size: 11px;
+  color: #5a6f8d;
 }
 
 .experiment-checkpoint-grid {
