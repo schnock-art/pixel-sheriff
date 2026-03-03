@@ -161,7 +161,7 @@ def export_best_classification_onnx(
     model_config: dict[str, Any],
     num_classes: int,
     class_names: list[str],
-    class_order: list[int] | None = None,
+    class_order: list[str] | None = None,
 ) -> OnnxExportResult:
     onnx_dir = storage.run_dir(project_id, experiment_id, attempt) / "onnx"
     onnx_dir.mkdir(parents=True, exist_ok=True)
@@ -244,9 +244,9 @@ def export_best_classification_onnx(
             "checkpoint_uri": checkpoint_uri,
             "model_uri": model_uri,
             "input_shape": [int(v) for v in input_shape],
-            "class_order": [str(name) for name in class_names],
+            "class_order": [str(value) for value in class_order] if isinstance(class_order, list) else [],
             "class_names": [str(name) for name in class_names],
-            "class_ids": [int(value) for value in class_order] if isinstance(class_order, list) else [],
+            "class_ids": [str(value) for value in class_order] if isinstance(class_order, list) else [],
             "preprocess": preprocess,
             "onnx": {
                 "opset_version": 17,

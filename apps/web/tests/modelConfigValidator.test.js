@@ -12,7 +12,7 @@ function buildValidConfig() {
       manifest_id: "manifest-1",
       task: "classification",
       num_classes: 2,
-      class_order: [1, 2],
+      class_order: ["class-1", "class-2"],
       class_names: ["cat", "dog"],
     },
     input: {

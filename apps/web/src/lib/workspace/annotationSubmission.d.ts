@@ -2,7 +2,7 @@ import type { AnnotationStatus } from "../api";
 import type { GeometryObject, ImageBasis } from "./annotationState";
 
 export interface ActiveLabelRow {
-  id: number;
+  id: string;
   name: string;
 }
 
@@ -12,17 +12,17 @@ export interface AnnotationUpsertInput {
   isUnlabeledSelection: boolean;
 }
 
-export function resolveActiveSelection(labelIds: number[], activeLabelRows: ActiveLabelRow[]): number[];
+export function resolveActiveSelection(labelIds: string[], activeLabelRows: ActiveLabelRow[]): string[];
 export function buildClassificationPayload(
   assetId: string,
-  selectedLabelIds: number[],
+  selectedLabelIds: string[],
   activeLabelRows: ActiveLabelRow[],
   objects?: GeometryObject[],
   imageBasis?: ImageBasis | null,
 ):
   | {
       isUnlabeledSelection: boolean;
-      selectedLabelIds: number[];
+      selectedLabelIds: string[];
       objects: GeometryObject[];
       payload_json: Record<string, unknown>;
     }
@@ -30,7 +30,7 @@ export function buildClassificationPayload(
 export function buildAnnotationUpsertInput(params: {
   assetId: string;
   currentStatus: AnnotationStatus;
-  selectedLabelIds: number[];
+  selectedLabelIds: string[];
   activeLabelRows: ActiveLabelRow[];
   objects?: GeometryObject[];
   imageBasis?: ImageBasis | null;

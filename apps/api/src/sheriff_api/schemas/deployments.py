@@ -72,7 +72,7 @@ class PredictRequest(BaseModel):
 
 class PredictPrediction(BaseModel):
     class_index: int = Field(ge=0)
-    class_id: int
+    class_id: str
     class_name: str
     score: float
 

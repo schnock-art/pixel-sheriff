@@ -50,7 +50,7 @@ Local-first CV annotation platform.
   - detection COCO annotations now omit `segmentation` instead of emitting empty lists
 - Project-scoped Phase 1 UI refactor is now implemented:
   - route structure under `/projects/{project_id}/...`
-  - top navigation tabs: `Datasets`, `Models`, `Experiments`, `Deploy` (disabled placeholder)
+  - top navigation tabs: `Labeling`, `Dataset`, `Models`, `Experiments`, `Deploy`
   - project selector dropdown with `+ Create Project` modal
   - datasets `Build Model` CTA creates a project-scoped model draft from latest manifest and opens model detail
   - unsaved draft guard for project/tab/model navigation
@@ -116,14 +116,22 @@ Local-first CV annotation platform.
   - `/projects` resolves to the last/first project or shows create-project empty state
   - project routes:
     - `/projects/{project_id}/datasets`
+    - `/projects/{project_id}/dataset`
     - `/projects/{project_id}/models`
     - `/projects/{project_id}/models/new`
     - `/projects/{project_id}/models/{model_id}`
     - `/projects/{project_id}/experiments`
     - `/projects/{project_id}/experiments/new`
     - `/projects/{project_id}/experiments/{experiment_id}`
-  - top shell project selector + tabs (`Datasets`, `Models`, `Experiments`, disabled `Deploy`)
+    - `/projects/{project_id}/deploy`
+  - top shell project selector + tabs (`Labeling`, `Dataset`, `Models`, `Experiments`, `Deploy`)
   - workspace status line (`images labeled`, `classes`, `models`, `experiments`)
+- Dataset workspace (DatasetVersion v2):
+  - immutable file-backed dataset versions (`datasets/{project_id}/datasets.json`)
+  - version preview + create flow with filter snapshot and seeded split config
+  - active dataset-version pointer with per-version export endpoint
+  - preview/list endpoints support pagination/filter/search without dumping full membership
+- Category/class identity contract uses UUID strings across API/web/trainer/deploy metadata.
 - Models pages support project-scoped create/list/detail plus editable model config drafting/saving
 - Model export contract:
   - `POST /projects/{project_id}/models/{model_id}/exports` creates deterministic JSON export artifacts for enabled ONNX configs
@@ -237,7 +245,7 @@ Local-first CV annotation platform.
   - Geometry edits participate in the same pending/edit-mode submit workflow as classification edits
   - Inline draft warnings clarify when geometry is not committed yet
 - Dataset export (manifest v1.2 + COCO companion):
-  - export record creation/listing
+  - export is pinned to dataset versions (`POST /projects/{project_id}/datasets/versions/{dataset_version_id}/export`)
   - deterministic zip artifact with `manifest.json`, `coco_instances.json`, and `assets/`
   - one-click download from web UI
   - canonical join key is UUID `asset_id` across manifest and COCO
@@ -282,8 +290,27 @@ Trainer CUDA defaults (Docker):
 - override via `.env` if needed:
   - `TRAINER_GPUS=all|none`
   - `TRAINER_PYTORCH_INDEX_URL=https://download.pytorch.org/whl/cu129`
+  - `TRAINER_BASE_IMAGE=python:3.11-slim` (or your prebuilt base image tag)
   - `NVIDIA_VISIBLE_DEVICES=all`
   - `NVIDIA_DRIVER_CAPABILITIES=compute,utility`
+
+Optional: prebuild a reusable trainer CUDA base image (recommended):
+
+```bash
+DOCKER_BUILDKIT=1 docker build \
+  -f apps/trainer/Dockerfile.base \
+  --build-arg PYTORCH_INDEX_URL=https://download.pytorch.org/whl/cu129 \
+  -t pixel-sheriff/trainer-base:cu129 \
+  .
+```
+
+Then set `.env`:
+
+```bash
+TRAINER_BASE_IMAGE=pixel-sheriff/trainer-base:cu129
+```
+
+After that, `docker compose build trainer` reuses the prebuilt CUDA/PyTorch layer and only rebuilds app code layers.
 
 3. Open (`.env.example` defaults):
 
@@ -346,8 +373,19 @@ Trainer CUDA defaults (Docker):
 - `DELETE /api/v1/projects/{project_id}/assets/{asset_id}`
 - `GET /api/v1/assets/{asset_id}/content`
 - `GET/POST /api/v1/projects/{project_id}/annotations`
-- `GET/POST /api/v1/projects/{project_id}/exports`
-- `GET /api/v1/projects/{project_id}/exports/{content_hash}/download`
+- Dataset versions:
+  - `GET /api/v1/projects/{project_id}/datasets/versions`
+  - `POST /api/v1/projects/{project_id}/datasets/versions/preview`
+  - `POST /api/v1/projects/{project_id}/datasets/versions`
+  - `PATCH /api/v1/projects/{project_id}/datasets/active`
+  - `GET /api/v1/projects/{project_id}/datasets/versions/{dataset_version_id}`
+  - `GET /api/v1/projects/{project_id}/datasets/versions/{dataset_version_id}/assets`
+  - `POST /api/v1/projects/{project_id}/datasets/versions/{dataset_version_id}/export`
+  - `GET /api/v1/projects/{project_id}/datasets/versions/{dataset_version_id}/export/download`
+- Legacy exports transition endpoints remain for compatibility and currently return `410 exports_legacy_gone`:
+  - `POST /api/v1/projects/{project_id}/exports`
+  - `GET /api/v1/projects/{project_id}/exports`
+  - `GET /api/v1/projects/{project_id}/exports/{content_hash}/download`
 - `GET/POST /api/v1/projects/{project_id}/models`
 - `GET /api/v1/projects/{project_id}/models/{model_id}`
 - `PUT /api/v1/projects/{project_id}/models/{model_id}`
@@ -362,7 +400,9 @@ Trainer CUDA defaults (Docker):
 - `GET /api/v1/projects/{project_id}/experiments/{experiment_id}/evaluation` (includes top-level `attempt`; returns `evaluation_not_found` when unavailable)
 - `GET /api/v1/projects/{project_id}/experiments/{experiment_id}/samples` (supports mode/class filters + `limit`; includes top-level `attempt`)
 - `GET /api/v1/projects/{project_id}/experiments/{experiment_id}/runtime` (latest runtime info; returns `runtime_not_found` when unavailable)
-- `GET /api/v1/projects/{project_id}/experiments/{experiment_id}/logs` (byte-range tailing for `training.log`; returns `training_log_not_found` when unavailable)
+- `GET /api/v1/projects/{project_id}/experiments/{experiment_id}/logs` (byte-range tailing for `training.log`; returns `logs_not_found` when unavailable)
+- `GET /api/v1/projects/{project_id}/experiments/{experiment_id}/onnx`
+- `GET /api/v1/projects/{project_id}/experiments/{experiment_id}/onnx/download?file=model|metadata`
 - `GET/POST /api/v1/models`
 - `GET /api/v1/assets/{asset_id}/suggestions`
 - `POST /api/v1/projects/{project_id}/suggestions/batch`
@@ -380,7 +420,7 @@ Trainer CUDA defaults (Docker):
 
 - Review/QA workflow
 - Geometry tooling polish (no polygon vertex dragging/edit yet)
-- Deploy section is still a placeholder in the project shell
+- Deploy UX is functional for classification ONNX but still early-stage (limited controls and error guidance)
 - Detection/segmentation trainer implementations are not yet available (classification only for now)
 - MAL inference/generation quality pipeline is still minimal (queue + persistence contracts implemented; model inference integration pending)
 - Shared-asset reference mode (upload-once/link-many)

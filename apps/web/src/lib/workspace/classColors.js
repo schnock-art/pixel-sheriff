@@ -1,7 +1,14 @@
 function normalizedHueForClassId(classId) {
-  if (typeof classId !== "number" || !Number.isFinite(classId)) return 210;
-  const prime = 57;
-  const hue = Math.abs(Math.round(classId) * prime) % 360;
+  if (typeof classId === "number" && Number.isFinite(classId)) {
+    const prime = 57;
+    return Math.abs(Math.round(classId) * prime) % 360;
+  }
+  if (typeof classId !== "string" || classId.trim() === "") return 210;
+  let hash = 0;
+  for (let index = 0; index < classId.length; index += 1) {
+    hash = ((hash << 5) - hash + classId.charCodeAt(index)) | 0;
+  }
+  const hue = Math.abs(hash) % 360;
   return hue;
 }
 

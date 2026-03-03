@@ -26,15 +26,21 @@ def _as_payload_dict(payload_json: Any) -> dict[str, Any]:
     )
 
 
-def _normalize_label_ids(raw_values: Any) -> list[int]:
+def _normalize_label_ids(raw_values: Any) -> list[str]:
     if not isinstance(raw_values, list):
         return []
 
-    values: list[int] = []
-    seen: set[int] = set()
+    values: list[str] = []
+    seen: set[str] = set()
     for value in raw_values:
-        if not isinstance(value, int):
+        if isinstance(value, int):
+            value = str(value)
+        if not isinstance(value, str):
             continue
+        normalized = value.strip()
+        if not normalized:
+            continue
+        value = normalized
         if value in seen:
             continue
         seen.add(value)
@@ -63,7 +69,7 @@ def _normalize_image_basis(payload: dict[str, Any], asset_width: int | None, ass
     return None
 
 
-def _validate_category(category_id: int, allowed_category_ids: set[int], object_id: str | None = None) -> None:
+def _validate_category(category_id: str, allowed_category_ids: set[str], object_id: str | None = None) -> None:
     if category_id not in allowed_category_ids:
         details: dict[str, Any] = {"category_id": category_id}
         if object_id:
@@ -87,7 +93,7 @@ def _validate_in_basis(x: float, y: float, basis: dict[str, int], object_id: str
 def _normalize_geometry_objects(
     raw_objects: Any,
     *,
-    allowed_category_ids: set[int],
+    allowed_category_ids: set[str],
     image_basis: dict[str, int] | None,
 ) -> list[dict[str, Any]]:
     if raw_objects is None:
@@ -109,7 +115,7 @@ def _normalize_geometry_objects(
 
         object_id = raw.get("id")
         kind = raw.get("kind")
-        category_id = raw.get("category_id")
+        raw_category_id = raw.get("category_id")
         if not isinstance(object_id, str) or object_id.strip() == "":
             raise PayloadValidationError(
                 code="annotation_geometry_invalid",
@@ -123,12 +129,15 @@ def _normalize_geometry_objects(
             )
         seen_ids.add(object_id)
 
-        if not isinstance(category_id, int):
+        if isinstance(raw_category_id, int):
+            raw_category_id = str(raw_category_id)
+        if not isinstance(raw_category_id, str) or not raw_category_id.strip():
             raise PayloadValidationError(
                 code="annotation_geometry_invalid",
-                message="Geometry object category_id must be an integer",
+                message="Geometry object category_id must be a UUID string",
                 details={"object_id": object_id},
             )
+        category_id = raw_category_id.strip()
         _validate_category(category_id, allowed_category_ids, object_id)
 
         if kind == "bbox":
@@ -219,7 +228,7 @@ def normalize_annotation_payload(
     payload_json: Any,
     *,
     task_type: TaskType,
-    allowed_category_ids: set[int],
+    allowed_category_ids: set[str],
     asset_width: int | None,
     asset_height: int | None,
 ) -> dict[str, Any]:
@@ -228,34 +237,42 @@ def normalize_annotation_payload(
 
     fallback_category_ids = _normalize_label_ids(payload.get("category_ids"))
     fallback_category_id = payload.get("category_id")
-    if isinstance(fallback_category_id, int) and fallback_category_id not in fallback_category_ids:
+    if isinstance(fallback_category_id, int):
+        fallback_category_id = str(fallback_category_id)
+    if isinstance(fallback_category_id, str):
+        fallback_category_id = fallback_category_id.strip() or None
+    if isinstance(fallback_category_id, str) and fallback_category_id not in fallback_category_ids:
         fallback_category_ids = [fallback_category_id, *fallback_category_ids]
 
     classification = payload.get("classification")
     if isinstance(classification, dict):
         category_ids = _normalize_label_ids(classification.get("category_ids"))
         primary_category_id = classification.get("primary_category_id")
-        if primary_category_id is not None and not isinstance(primary_category_id, int):
+        if isinstance(primary_category_id, int):
+            primary_category_id = str(primary_category_id)
+        if primary_category_id is not None and not isinstance(primary_category_id, str):
             raise PayloadValidationError(
                 code="annotation_payload_invalid",
-                message="classification.primary_category_id must be an integer when provided",
+                message="classification.primary_category_id must be a UUID string when provided",
             )
+        if isinstance(primary_category_id, str):
+            primary_category_id = primary_category_id.strip() or None
         if not category_ids:
             category_ids = fallback_category_ids
-        if primary_category_id is None and isinstance(fallback_category_id, int):
+        if primary_category_id is None and isinstance(fallback_category_id, str):
             primary_category_id = fallback_category_id
     else:
         category_ids = fallback_category_ids
-        primary_category_id = fallback_category_id if isinstance(fallback_category_id, int) else None
+        primary_category_id = fallback_category_id if isinstance(fallback_category_id, str) else None
 
     objects = _normalize_geometry_objects(payload.get("objects"), allowed_category_ids=allowed_category_ids, image_basis=image_basis)
     if not category_ids and objects:
-        category_ids = sorted(
+        category_ids = list(
             dict.fromkeys(
                 [
                     object_value["category_id"]
                     for object_value in objects
-                    if isinstance(object_value.get("category_id"), int)
+                    if isinstance(object_value.get("category_id"), str)
                 ]
             )
         )
@@ -266,7 +283,7 @@ def normalize_annotation_payload(
 
     for category_id in category_ids:
         _validate_category(category_id, allowed_category_ids)
-    category_ids = sorted(dict.fromkeys(category_ids))
+    category_ids = list(dict.fromkeys(category_ids))
     if primary_category_id is not None:
         _validate_category(primary_category_id, allowed_category_ids)
 

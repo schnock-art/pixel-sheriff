@@ -2,7 +2,7 @@ import type { AnnotationStatus } from "../api";
 import type { GeometryObject, ImageBasis } from "./annotationState";
 
 export interface PendingAnnotationLike {
-  labelIds: number[];
+  labelIds: string[];
   status: AnnotationStatus;
   objects?: GeometryObject[];
   imageBasis?: ImageBasis | null;
@@ -18,7 +18,7 @@ export function resolveSelectionForAsset(params: {
   pendingAnnotations: Record<string, PendingAnnotationLike>;
   annotationByAssetId: Map<string, AnnotationLike>;
 }): {
-  labelIds: number[];
+  labelIds: string[];
   status: AnnotationStatus;
   source: "pending" | "committed" | "empty";
 };

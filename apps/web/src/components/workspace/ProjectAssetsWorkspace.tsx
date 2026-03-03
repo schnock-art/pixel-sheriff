@@ -10,7 +10,6 @@ import {
   listDeployments,
   predict,
   createProjectModel,
-  createExport,
   createCategory,
   createProject,
   listAssets,
@@ -72,14 +71,13 @@ export default function ProjectAssetsWorkspace() {
   const [assetIndex, setAssetIndex] = useState(0);
   const [isCreatingLabel, setIsCreatingLabel] = useState(false);
   const [isSavingLabelChanges, setIsSavingLabelChanges] = useState(false);
-  const [isExporting, setIsExporting] = useState(false);
   const [isCreatingModel, setIsCreatingModel] = useState(false);
   const [editMode, setEditMode] = useState(false);
   const { projectMultiLabelSettings, setProjectMultiLabelSettings } = useProjectMultiLabelSettings(PROJECT_MULTILABEL_STORAGE_KEY);
   const [message, setMessage] = useState<string | null>(null);
   const [annotationMode, setAnnotationMode] = useState<WorkspaceAnnotationMode>("labels");
   const [importNewProjectTaskType, setImportNewProjectTaskType] = useState<NewProjectTaskType>("classification_single");
-  const [geometryCategoryId, setGeometryCategoryId] = useState<number | null>(null);
+  const [geometryCategoryId, setGeometryCategoryId] = useState<string | null>(null);
   const [hoveredGeometryObjectId, setHoveredGeometryObjectId] = useState<string | null>(null);
   const [selectedTreeFolderPath, setSelectedTreeFolderPath] = useState<string | null>(null);
   const [collapsedFolders, setCollapsedFolders] = useState<Record<string, boolean>>({});
@@ -105,7 +103,7 @@ export default function ProjectAssetsWorkspace() {
     items: Array<{ deployment_id: string; name: string; device_preference: string; status: string }>;
   }>({ active_deployment_id: null, items: [] });
   const [suggestionPredictions, setSuggestionPredictions] = useState<
-    Array<{ class_id: number; class_name: string; score: number }>
+    Array<{ class_id: string; class_name: string; score: number }>
   >([]);
   const [lastInferenceDeviceSelected, setLastInferenceDeviceSelected] = useState<string | null>(null);
   const [isSuggesting, setIsSuggesting] = useState(false);
@@ -176,7 +174,7 @@ export default function ProjectAssetsWorkspace() {
   }));
   const activeLabelRows = allLabelRows.filter((label) => label.isActive).sort((a, b) => a.displayOrder - b.displayOrder);
   const labelNameById = useMemo(() => {
-    const map = new Map<number, string>();
+    const map = new Map<string, string>();
     for (const label of allLabelRows) map.set(label.id, label.name);
     return map;
   }, [allLabelRows]);
@@ -458,7 +456,7 @@ export default function ProjectAssetsWorkspace() {
   const effectiveSelectedLabelIds =
     annotationMode === "labels" ? selectedLabelIds : defaultGeometryCategoryId ? [defaultGeometryCategoryId] : [];
 
-  function handleToggleLabelForCurrentMode(labelId: number) {
+  function handleToggleLabelForCurrentMode(labelId: string) {
     if (annotationMode === "labels") {
       handleToggleLabel(labelId);
       return;
@@ -501,7 +499,7 @@ export default function ProjectAssetsWorkspace() {
   }
 
   async function handleSaveLabelChanges(
-    changes: Array<{ id: number; name: string; isActive: boolean; displayOrder: number }>,
+    changes: Array<{ id: string; name: string; isActive: boolean; displayOrder: number }>,
   ) {
     try {
       setIsSavingLabelChanges(true);
@@ -673,40 +671,6 @@ export default function ProjectAssetsWorkspace() {
     picker.click();
   }
 
-  async function handleExport() {
-    if (!selectedProjectId) {
-      setMessage("Select a project before exporting.");
-      return;
-    }
-
-    try {
-      setIsExporting(true);
-      setMessage("Building export...");
-      const created = await createExport(selectedProjectId, {
-        selection_criteria_json: { statuses: ["labeled", "approved", "needs_review", "skipped"] },
-      });
-
-      const url = resolveAssetUri(created.export_uri);
-      const anchor = document.createElement("a");
-      anchor.href = url;
-      anchor.download = `${selectedProjectName.replace(/[^a-zA-Z0-9-_]+/g, "_") || "dataset"}-${created.hash.slice(0, 8)}.zip`;
-      document.body.appendChild(anchor);
-      anchor.click();
-      anchor.remove();
-
-      const counts = created.manifest_json.counts as Record<string, number> | undefined;
-      if (counts && typeof counts.assets === "number" && typeof counts.annotations === "number") {
-        setMessage(`Export ready. ${counts.assets} assets, ${counts.annotations} annotations.`);
-      } else {
-        setMessage("Export ready.");
-      }
-    } catch (error) {
-      setMessage(error instanceof Error ? `Export failed: ${error.message}` : "Export failed.");
-    } finally {
-      setIsExporting(false);
-    }
-  }
-
   function handleBuildModel() {
     if (!selectedProjectId) {
       setMessage("Select a project before building a model.");
@@ -763,7 +727,7 @@ export default function ProjectAssetsWorkspace() {
     }
   }
 
-  function handleApplySuggestedLabel(categoryId: number) {
+  function handleApplySuggestedLabel(categoryId: string) {
     clearSelectedLabels();
     handleToggleLabelForCurrentMode(categoryId);
   }
@@ -929,7 +893,6 @@ export default function ProjectAssetsWorkspace() {
 
         <ProjectAssetsFooterActions
           isImporting={isImporting}
-          isExporting={isExporting}
           selectedProjectId={selectedProjectId}
           isDeletingAssets={isDeletingAssets}
           hasCurrentAsset={Boolean(currentAsset)}
@@ -940,7 +903,6 @@ export default function ProjectAssetsWorkspace() {
           isDeletingProject={isDeletingProject}
           isCreatingModel={isCreatingModel}
           onImport={handleImport}
-          onExport={handleExport}
           onDeleteCurrentAsset={handleDeleteCurrentAsset}
           onToggleBulkDeleteMode={handleToggleBulkDeleteMode}
           onDeleteSelectedAssets={handleDeleteSelectedAssets}

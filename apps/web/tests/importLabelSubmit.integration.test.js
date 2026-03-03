@@ -27,13 +27,13 @@ test("import -> label -> submit workflow composes valid paths and annotation pay
   const relativePaths = imageFiles.map((file) => buildTargetRelativePath(file, "train/cats"));
   assert.deepEqual(relativePaths, ["train/cats/a.jpg", "train/cats/nested/b.png"]);
 
-  const activeLabelRows = [{ id: 7, name: "cat" }, { id: 8, name: "dog" }];
+  const activeLabelRows = [{ id: "7", name: "cat" }, { id: "8", name: "dog" }];
 
   const firstCommitted = getCommittedSelectionState(null);
   const firstDraftUpsert = buildAnnotationUpsertInput({
     assetId: "asset-a",
     currentStatus: firstCommitted.status,
-    selectedLabelIds: [7],
+    selectedLabelIds: ["7"],
     activeLabelRows,
   });
   assert.equal(
@@ -41,17 +41,17 @@ test("import -> label -> submit workflow composes valid paths and annotation pay
       pendingCount: 0,
       editMode: false,
       hasCurrentAsset: true,
-      draftState: { labelIds: [7], status: firstDraftUpsert.status },
+      draftState: { labelIds: ["7"], status: firstDraftUpsert.status },
       committedState: firstCommitted,
     }),
     true,
   );
   assert.equal(firstDraftUpsert.status, "labeled");
-  assert.equal(firstDraftUpsert.payload_json.category_id, 7);
+  assert.equal(firstDraftUpsert.payload_json.category_id, "7");
 
   const secondCommitted = getCommittedSelectionState({
     status: "approved",
-    payload_json: { category_ids: [7] },
+    payload_json: { category_ids: ["7"] },
   });
   const secondDraftUpsert = buildAnnotationUpsertInput({
     assetId: "asset-b",

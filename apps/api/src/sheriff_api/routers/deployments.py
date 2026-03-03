@@ -183,7 +183,13 @@ async def predict_classification(
             code="deployment_class_mapping_invalid",
             message="Deployment metadata is missing class_ids",
         )
-    class_ids = [int(value) for value in class_ids_raw if isinstance(value, int)]
+    if any(isinstance(value, int) for value in class_ids_raw):
+        raise api_error(
+            status_code=409,
+            code="deployment_legacy_metadata_incompatible",
+            message="Deployment metadata uses legacy integer class_ids. Redeploy from a new dataset version.",
+        )
+    class_ids = [str(value).strip() for value in class_ids_raw if isinstance(value, str) and value.strip()]
     if not class_ids:
         raise api_error(
             status_code=409,
@@ -194,7 +200,7 @@ async def predict_classification(
     categories = (
         await db.execute(select(Category.id, Category.name).where(Category.project_id == project_id))
     ).all()
-    category_name_by_id = {int(row[0]): str(row[1]) for row in categories}
+    category_name_by_id = {str(row[0]): str(row[1]) for row in categories}
     if any(class_id not in category_name_by_id for class_id in class_ids):
         raise api_error(
             status_code=409,

@@ -167,6 +167,7 @@ class ProjectExperimentRecord(ProjectExperimentSummary):
 class ProjectExperimentCreate(BaseModel):
     model_id: str
     name: str | None = None
+    dataset_version_id: str | None = None
     config_overrides: dict[str, Any] | None = None
 
 

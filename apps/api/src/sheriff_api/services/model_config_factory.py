@@ -44,13 +44,16 @@ def _load_schema() -> dict[str, Any]:
     raise ModelConfigValidationError("ModelConfig schema file is missing or empty")
 
 
-def _as_int_list(value: Any) -> list[int]:
+def _as_str_list(value: Any) -> list[str]:
     if not isinstance(value, list):
         return []
-    result: list[int] = []
+    result: list[str] = []
     for item in value:
         if isinstance(item, int):
-            result.append(item)
+            result.append(str(item))
+            continue
+        if isinstance(item, str) and item.strip():
+            result.append(item.strip())
     return result
 
 
@@ -71,12 +74,12 @@ def _normalize_task(raw_task: Any) -> str:
     return normalized
 
 
-def _resolve_classes(manifest: dict[str, Any]) -> tuple[list[int], list[str]]:
+def _resolve_classes(manifest: dict[str, Any]) -> tuple[list[str], list[str]]:
     label_schema = manifest.get("label_schema")
     if not isinstance(label_schema, dict):
         raise ManifestConfigError("manifest.label_schema is required")
 
-    class_order = _as_int_list(label_schema.get("class_order"))
+    class_order = _as_str_list(label_schema.get("class_order"))
     if not class_order:
         raise ManifestConfigError("manifest.label_schema.class_order must contain at least one class id")
 
@@ -84,12 +87,14 @@ def _resolve_classes(manifest: dict[str, Any]) -> tuple[list[int], list[str]]:
     if not isinstance(classes_raw, list):
         raise ManifestConfigError("manifest.label_schema.classes must be an array")
 
-    class_name_by_id: dict[int, str] = {}
+    class_name_by_id: dict[str, str] = {}
     for row in classes_raw:
         if not isinstance(row, dict):
             continue
         class_id = row.get("id")
-        if not isinstance(class_id, int):
+        if isinstance(class_id, int):
+            class_id = str(class_id)
+        if not isinstance(class_id, str):
             continue
         if isinstance(row.get("name"), str) and row["name"].strip():
             class_name_by_id[class_id] = row["name"].strip()

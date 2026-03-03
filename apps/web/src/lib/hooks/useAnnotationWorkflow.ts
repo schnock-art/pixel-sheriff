@@ -23,14 +23,14 @@ import {
 export interface GeometryBBoxObject {
   id: string;
   kind: "bbox";
-  category_id: number;
+  category_id: string;
   bbox: number[];
 }
 
 export interface GeometryPolygonObject {
   id: string;
   kind: "polygon";
-  category_id: number;
+  category_id: string;
   segmentation: number[][];
 }
 
@@ -42,14 +42,14 @@ export interface ImageBasis {
 }
 
 export interface PendingAnnotation {
-  labelIds: number[];
+  labelIds: string[];
   status: AnnotationStatus;
   objects: GeometryObject[];
   imageBasis: ImageBasis | null;
 }
 
 interface LabelRow {
-  id: number;
+  id: string;
   name: string;
 }
 
@@ -89,7 +89,7 @@ export function useAnnotationWorkflow({
   setAnnotations,
   setMessage,
 }: UseAnnotationWorkflowParams) {
-  const [selectedLabelIds, setSelectedLabelIds] = useState<number[]>([]);
+  const [selectedLabelIds, setSelectedLabelIds] = useState<string[]>([]);
   const [currentStatus, setCurrentStatus] = useState<AnnotationStatus>("unlabeled");
   const [pendingAnnotations, setPendingAnnotations] = useState<Record<string, PendingAnnotation>>({});
   const [isSaving, setIsSaving] = useState(false);
@@ -210,7 +210,7 @@ export function useAnnotationWorkflow({
     });
   }
 
-  function stageLabelSelection(nextLabelIds: number[]) {
+  function stageLabelSelection(nextLabelIds: string[]) {
     if (!currentAsset) return;
     const normalizedLabelIds = normalizeLabelIds(nextLabelIds);
     const draftState: PendingAnnotation = {
@@ -225,7 +225,7 @@ export function useAnnotationWorkflow({
     stageCurrentDraft(draftState);
   }
 
-  function getNextToggledLabels(labelId: number): number[] {
+  function getNextToggledLabels(labelId: string): string[] {
     if (multiLabelEnabled) {
       return selectedLabelIds.includes(labelId)
         ? selectedLabelIds.filter((value) => value !== labelId)
@@ -234,7 +234,7 @@ export function useAnnotationWorkflow({
     return selectedLabelIds.length === 1 && selectedLabelIds[0] === labelId ? [] : [labelId];
   }
 
-  function handleToggleLabel(id: number) {
+  function handleToggleLabel(id: string) {
     if (!currentAsset) return;
     stageLabelSelection(getNextToggledLabels(id));
   }
@@ -279,7 +279,7 @@ export function useAnnotationWorkflow({
     setSelectedObjectId(null);
   }
 
-  function assignSelectedGeometryCategory(categoryId: number) {
+  function assignSelectedGeometryCategory(categoryId: string) {
     if (!selectedObjectId) return;
     const next = currentObjects.map((object) =>
       object.id === selectedObjectId ? { ...object, category_id: categoryId } : object,

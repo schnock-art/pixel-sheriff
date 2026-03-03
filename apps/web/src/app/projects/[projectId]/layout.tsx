@@ -205,7 +205,14 @@ function ProjectRouteLayout({ children }: ProjectRouteLayoutProps) {
                 className={currentSection === "datasets" ? "project-nav-tab active" : "project-nav-tab"}
                 onClick={() => handleTabSelect("datasets")}
               >
-                Datasets
+                Labeling
+              </button>
+              <button
+                type="button"
+                className={currentSection === "dataset" ? "project-nav-tab active" : "project-nav-tab"}
+                onClick={() => handleTabSelect("dataset")}
+              >
+                Dataset
               </button>
               <button
                 type="button"

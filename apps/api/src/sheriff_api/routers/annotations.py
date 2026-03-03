@@ -21,9 +21,10 @@ async def upsert_annotation(project_id: str, payload: AnnotationUpsert, db: Asyn
     if asset is None or asset.project_id != project_id:
         raise api_error(status_code=404, code="not_found", message="Asset not found in project")
 
-    category_ids = set(
-        list((await db.execute(select(Category.id).where(Category.project_id == project_id))).scalars().all())
-    )
+    category_ids = {
+        str(value)
+        for value in list((await db.execute(select(Category.id).where(Category.project_id == project_id))).scalars().all())
+    }
 
     try:
         normalized_payload = normalize_annotation_payload(

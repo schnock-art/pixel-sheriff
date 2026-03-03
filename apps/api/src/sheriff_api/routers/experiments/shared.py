@@ -2,18 +2,19 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sheriff_api.config import get_settings
-from sheriff_api.db.models import DatasetVersion, Project
+from sheriff_api.db.models import Annotation, Asset, Project
 from sheriff_api.errors import api_error
 from sheriff_api.schemas.experiments import ExperimentSampleItem, ProjectExperimentRecord, ProjectExperimentSummary, TrainingConfigV0
-from sheriff_api.services.dataset_export_pipeline import build_export_bundle, prepare_export_inputs
+from sheriff_api.services.dataset_store import DatasetStore
 from sheriff_api.services.experiment_store import ExperimentStore
-from sheriff_api.services.exporter_coco import ExportValidationError
+from sheriff_api.services.exporter_coco import ExportValidationError, build_export_result
 from sheriff_api.services.model_store import ProjectModelStore, create_project_model_store
 from sheriff_api.services.storage import LocalStorage
 from sheriff_api.services.train_queue import TrainQueue
@@ -32,6 +33,7 @@ except Exception:
 
 settings = get_settings()
 model_store: ProjectModelStore = create_project_model_store(settings.storage_root)
+dataset_store = DatasetStore(settings.storage_root)
 experiment_store = ExperimentStore(settings.storage_root)
 storage = LocalStorage(settings.storage_root)
 train_queue = TrainQueue()
@@ -218,83 +220,218 @@ def as_sample_item(row: dict[str, Any]) -> ExperimentSampleItem:
     )
 
 
+def _map_uuid_payload_to_coco_int(payload_json: dict[str, Any], class_to_coco: dict[str, int]) -> dict[str, Any]:
+    payload = dict(payload_json)
+
+    def map_one(value: Any) -> Any:
+        if isinstance(value, str) and value in class_to_coco:
+            return class_to_coco[value]
+        return value
+
+    def map_many(values: Any) -> Any:
+        if not isinstance(values, list):
+            return values
+        mapped: list[int] = []
+        for value in values:
+            converted = map_one(value)
+            if isinstance(converted, int):
+                mapped.append(converted)
+        return mapped
+
+    payload["category_id"] = map_one(payload.get("category_id"))
+    payload["category_ids"] = map_many(payload.get("category_ids"))
+
+    classification = payload.get("classification")
+    if isinstance(classification, dict):
+        classification["primary_category_id"] = map_one(classification.get("primary_category_id"))
+        classification["category_ids"] = map_many(classification.get("category_ids"))
+
+    coco = payload.get("coco")
+    if isinstance(coco, dict):
+        coco["category_id"] = map_one(coco.get("category_id"))
+
+    objects = payload.get("objects")
+    if isinstance(objects, list):
+        for item in objects:
+            if not isinstance(item, dict):
+                continue
+            item["category_id"] = map_one(item.get("category_id"))
+    return payload
+
+
+def _load_asset_bytes(local_storage: LocalStorage, asset: dict[str, Any]) -> bytes | None:
+    storage_uri = asset.get("storage_uri")
+    if not isinstance(storage_uri, str) or not storage_uri:
+        return None
+    try:
+        path = local_storage.resolve(storage_uri)
+    except ValueError:
+        return None
+    if not path.exists() or not path.is_file():
+        return None
+    return path.read_bytes()
+
+
 async def ensure_dataset_export_zip(
     *,
     db: AsyncSession,
     project: Project,
-    dataset_version: DatasetVersion,
+    dataset_version: dict[str, Any],
 ) -> dict[str, Any]:
-    content_hash = str(dataset_version.hash)
-    relpath = f"exports/{project.id}/{content_hash}.zip"
-    path = storage.resolve(relpath)
-    if path.exists():
-        return {
-            "content_hash": content_hash,
-            "zip_relpath": relpath,
-            "dataset_version_id": dataset_version.id,
-        }
+    dataset_version_id = str(dataset_version.get("dataset_version_id") or "")
+    if not dataset_version_id:
+        raise api_error(
+            status_code=422,
+            code="dataset_version_not_found",
+            message="Dataset version payload is invalid",
+            details={"project_id": project.id},
+        )
 
-    selection_criteria = (
-        dataset_version.selection_criteria_json if isinstance(dataset_version.selection_criteria_json, dict) else {}
-    )
-    export_inputs = await prepare_export_inputs(
-        db=db,
-        project_id=project.id,
-        selection_criteria=selection_criteria,
-    )
+    existing_artifact = dataset_store.get_export_artifact(project.id, dataset_version_id)
+    if isinstance(existing_artifact, dict) and isinstance(existing_artifact.get("hash"), str):
+        content_hash = existing_artifact["hash"]
+        relpath = f"exports/{project.id}/{content_hash}.zip"
+        if storage.resolve(relpath).exists():
+            return {
+                "content_hash": content_hash,
+                "zip_relpath": relpath,
+                "dataset_version_id": dataset_version_id,
+            }
+
+    class_order = dataset_version.get("labels", {}).get("label_schema", {}).get("class_order")
+    classes = dataset_version.get("labels", {}).get("label_schema", {}).get("classes")
+    if not isinstance(class_order, list) or not isinstance(classes, list):
+        raise api_error(
+            status_code=422,
+            code="dataset_split_invalid",
+            message="Dataset label schema is invalid",
+            details={"project_id": project.id, "dataset_version_id": dataset_version_id},
+        )
+
+    class_to_coco: dict[str, int] = {}
+    class_name_by_id: dict[str, str] = {}
+    for row in classes:
+        if not isinstance(row, dict):
+            continue
+        category_id = row.get("category_id")
+        name = row.get("name")
+        if isinstance(category_id, str) and isinstance(name, str):
+            class_name_by_id[category_id] = name
+
+    categories_for_export: list[dict[str, Any]] = []
+    for index, category_id in enumerate(class_order):
+        if not isinstance(category_id, str):
+            continue
+        class_to_coco[category_id] = index + 1
+        categories_for_export.append(
+            {
+                "id": index + 1,
+                "stable_id": category_id,
+                "name": class_name_by_id.get(category_id, f"class_{index + 1}"),
+                "display_order": index,
+                "is_active": True,
+            }
+        )
+
+    selected_asset_ids = dataset_version.get("assets", {}).get("asset_ids")
+    if not isinstance(selected_asset_ids, list):
+        selected_asset_ids = []
+    selected_asset_id_set = {str(item) for item in selected_asset_ids}
+
+    assets = list((await db.execute(select(Asset).where(Asset.project_id == project.id))).scalars().all())
+    annotations = list((await db.execute(select(Annotation).where(Annotation.project_id == project.id))).scalars().all())
+    selected_assets = [asset for asset in assets if asset.id in selected_asset_id_set]
+    selected_annotations = [annotation for annotation in annotations if annotation.asset_id in selected_asset_id_set]
+
+    selection_criteria = dataset_version.get("selection", {}).get("filters", {})
+    if not isinstance(selection_criteria, dict):
+        selection_criteria = {}
+
     try:
-        rebuilt = build_export_bundle(
-            project=project,
+        _manifest, _coco, content_hash, zip_bytes = build_export_result(
+            project_id=project.id,
+            project_name=project.name,
+            task_type=project.task_type,
             selection_criteria=selection_criteria,
-            inputs=export_inputs,
-            storage=storage,
+            categories=categories_for_export,
+            assets=[
+                {
+                    "id": asset.id,
+                    "uri": asset.uri,
+                    "type": asset.type.value,
+                    "width": asset.width,
+                    "height": asset.height,
+                    "checksum": asset.checksum,
+                    "relative_path": (asset.metadata_json or {}).get("relative_path")
+                    if isinstance(asset.metadata_json, dict)
+                    else None,
+                    "original_filename": (asset.metadata_json or {}).get("original_filename")
+                    if isinstance(asset.metadata_json, dict)
+                    else None,
+                    "storage_uri": (asset.metadata_json or {}).get("storage_uri")
+                    if isinstance(asset.metadata_json, dict)
+                    else None,
+                    "extension": Path(str((asset.metadata_json or {}).get("storage_uri", ""))).suffix.lower()
+                    if isinstance(asset.metadata_json, dict)
+                    else "",
+                }
+                for asset in selected_assets
+            ],
+            annotations=[
+                {
+                    "id": annotation.id,
+                    "asset_id": annotation.asset_id,
+                    "status": annotation.status.value,
+                    "payload": _map_uuid_payload_to_coco_int(
+                        annotation.payload_json if isinstance(annotation.payload_json, dict) else {},
+                        class_to_coco,
+                    ),
+                    "created_at": annotation.created_at,
+                    "updated_at": annotation.updated_at,
+                    "annotated_by": annotation.annotated_by,
+                }
+                for annotation in selected_annotations
+            ],
+            load_asset_bytes=lambda asset: _load_asset_bytes(storage, asset),
         )
     except ExportValidationError as exc:
         raise api_error(status_code=422, code=exc.code, message=exc.message, details=exc.details) from exc
 
-    if rebuilt.content_hash != content_hash:
-        raise api_error(
-            status_code=409,
-            code="dataset_export_hash_mismatch",
-            message="Dataset export could not be rebuilt deterministically for this dataset version",
-            details={
-                "dataset_version_id": dataset_version.id,
-                "expected_hash": content_hash,
-                "actual_hash": rebuilt.content_hash,
-            },
-        )
-    storage.write_bytes(relpath, rebuilt.zip_bytes)
+    relpath = f"exports/{project.id}/{content_hash}.zip"
+    storage.write_bytes(relpath, zip_bytes)
+    dataset_store.set_export_artifact(
+        project.id,
+        dataset_version_id,
+        {
+            "hash": content_hash,
+            "export_uri": f"/api/v1/projects/{project.id}/datasets/versions/{dataset_version_id}/export/download",
+        },
+    )
     return {
         "content_hash": content_hash,
         "zip_relpath": relpath,
-        "dataset_version_id": dataset_version.id,
+        "dataset_version_id": dataset_version_id,
     }
 
 
-async def latest_dataset_version(db: AsyncSession, project_id: str) -> DatasetVersion | None:
-    return (
-        (
-            await db.execute(
-                select(DatasetVersion)
-                .where(DatasetVersion.project_id == project_id)
-                .order_by(DatasetVersion.created_at.desc()),
-            )
-        )
-        .scalars()
-        .first()
-    )
+async def latest_dataset_version(_db: AsyncSession, project_id: str) -> dict[str, Any] | None:
+    listed = dataset_store.list_versions(project_id)
+    active_dataset_version_id = listed.get("active_dataset_version_id")
+    if isinstance(active_dataset_version_id, str):
+        loaded = dataset_store.get_version(project_id, active_dataset_version_id)
+        if loaded is not None:
+            return loaded["version"]
+
+    items = listed.get("items")
+    if isinstance(items, list) and items:
+        first = items[0]
+        if isinstance(first, dict) and isinstance(first.get("version"), dict):
+            return first["version"]
+    return None
 
 
-async def get_dataset_version(db: AsyncSession, project_id: str, dataset_version_id: str) -> DatasetVersion | None:
-    return (
-        (
-            await db.execute(
-                select(DatasetVersion).where(
-                    DatasetVersion.id == dataset_version_id,
-                    DatasetVersion.project_id == project_id,
-                )
-            )
-        )
-        .scalars()
-        .first()
-    )
+async def get_dataset_version(_db: AsyncSession, project_id: str, dataset_version_id: str) -> dict[str, Any] | None:
+    loaded = dataset_store.get_version(project_id, dataset_version_id)
+    if loaded is None:
+        return None
+    return loaded["version"]

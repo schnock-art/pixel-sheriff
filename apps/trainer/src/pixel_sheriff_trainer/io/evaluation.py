@@ -43,7 +43,7 @@ def write_classification_evaluation(
     project_id: str,
     experiment_id: str,
     attempt: int,
-    class_order: list[int],
+    class_order: list[str],
     class_names: list[str],
     evaluation: ClassifierEvaluation,
     sample_bucket_limit: int = SAMPLE_BUCKET_LIMIT,
@@ -53,12 +53,12 @@ def write_classification_evaluation(
     per_class_rows: list[dict[str, Any]] = []
     for row in evaluation.per_class:
         class_index = int(row.class_index)
-        class_id = class_order[class_index] if 0 <= class_index < len(class_order) else class_index
+        class_id = class_order[class_index] if 0 <= class_index < len(class_order) else str(class_index)
         class_name = class_names[class_index] if 0 <= class_index < len(class_names) else f"class_{class_id}"
         per_class_rows.append(
             {
                 "class_index": class_index,
-                "class_id": int(class_id),
+                "class_id": str(class_id),
                 "name": class_name,
                 "precision": float(row.precision),
                 "recall": float(row.recall),
@@ -76,7 +76,7 @@ def write_classification_evaluation(
         "split": "val",
         "num_samples": len(prediction_rows),
         "classes": {
-            "class_order": [int(class_id) for class_id in class_order],
+            "class_order": [str(class_id) for class_id in class_order],
             "class_names": [str(name) for name in class_names],
             "id_to_index": class_id_to_index,
         },

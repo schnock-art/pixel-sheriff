@@ -2,10 +2,13 @@ function normalizeLabelIds(labelIds) {
   const normalized = [];
   const seen = new Set();
   for (const value of labelIds) {
-    if (typeof value !== "number" || !Number.isFinite(value)) continue;
-    if (seen.has(value)) continue;
-    seen.add(value);
-    normalized.push(value);
+    let next = value;
+    if (typeof next === "number" && Number.isFinite(next)) next = String(next);
+    if (typeof next !== "string") continue;
+    next = next.trim();
+    if (!next || seen.has(next)) continue;
+    seen.add(next);
+    normalized.push(next);
   }
   return normalized;
 }
@@ -22,7 +25,10 @@ function readAnnotationLabelIds(payload) {
 
     const primaryCategoryId = classification.primary_category_id;
     if (typeof primaryCategoryId === "number" && Number.isFinite(primaryCategoryId)) {
-      return [primaryCategoryId];
+      return [String(primaryCategoryId)];
+    }
+    if (typeof primaryCategoryId === "string" && primaryCategoryId.trim() !== "") {
+      return [primaryCategoryId.trim()];
     }
   }
 
@@ -33,7 +39,10 @@ function readAnnotationLabelIds(payload) {
 
   const categoryId = payload.category_id;
   if (typeof categoryId === "number" && Number.isFinite(categoryId)) {
-    return [categoryId];
+    return [String(categoryId)];
+  }
+  if (typeof categoryId === "string" && categoryId.trim() !== "") {
+    return [categoryId.trim()];
   }
 
   return [];
@@ -78,8 +87,10 @@ function normalizeAnnotationObjects(objects) {
     const id = typeof item.id === "string" && item.id.trim() !== "" ? item.id : null;
     if (!id || seenIds.has(id)) continue;
     const kind = item.kind;
-    const categoryId = item.category_id;
-    if (typeof categoryId !== "number" || !Number.isFinite(categoryId)) continue;
+    let categoryId = item.category_id;
+    if (typeof categoryId === "number" && Number.isFinite(categoryId)) categoryId = String(categoryId);
+    if (typeof categoryId !== "string" || categoryId.trim() === "") continue;
+    categoryId = categoryId.trim();
 
     if (kind === "bbox") {
       const bbox = item.bbox;
@@ -131,7 +142,7 @@ function deriveNextAnnotationStatus(currentStatus, labelIds, objectCount = 0) {
 function comparableLabelIds(labelIds) {
   return normalizeLabelIds(labelIds)
     .slice()
-    .sort((a, b) => a - b);
+    .sort();
 }
 
 function areSelectionStatesEqual(left, right) {

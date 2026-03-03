@@ -215,9 +215,12 @@ def build_export_result(
             )
         class_names_seen.add(normalized_name)
         aliases = [display_name] if display_name != normalized_name else []
+        stable_id = cat.get("stable_id")
+        stable_id_value = stable_id.strip() if isinstance(stable_id, str) and stable_id.strip() else None
         classes.append(
             {
                 "id": class_id,
+                "stable_id": stable_id_value,
                 "name": normalized_name,
                 "display_name": display_name,
                 "supercategory": None,

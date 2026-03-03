@@ -6,14 +6,14 @@ import { getClassColor } from "../lib/workspace/classColors";
 export type AnnotationMode = "labels" | "bbox" | "segmentation";
 
 interface LabelItem {
-  id: number;
+  id: string;
   name: string;
   isActive: boolean;
   displayOrder: number;
 }
 
 interface ManageLabelItem {
-  id: number;
+  id: string;
   name: string;
   isActive: boolean;
   displayOrder: number;
@@ -22,15 +22,15 @@ interface ManageLabelItem {
 interface GeometryObjectListItem {
   id: string;
   kind: "bbox" | "polygon";
-  categoryId: number;
+  categoryId: string;
   categoryName: string;
 }
 
 interface LabelPanelProps {
   labels: LabelItem[];
   allLabels: LabelItem[];
-  selectedLabelIds: number[];
-  onToggleLabel: (id: number) => void;
+  selectedLabelIds: string[];
+  onToggleLabel: (id: string) => void;
   onClearLabels: () => void;
   onSubmit: () => void;
   isSaving: boolean;
@@ -57,11 +57,11 @@ interface LabelPanelProps {
   activeDeploymentName?: string | null;
   activeDeploymentDevicePreference?: string | null;
   lastInferenceDeviceSelected?: string | null;
-  suggestionPredictions?: Array<{ class_id: number; class_name: string; score: number }>;
+  suggestionPredictions?: Array<{ class_id: string; class_name: string; score: number }>;
   isSuggesting?: boolean;
   hasActiveDeployment?: boolean;
   onSuggest?: () => void;
-  onApplySuggestedLabel?: (categoryId: number) => void;
+  onApplySuggestedLabel?: (categoryId: string) => void;
 }
 
 export function LabelPanel({
@@ -133,7 +133,7 @@ export function LabelPanel({
     setDraftLabels(next);
   }
 
-  function updateDraft(id: number, patch: Partial<ManageLabelItem>) {
+  function updateDraft(id: string, patch: Partial<ManageLabelItem>) {
     setDraftLabels((previous) => previous.map((item) => (item.id === id ? { ...item, ...patch } : item)));
   }
 

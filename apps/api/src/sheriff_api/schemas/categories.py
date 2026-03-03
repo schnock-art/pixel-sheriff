@@ -13,7 +13,7 @@ class CategoryUpdate(BaseModel):
 
 
 class CategoryRead(BaseModel):
-    id: int
+    id: str
     project_id: str
     name: str
     display_order: int

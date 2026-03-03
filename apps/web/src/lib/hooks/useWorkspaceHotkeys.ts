@@ -3,7 +3,7 @@ import { useEffect } from "react";
 import { resolveWorkspaceHotkeyAction } from "../workspace/hotkeys";
 
 interface LabelRow {
-  id: number;
+  id: string;
 }
 
 type AnnotationMode = "labels" | "bbox" | "segmentation";
@@ -15,7 +15,7 @@ interface UseWorkspaceHotkeysParams {
   selectedObjectId: string | null;
   onPrev: () => void;
   onNext: () => void;
-  onLabelHotkey: (labelId: number, selectedObjectId: string | null) => void;
+  onLabelHotkey: (labelId: string, selectedObjectId: string | null) => void;
 }
 
 export function useWorkspaceHotkeys({

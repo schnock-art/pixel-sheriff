@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sheriff_api.config import get_settings
-from sheriff_api.db.models import Asset, DatasetVersion, Model, Project, Suggestion
+from sheriff_api.db.models import Asset, Model, Project, Suggestion
 from sheriff_api.db.session import get_db
 from sheriff_api.errors import api_error
 from sheriff_api.schemas.models import (
@@ -30,12 +30,14 @@ from sheriff_api.services.model_config_factory import (
     validate_model_config,
 )
 from sheriff_api.services.model_store import ProjectModelStore, create_project_model_store
+from sheriff_api.services.dataset_store import DatasetStore
 from sheriff_api.services.storage import LocalStorage
 from sheriff_api.services.suggestion_queue import SuggestionQueue
 
 router = APIRouter(tags=["models"])
 settings = get_settings()
 model_store: ProjectModelStore = create_project_model_store(settings.storage_root)
+dataset_store = DatasetStore(settings.storage_root)
 storage = LocalStorage(settings.storage_root)
 suggestion_queue = SuggestionQueue()
 
@@ -123,6 +125,71 @@ def _resolve_model_name(*, requested_name: str | None, model_count: int, task: s
     return f"{task}_model_{model_count + 1}"
 
 
+def _active_or_latest_dataset_version(project_id: str) -> dict[str, Any] | None:
+    listed = dataset_store.list_versions(project_id)
+    active_id = listed.get("active_dataset_version_id")
+    if isinstance(active_id, str):
+        loaded = dataset_store.get_version(project_id, active_id)
+        if loaded is not None:
+            return loaded["version"]
+    items = listed.get("items")
+    if isinstance(items, list) and items:
+        first = items[0]
+        if isinstance(first, dict) and isinstance(first.get("version"), dict):
+            return first["version"]
+    return None
+
+
+def _manifest_from_dataset_version(version: dict[str, Any]) -> dict[str, Any]:
+    task = str(version.get("task") or "classification")
+    if task == "bbox":
+        normalized_task = "detection"
+    elif task == "segmentation":
+        normalized_task = "segmentation"
+    else:
+        normalized_task = "classification"
+
+    label_schema = version.get("labels", {}).get("label_schema")
+    class_order = label_schema.get("class_order") if isinstance(label_schema, dict) else []
+    classes_raw = label_schema.get("classes") if isinstance(label_schema, dict) else []
+    classes = []
+    if isinstance(classes_raw, list):
+        for row in classes_raw:
+            if not isinstance(row, dict):
+                continue
+            category_id = row.get("category_id")
+            name = row.get("export_name") or row.get("name")
+            if isinstance(category_id, str) and isinstance(name, str):
+                classes.append(
+                    {
+                        "id": category_id,
+                        "name": name,
+                        "display_name": row.get("name") if isinstance(row.get("name"), str) else name,
+                    }
+                )
+
+    split_items = version.get("splits", {}).get("items")
+    split_map: dict[str, list[str]] = {"train": [], "val": [], "test": []}
+    if isinstance(split_items, list):
+        for item in split_items:
+            if not isinstance(item, dict):
+                continue
+            asset_id = item.get("asset_id")
+            split = item.get("split")
+            if isinstance(asset_id, str) and split in split_map:
+                split_map[str(split)].append(asset_id)
+
+    return {
+        "tasks": {"primary": normalized_task},
+        "label_schema": {"class_order": class_order, "classes": classes},
+        "splits": {
+            "train": {"asset_ids": split_map["train"]},
+            "val": {"asset_ids": split_map["val"]},
+            "test": {"asset_ids": split_map["test"]},
+        },
+    }
+
+
 @router.get("/projects/{project_id}/models", response_model=list[ProjectModelSummary])
 async def list_project_models(project_id: str, db: AsyncSession = Depends(get_db)) -> list[ProjectModelSummary]:
     await _require_project(db, project_id)
@@ -139,32 +206,25 @@ async def create_project_model(
 ) -> ProjectModelCreateResponse:
     await _require_project(db, project_id)
 
-    latest_dataset_version = (
-        (
-            await db.execute(
-                select(DatasetVersion)
-                .where(DatasetVersion.project_id == project_id)
-                .order_by(DatasetVersion.created_at.desc()),
-            )
-        )
-        .scalars()
-        .first()
-    )
-    if latest_dataset_version is None:
+    active_dataset_version = _active_or_latest_dataset_version(project_id)
+    if active_dataset_version is None:
         raise api_error(
             status_code=400,
             code="project_manifest_missing",
-            message="Project has no exported dataset manifest yet. Export the dataset first.",
+            message="Project has no dataset version yet. Create and activate a dataset version first.",
             details={"project_id": project_id},
         )
 
-    manifest = latest_dataset_version.manifest_json
+    manifest = _manifest_from_dataset_version(active_dataset_version)
     if not isinstance(manifest, dict):
         raise api_error(
             status_code=400,
             code="project_manifest_invalid",
-            message="Latest dataset manifest is invalid",
-            details={"project_id": project_id, "dataset_version_id": latest_dataset_version.id},
+            message="Active dataset manifest is invalid",
+            details={
+                "project_id": project_id,
+                "dataset_version_id": active_dataset_version.get("dataset_version_id"),
+            },
         )
 
     existing = model_store.list_by_project(project_id)
@@ -174,7 +234,7 @@ async def create_project_model(
     try:
         config = build_default_model_config(
             model_name=model_name,
-            dataset_manifest_id=latest_dataset_version.id,
+            dataset_manifest_id=str(active_dataset_version.get("dataset_version_id")),
             manifest=manifest,
         )
         validate_model_config(config)
@@ -183,7 +243,10 @@ async def create_project_model(
             status_code=400,
             code="project_manifest_invalid",
             message=str(exc),
-            details={"project_id": project_id, "dataset_version_id": latest_dataset_version.id},
+            details={
+                "project_id": project_id,
+                "dataset_version_id": active_dataset_version.get("dataset_version_id"),
+            },
         ) from exc
     except ModelConfigValidationError as exc:
         raise api_error(

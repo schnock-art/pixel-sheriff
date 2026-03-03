@@ -8,5 +8,5 @@ export interface ClassColor {
   overlayFill: string;
 }
 
-export function normalizedHueForClassId(classId: number): number;
-export function getClassColor(classId: number): ClassColor;
+export function normalizedHueForClassId(classId: number | string): number;
+export function getClassColor(classId: number | string): ClassColor;

@@ -7,8 +7,8 @@ const { resolveSelectionForAsset } = require("../src/lib/workspace/annotationWor
 
 test("edit-mode staged annotation persists across asset switches until submitted", () => {
   const annotationByAssetId = new Map([
-    ["asset-a", { status: "approved", payload_json: { category_ids: [1] } }],
-    ["asset-b", { status: "labeled", payload_json: { category_ids: [2] } }],
+    ["asset-a", { status: "approved", payload_json: { category_ids: ["1"] } }],
+    ["asset-b", { status: "labeled", payload_json: { category_ids: ["2"] } }],
   ]);
   const pendingAnnotations = {};
 
@@ -31,7 +31,7 @@ test("edit-mode staged annotation persists across asset switches until submitted
     annotationByAssetId,
   });
   assert.equal(currentB.source, "committed");
-  assert.deepEqual(currentB.labelIds, [2]);
+  assert.deepEqual(currentB.labelIds, ["2"]);
 
   const currentAAgain = resolveSelectionForAsset({
     currentAssetId: "asset-a",
@@ -55,7 +55,7 @@ test("edit-mode staged annotation persists across asset switches until submitted
     assetId: "asset-a",
     currentStatus: currentAAgain.status,
     selectedLabelIds: currentAAgain.labelIds,
-    activeLabelRows: [{ id: 1, name: "cat" }, { id: 2, name: "dog" }],
+    activeLabelRows: [{ id: "1", name: "cat" }, { id: "2", name: "dog" }],
   });
   annotationByAssetId.set("asset-a", {
     status: savedUpsert.status,

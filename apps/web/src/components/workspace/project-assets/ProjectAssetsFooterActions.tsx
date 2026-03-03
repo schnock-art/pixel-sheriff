@@ -1,6 +1,5 @@
 interface ProjectAssetsFooterActionsProps {
   isImporting: boolean;
-  isExporting: boolean;
   selectedProjectId: string | null;
   isDeletingAssets: boolean;
   hasCurrentAsset: boolean;
@@ -11,7 +10,6 @@ interface ProjectAssetsFooterActionsProps {
   isDeletingProject: boolean;
   isCreatingModel: boolean;
   onImport: () => void;
-  onExport: () => void;
   onDeleteCurrentAsset: () => void;
   onToggleBulkDeleteMode: () => void;
   onDeleteSelectedAssets: () => void;
@@ -22,7 +20,6 @@ interface ProjectAssetsFooterActionsProps {
 
 export function ProjectAssetsFooterActions({
   isImporting,
-  isExporting,
   selectedProjectId,
   isDeletingAssets,
   hasCurrentAsset,
@@ -33,7 +30,6 @@ export function ProjectAssetsFooterActions({
   isDeletingProject,
   isCreatingModel,
   onImport,
-  onExport,
   onDeleteCurrentAsset,
   onToggleBulkDeleteMode,
   onDeleteSelectedAssets,
@@ -46,9 +42,6 @@ export function ProjectAssetsFooterActions({
       <div className="footer-left">
         <button type="button" className="ghost-button" onClick={onImport} disabled={isImporting}>
           {isImporting ? "Importing..." : "Import"}
-        </button>
-        <button type="button" className="ghost-button" onClick={onExport} disabled={isExporting || !selectedProjectId}>
-          {isExporting ? "Exporting..." : "Export Dataset"}
         </button>
         <button
           type="button"

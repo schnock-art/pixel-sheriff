@@ -11,8 +11,8 @@ class LegacyClassificationPayload(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     type: str | None = None
-    category_id: int | None = None
-    category_ids: list[int] = Field(default_factory=list)
+    category_id: str | None = None
+    category_ids: list[str] = Field(default_factory=list)
     coco: dict = Field(default_factory=dict)
     source: str | None = None
 
@@ -20,14 +20,14 @@ class LegacyClassificationPayload(BaseModel):
 class GeometryBBoxObject(BaseModel):
     id: str
     kind: Literal["bbox"]
-    category_id: int
+    category_id: str
     bbox: list[float]
 
 
 class GeometryPolygonObject(BaseModel):
     id: str
     kind: Literal["polygon"]
-    category_id: int
+    category_id: str
     segmentation: list[list[float]]
 
 
@@ -37,8 +37,8 @@ class AnnotationImageBasis(BaseModel):
 
 
 class AnnotationClassificationV2(BaseModel):
-    category_ids: list[int] = Field(default_factory=list)
-    primary_category_id: int | None = None
+    category_ids: list[str] = Field(default_factory=list)
+    primary_category_id: str | None = None
 
 
 class AnnotationPayloadV2(BaseModel):

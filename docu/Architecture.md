@@ -60,8 +60,11 @@ Network behavior:
 
 Defined in `apps/api/src/sheriff_api/db/models.py`:
 
-- Core: `Project`, `Category`, `Asset`, `Annotation`, `DatasetVersion`
+- Core: `Project`, `Category`, `Asset`, `Annotation` (plus legacy SQL `DatasetVersion` model retained but not used as source-of-truth)
 - Initial MAL domain: `Model`, `Suggestion`
+- Dataset versions are file-backed and immutable:
+  - `datasets/{project_id}/datasets.json`
+  - implementation: `apps/api/src/sheriff_api/services/dataset_store.py`
 - Project-scoped model drafts (Phase 1 scaffold) are stored via file-backed records under storage root:
   - `models/{project_id}/records.json`
   - implementation: `apps/api/src/sheriff_api/services/model_store.py`
@@ -294,11 +297,22 @@ Annotations:
 - `POST /api/v1/projects/{project_id}/annotations` (upsert)
 - `GET /api/v1/projects/{project_id}/annotations`
 
-Exports:
+Dataset versions (file-backed source of truth):
 
-- `POST /api/v1/projects/{project_id}/exports`
-- `GET /api/v1/projects/{project_id}/exports`
-- `GET /api/v1/projects/{project_id}/exports/{content_hash}/download`
+- `GET /api/v1/projects/{project_id}/datasets/versions`
+- `POST /api/v1/projects/{project_id}/datasets/versions/preview`
+- `POST /api/v1/projects/{project_id}/datasets/versions`
+- `PATCH /api/v1/projects/{project_id}/datasets/active`
+- `GET /api/v1/projects/{project_id}/datasets/versions/{dataset_version_id}`
+- `GET /api/v1/projects/{project_id}/datasets/versions/{dataset_version_id}/assets`
+- `POST /api/v1/projects/{project_id}/datasets/versions/{dataset_version_id}/export`
+- `GET /api/v1/projects/{project_id}/datasets/versions/{dataset_version_id}/export/download`
+
+Legacy exports transition:
+
+- `POST /api/v1/projects/{project_id}/exports` -> `410 exports_legacy_gone`
+- `GET /api/v1/projects/{project_id}/exports` -> `410 exports_legacy_gone`
+- `GET /api/v1/projects/{project_id}/exports/{content_hash}/download` -> `410 exports_legacy_gone`
 
 MAL contracts:
 
@@ -325,7 +339,7 @@ Project-scoped model scaffolding:
 - `POST /api/v1/projects/{project_id}/models`
 - `GET /api/v1/projects/{project_id}/models/{model_id}`
 - `PUT /api/v1/projects/{project_id}/models/{model_id}`
-- model creation derives deterministic `ModelConfig v1.0` from latest `DatasetVersion.manifest_json` and validates against schema before persistence
+- model creation derives deterministic `ModelConfig v1.0` from active/latest dataset-version snapshot in `DatasetStore` and validates against schema before persistence
 - model updates validate incoming `config_json` against `ModelConfig v1.0` before persistence
 
 Project-scoped experiments:
@@ -340,6 +354,10 @@ Project-scoped experiments:
 - `GET /api/v1/projects/{project_id}/experiments/{experiment_id}/events` (SSE)
 - `GET /api/v1/projects/{project_id}/experiments/{experiment_id}/evaluation`
 - `GET /api/v1/projects/{project_id}/experiments/{experiment_id}/samples`
+- `GET /api/v1/projects/{project_id}/experiments/{experiment_id}/runtime`
+- `GET /api/v1/projects/{project_id}/experiments/{experiment_id}/logs`
+- `GET /api/v1/projects/{project_id}/experiments/{experiment_id}/onnx`
+- `GET /api/v1/projects/{project_id}/experiments/{experiment_id}/onnx/download?file=model|metadata`
 - create flow derives default `TrainingConfig v0` from model + latest `DatasetVersion` and persists in `draft`
 - start flow pins dataset export, creates run attempt metadata, enqueues Redis job, and transitions to `queued`
 - SSE events stream by tailing run-attempt `events.jsonl` with optional resume cursor (`from_line`) and run selection (`attempt`)
@@ -371,10 +389,11 @@ App-router entry and project shell:
 - `apps/web/src/app/projects/page.tsx` resolves last/first project or shows empty-state create flow
 - `apps/web/src/app/projects/[projectId]/layout.tsx` provides:
   - project selector dropdown + create-project modal
-  - section tabs (`Datasets`, `Models`, `Experiments`, `Deploy`)
+  - section tabs (`Labeling`, `Dataset`, `Models`, `Experiments`, `Deploy`)
   - project status summary bar
   - guarded navigation for unsaved drafts
-- `apps/web/src/app/projects/[projectId]/datasets/page.tsx` mounts the datasets workspace
+- `apps/web/src/app/projects/[projectId]/datasets/page.tsx` mounts the labeling workspace
+- `apps/web/src/app/projects/[projectId]/dataset/page.tsx` mounts the dataset-version workspace (versions/preview/splits/export)
 - `apps/web/src/app/projects/[projectId]/deploy/page.tsx` manages active deployment selection, device preference, deployment creation from experiments, and warmup
 - `apps/web/src/app/projects/[projectId]/models/page.tsx` renders project-scoped model list/empty state + create flow
 - `apps/web/src/app/projects/[projectId]/models/[modelId]/page.tsx` renders editable Model Builder controls with draft/save state, AJV validation, and live summary updates
@@ -533,6 +552,7 @@ Workspace container components (`apps/web/src/components/workspace/*`):
 Annotation payload is normalized to a backward-compatible v2 shape:
 
 - `version: "2.0"`
+- category/class IDs are UUID strings across top-level, classification block, and geometry objects
 - legacy-compatible classification fields:
   - `type: "classification"`
   - `category_id` (primary label)

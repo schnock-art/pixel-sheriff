@@ -44,6 +44,7 @@ services:
       context: .
       dockerfile: apps/trainer/Dockerfile
       args:
+        TRAINER_BASE_IMAGE: ${TRAINER_BASE_IMAGE:-python:3.11-slim}
         PYTORCH_INDEX_URL: ${TRAINER_PYTORCH_INDEX_URL:-https://download.pytorch.org/whl/cu129}
     environment:
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}

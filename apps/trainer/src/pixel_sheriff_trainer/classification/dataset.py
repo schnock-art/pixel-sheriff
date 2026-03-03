@@ -40,7 +40,7 @@ class ClassificationSample:
 class LoadedClassificationData:
     train_loader: DataLoader[Any]
     val_loader: DataLoader[Any]
-    class_order: list[int]
+    class_order: list[str]
     num_classes: int
     class_names: list[str]
     train_count: int
@@ -92,7 +92,7 @@ def _extract_if_missing(zip_path: Path, workdir: Path) -> Path:
 
 def _asset_label_samples(
     manifest: dict[str, Any], dataset_dir: Path
-) -> tuple[list[ClassificationSample], list[int], list[str], int]:
+) -> tuple[list[ClassificationSample], list[str], list[str], int]:
     label_schema = manifest.get("label_schema")
     if not isinstance(label_schema, dict):
         raise ValueError("manifest.label_schema is missing")
@@ -103,21 +103,31 @@ def _asset_label_samples(
     for raw in class_order:
         if isinstance(raw, int):
             normalized_order.append(raw)
+            continue
+        if isinstance(raw, str) and raw.strip().isdigit():
+            normalized_order.append(int(raw.strip()))
     if not normalized_order:
         raise ValueError("manifest.label_schema.class_order is invalid")
 
     classes_raw = label_schema.get("classes")
     class_name_map: dict[int, str] = {}
+    class_stable_id_map: dict[int, str] = {}
     if isinstance(classes_raw, list):
         for row in classes_raw:
             if not isinstance(row, dict):
                 continue
             class_id = row.get("id")
+            if isinstance(class_id, str) and class_id.strip().isdigit():
+                class_id = int(class_id.strip())
             if not isinstance(class_id, int):
                 continue
             name = str(row.get("name") or f"class_{class_id}").strip()
             class_name_map[class_id] = name or f"class_{class_id}"
+            stable_id = row.get("stable_id")
+            if isinstance(stable_id, str) and stable_id.strip():
+                class_stable_id_map[class_id] = stable_id.strip()
     class_names = [class_name_map.get(class_id, f"class_{class_id}") for class_id in normalized_order]
+    stable_class_order = [class_stable_id_map.get(class_id, str(class_id)) for class_id in normalized_order]
     class_index = {class_id: idx for idx, class_id in enumerate(normalized_order)}
     assets_raw = manifest.get("assets")
     annotations_raw = manifest.get("annotations")
@@ -151,10 +161,14 @@ def _asset_label_samples(
             raw_primary = image_labels.get("primary_class_id")
             if isinstance(raw_primary, int):
                 primary_class_id = raw_primary
+            elif isinstance(raw_primary, str) and raw_primary.strip().isdigit():
+                primary_class_id = int(raw_primary.strip())
             elif isinstance(image_labels.get("class_ids"), list) and image_labels["class_ids"]:
                 first = image_labels["class_ids"][0]
                 if isinstance(first, int):
                     primary_class_id = first
+                elif isinstance(first, str) and first.strip().isdigit():
+                    primary_class_id = int(first.strip())
 
         if not isinstance(primary_class_id, int):
             skipped_unlabeled += 1
@@ -177,7 +191,7 @@ def _asset_label_samples(
                 relative_path=relative_path,
             )
         )
-    return samples, normalized_order, class_names, skipped_unlabeled
+    return samples, stable_class_order, class_names, skipped_unlabeled
 
 
 def build_classification_loaders(

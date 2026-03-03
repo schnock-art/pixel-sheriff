@@ -24,14 +24,14 @@ interface ViewerAsset {
 interface GeometryBBoxObject {
   id: string;
   kind: "bbox";
-  category_id: number;
+  category_id: string;
   bbox: number[];
 }
 
 interface GeometryPolygonObject {
   id: string;
   kind: "polygon";
-  category_id: number;
+  category_id: string;
   segmentation: number[][];
 }
 
@@ -53,7 +53,7 @@ interface ViewerProps {
   geometryObjects: GeometryObject[];
   selectedObjectId: string | null;
   hoveredObjectId: string | null;
-  defaultCategoryId: number | null;
+  defaultCategoryId: string | null;
   onSelectObject: (objectId: string | null) => void;
   onHoverObject: (objectId: string | null) => void;
   onUpsertObject: (object: GeometryObject) => void;

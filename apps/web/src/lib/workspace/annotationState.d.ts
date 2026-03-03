@@ -3,14 +3,14 @@ import type { AnnotationStatus } from "../api";
 export interface GeometryBBoxObject {
   id: string;
   kind: "bbox";
-  category_id: number;
+  category_id: string;
   bbox: number[];
 }
 
 export interface GeometryPolygonObject {
   id: string;
   kind: "polygon";
-  category_id: number;
+  category_id: string;
   segmentation: number[][];
 }
 
@@ -22,7 +22,7 @@ export interface ImageBasis {
 }
 
 export interface SelectionState {
-  labelIds: number[];
+  labelIds: string[];
   status: AnnotationStatus;
   objects?: GeometryObject[];
   imageBasis?: ImageBasis | null;
@@ -33,13 +33,13 @@ export interface AnnotationLike {
   payload_json: Record<string, unknown>;
 }
 
-export function normalizeLabelIds(labelIds: number[]): number[];
+export function normalizeLabelIds(labelIds: Array<string | number>): string[];
 export function normalizeAnnotationObjects(objects: unknown): GeometryObject[];
 export function normalizeImageBasis(imageBasis: unknown): ImageBasis | null;
-export function readAnnotationLabelIds(payload: Record<string, unknown>): number[];
+export function readAnnotationLabelIds(payload: Record<string, unknown>): string[];
 export function readAnnotationObjects(payload: Record<string, unknown>): GeometryObject[];
 export function readAnnotationImageBasis(payload: Record<string, unknown>): ImageBasis | null;
-export function deriveNextAnnotationStatus(currentStatus: AnnotationStatus, labelIds: number[], objectCount?: number): AnnotationStatus;
+export function deriveNextAnnotationStatus(currentStatus: AnnotationStatus, labelIds: string[], objectCount?: number): AnnotationStatus;
 export function areSelectionStatesEqual(left: SelectionState, right: SelectionState): boolean;
 export function areGeometryStatesEqual(left: GeometryObject[], right: GeometryObject[]): boolean;
 export function getCommittedSelectionState(annotation: AnnotationLike | null | undefined): SelectionState;

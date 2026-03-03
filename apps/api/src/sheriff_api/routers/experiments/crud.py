@@ -19,6 +19,7 @@ from .shared import (
     deep_merge,
     default_training_config,
     experiment_store,
+    get_dataset_version,
     latest_dataset_version,
     model_store,
     require_project,
@@ -54,12 +55,16 @@ async def create_project_experiment(
             details={"project_id": project_id, "model_id": payload.model_id},
         )
 
-    latest_dataset = await latest_dataset_version(db, project_id)
-    if latest_dataset is None:
+    selected_dataset_version_id = payload.dataset_version_id if isinstance(payload.dataset_version_id, str) else None
+    if selected_dataset_version_id:
+        selected_dataset = await get_dataset_version(db, project_id, selected_dataset_version_id)
+    else:
+        selected_dataset = await latest_dataset_version(db, project_id)
+    if selected_dataset is None:
         raise api_error(
             status_code=400,
             code="project_manifest_missing",
-            message="Project has no exported dataset manifest yet. Export the dataset first.",
+            message="Project has no dataset version yet. Create and activate a dataset version first.",
             details={"project_id": project_id},
         )
 
@@ -72,7 +77,7 @@ async def create_project_experiment(
 
     default_config = default_training_config(
         model_id=payload.model_id,
-        dataset_version_id=latest_dataset.id,
+        dataset_version_id=str(selected_dataset.get("dataset_version_id")),
         task=task,
     )
     overrides = payload.config_overrides if isinstance(payload.config_overrides, dict) else {}

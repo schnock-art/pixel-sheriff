@@ -3,7 +3,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
-import { ApiError, createExperiment, listProjectModels, type ProjectModelSummary } from "../../../../../lib/api";
+import {
+  ApiError,
+  createExperiment,
+  listDatasetVersions,
+  listProjectModels,
+  type ProjectModelSummary,
+} from "../../../../../lib/api";
 
 interface NewExperimentPageProps {
   params: {
@@ -34,6 +40,8 @@ export default function NewExperimentPage({ params }: NewExperimentPageProps) {
 
   const [models, setModels] = useState<ProjectModelSummary[]>([]);
   const [selectedModelId, setSelectedModelId] = useState(modelIdFromQuery);
+  const [datasetVersionOptions, setDatasetVersionOptions] = useState<Array<{ id: string; name: string }>>([]);
+  const [selectedDatasetVersionId, setSelectedDatasetVersionId] = useState("");
   const [name, setName] = useState("");
   const [isLoadingModels, setIsLoadingModels] = useState(!modelIdFromQuery);
   const [isCreating, setIsCreating] = useState(Boolean(modelIdFromQuery));
@@ -48,12 +56,21 @@ export default function NewExperimentPage({ params }: NewExperimentPageProps) {
     async function loadModels() {
       setIsLoadingModels(true);
       try {
-        const rows = await listProjectModels(projectId);
+        const [rows, datasetVersions] = await Promise.all([listProjectModels(projectId), listDatasetVersions(projectId)]);
         if (!isMounted) return;
         setModels(rows);
         if (!selectedModelId && rows.length > 0) {
           setSelectedModelId(rows[0].id);
         }
+        const versionRows = (datasetVersions.items ?? []).map((item) => {
+          const version = item.version as Record<string, unknown>;
+          const id = typeof version.dataset_version_id === "string" ? version.dataset_version_id : "";
+          const name = typeof version.name === "string" ? version.name : id;
+          return { id, name };
+        });
+        setDatasetVersionOptions(versionRows.filter((item) => item.id));
+        const activeId = datasetVersions.active_dataset_version_id ?? versionRows[0]?.id ?? "";
+        setSelectedDatasetVersionId(activeId);
       } catch (error) {
         if (!isMounted) return;
         setErrorMessage(parseApiErrorMessage(error, "Failed to load models"));
@@ -102,6 +119,7 @@ export default function NewExperimentPage({ params }: NewExperimentPageProps) {
     try {
       const created = await createExperiment(projectId, {
         model_id: selectedModelId,
+        dataset_version_id: selectedDatasetVersionId || undefined,
         name: name.trim() || undefined,
       });
       router.replace(`/projects/${encodeURIComponent(projectId)}/experiments/${encodeURIComponent(created.id)}`);
@@ -142,12 +160,27 @@ export default function NewExperimentPage({ params }: NewExperimentPageProps) {
                   placeholder="training_run_1"
                 />
               </label>
+              <label className="project-field">
+                <span>Dataset Version</span>
+                <select
+                  value={selectedDatasetVersionId}
+                  onChange={(event) => setSelectedDatasetVersionId(event.target.value)}
+                  disabled={datasetVersionOptions.length === 0}
+                >
+                  {datasetVersionOptions.length === 0 ? <option value="">No dataset versions</option> : null}
+                  {datasetVersionOptions.map((row) => (
+                    <option key={row.id} value={row.id}>
+                      {row.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
               {errorMessage ? <p className="project-field-error">{errorMessage}</p> : null}
               <div className="project-modal-actions">
                 <button
                   type="button"
                   className="primary-button"
-                  disabled={!selectedModelId || isCreating || isLoadingModels}
+                  disabled={!selectedModelId || isCreating || isLoadingModels || !selectedDatasetVersionId}
                   onClick={() => void handleCreateFromPicker()}
                 >
                   {isCreating ? "Creating..." : "Create Experiment"}
@@ -160,4 +193,3 @@ export default function NewExperimentPage({ params }: NewExperimentPageProps) {
     </main>
   );
 }
-

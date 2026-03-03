@@ -109,7 +109,7 @@ export interface ProjectCreatePayload {
 }
 
 export interface Category {
-  id: number;
+  id: string;
   project_id: string;
   name: string;
   display_order: number;
@@ -176,6 +176,68 @@ export interface ExportVersion {
   manifest_json: Record<string, unknown>;
   export_uri: string;
   hash: string;
+}
+
+export interface DatasetSelectionFilters {
+  include_labeled_only?: boolean;
+  include_statuses?: AnnotationStatus[];
+  include_category_ids?: string[];
+  exclude_category_ids?: string[];
+  include_folder_paths?: string[];
+  exclude_folder_paths?: string[];
+  include_negative_images?: boolean;
+}
+
+export interface DatasetSplitConfig {
+  seed?: number;
+  ratios?: { train: number; val: number; test: number };
+  stratify?: {
+    enabled?: boolean;
+    by?: "label_primary" | "label_multi_hot" | "embedding_cluster";
+    strict_stratify?: boolean;
+  };
+}
+
+export interface DatasetVersionSummaryEnvelope {
+  version: Record<string, unknown>;
+  is_archived: boolean;
+  is_active: boolean;
+}
+
+export interface DatasetVersionListPayload {
+  active_dataset_version_id: string | null;
+  items: DatasetVersionSummaryEnvelope[];
+}
+
+export interface DatasetPreviewPayload {
+  asset_ids: string[];
+  sample_asset_ids: string[];
+  counts: {
+    total: number;
+    class_counts: Record<string, number>;
+    split_counts: { train: number; val: number; test: number };
+  };
+  warnings: string[];
+}
+
+export interface DatasetVersionAssetsPayload {
+  items: Array<{
+    asset_id: string;
+    filename: string;
+    relative_path: string;
+    status: AnnotationStatus;
+    split?: "train" | "val" | "test" | null;
+    label_summary: Record<string, unknown>;
+  }>;
+  page: number;
+  page_size: number;
+  total: number;
+}
+
+export interface DatasetVersionExportPayload {
+  dataset_version_id: string;
+  hash: string;
+  export_uri: string;
 }
 
 export interface ProjectModelSummary {
@@ -274,6 +336,7 @@ export interface ProjectExperimentListResponse {
 
 export interface ProjectExperimentCreatePayload {
   model_id: string;
+  dataset_version_id?: string;
   name?: string;
   config_overrides?: Record<string, unknown>;
 }
@@ -332,7 +395,7 @@ export interface ExperimentEvaluationOverall {
 
 export interface ExperimentEvaluationPerClassRow {
   class_index: number;
-  class_id: number;
+  class_id: string;
   name: string;
   precision: number;
   recall: number;
@@ -357,7 +420,7 @@ export interface ExperimentEvaluationPayload {
   split?: string;
   num_samples?: number;
   classes?: {
-    class_order?: number[];
+    class_order?: string[];
     class_names?: string[];
     id_to_index?: Record<string, number>;
   };
@@ -470,7 +533,7 @@ export interface PredictPayload {
 
 export interface PredictPrediction {
   class_index: number;
-  class_id: number;
+  class_id: string;
   class_name: string;
   score: number;
 }
@@ -542,7 +605,7 @@ export function createCategory(projectId: string, payload: CategoryCreatePayload
   return apiPost<Category, CategoryCreatePayload>(`/projects/${projectId}/categories`, payload);
 }
 
-export function patchCategory(categoryId: number, payload: CategoryUpdatePayload): Promise<Category> {
+export function patchCategory(categoryId: string, payload: CategoryUpdatePayload): Promise<Category> {
   return requestJson<Category>(`/categories/${categoryId}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
@@ -584,6 +647,89 @@ export function createExport(projectId: string, payload: ExportCreatePayload = {
 
 export function listExports(projectId: string): Promise<ExportVersion[]> {
   return apiGet<ExportVersion[]>(`/projects/${projectId}/exports`);
+}
+
+export function listDatasetVersions(projectId: string): Promise<DatasetVersionListPayload> {
+  return apiGet<DatasetVersionListPayload>(`/projects/${projectId}/datasets/versions`);
+}
+
+export function previewDatasetVersion(
+  projectId: string,
+  payload: {
+    task: "classification" | "bbox" | "segmentation";
+    selection: { mode: "filter_snapshot" | "explicit_asset_ids"; filters?: DatasetSelectionFilters; explicit_asset_ids?: string[] };
+    split?: DatasetSplitConfig;
+    strict_preview_cap?: boolean;
+    preview_cap?: number;
+  },
+): Promise<DatasetPreviewPayload> {
+  return apiPost<DatasetPreviewPayload, typeof payload>(`/projects/${projectId}/datasets/versions/preview`, payload);
+}
+
+export function createDatasetVersion(
+  projectId: string,
+  payload: {
+    name: string;
+    description?: string;
+    task: "classification" | "bbox" | "segmentation";
+    created_by?: string;
+    selection: { mode: "filter_snapshot" | "explicit_asset_ids"; filters?: DatasetSelectionFilters; explicit_asset_ids?: string[] };
+    split?: DatasetSplitConfig;
+    set_active?: boolean;
+  },
+): Promise<DatasetVersionSummaryEnvelope> {
+  return apiPost<DatasetVersionSummaryEnvelope, typeof payload>(`/projects/${projectId}/datasets/versions`, payload);
+}
+
+export function setActiveDatasetVersion(
+  projectId: string,
+  activeDatasetVersionId: string | null,
+): Promise<{ ok: boolean; active_dataset_version_id: string | null }> {
+  return requestJson<{ ok: boolean; active_dataset_version_id: string | null }>(`/projects/${projectId}/datasets/active`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ active_dataset_version_id: activeDatasetVersionId }),
+  });
+}
+
+export function getDatasetVersion(projectId: string, datasetVersionId: string): Promise<DatasetVersionSummaryEnvelope> {
+  return apiGet<DatasetVersionSummaryEnvelope>(`/projects/${projectId}/datasets/versions/${datasetVersionId}`);
+}
+
+export function listDatasetVersionAssets(
+  projectId: string,
+  datasetVersionId: string,
+  options: {
+    page?: number;
+    page_size?: number;
+    split?: "train" | "val" | "test";
+    status?: AnnotationStatus;
+    class_id?: string;
+    search?: string;
+  } = {},
+): Promise<DatasetVersionAssetsPayload> {
+  const params = new URLSearchParams();
+  if (typeof options.page === "number" && Number.isFinite(options.page) && options.page >= 1) {
+    params.set("page", String(Math.floor(options.page)));
+  }
+  if (typeof options.page_size === "number" && Number.isFinite(options.page_size) && options.page_size >= 1) {
+    params.set("page_size", String(Math.floor(options.page_size)));
+  }
+  if (options.split) params.set("split", options.split);
+  if (options.status) params.set("status", options.status);
+  if (options.class_id) params.set("class_id", options.class_id);
+  if (options.search) params.set("search", options.search);
+  const query = params.toString();
+  return apiGet<DatasetVersionAssetsPayload>(
+    `/projects/${projectId}/datasets/versions/${datasetVersionId}/assets${query ? `?${query}` : ""}`,
+  );
+}
+
+export function exportDatasetVersion(projectId: string, datasetVersionId: string): Promise<DatasetVersionExportPayload> {
+  return apiPost<DatasetVersionExportPayload, Record<string, never>>(
+    `/projects/${projectId}/datasets/versions/${datasetVersionId}/export`,
+    {},
+  );
 }
 
 export function listProjectModels(projectId: string): Promise<ProjectModelSummary[]> {

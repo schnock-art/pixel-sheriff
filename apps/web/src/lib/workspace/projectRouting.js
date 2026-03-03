@@ -1,5 +1,7 @@
-﻿function normalizeSection(section) {
-  return section === "datasets" || section === "models" || section === "experiments" || section === "deploy" ? section : "datasets";
+function normalizeSection(section) {
+  return section === "datasets" || section === "dataset" || section === "models" || section === "experiments" || section === "deploy"
+    ? section
+    : "datasets";
 }
 
 function deriveProjectSectionFromPathname(pathname) {
@@ -33,4 +35,3 @@ module.exports = {
   buildProjectSectionHref,
   buildModelBuilderHref,
 };
-

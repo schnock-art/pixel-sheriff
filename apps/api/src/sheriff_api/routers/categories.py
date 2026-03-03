@@ -26,7 +26,7 @@ async def list_categories(project_id: str, db: AsyncSession = Depends(get_db)) -
 
 
 @router.patch("/categories/{category_id}", response_model=CategoryRead)
-async def patch_category(category_id: int, payload: CategoryUpdate, db: AsyncSession = Depends(get_db)) -> Category:
+async def patch_category(category_id: str, payload: CategoryUpdate, db: AsyncSession = Depends(get_db)) -> Category:
     category = await db.get(Category, category_id)
     if not category:
         raise api_error(

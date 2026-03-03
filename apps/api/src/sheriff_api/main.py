@@ -10,7 +10,8 @@ from sheriff_api.config import get_settings
 from sheriff_api.db.models import Base, TaskType
 from sheriff_api.db.session import engine
 from sheriff_api.errors import http_exception_handler, request_validation_exception_handler
-from sheriff_api.routers import annotations, assets, categories, deployments, experiments, exports, health, models, projects
+from sheriff_api.routers import annotations, assets, categories, datasets, deployments, experiments, exports, health, models, projects
+from sheriff_api.services.migrations import run_startup_migrations
 
 settings = get_settings()
 
@@ -27,6 +28,7 @@ async def lifespan(app: FastAPI):
         if engine.dialect.name == "postgresql":
             for value in TaskType:
                 await conn.execute(text(f"ALTER TYPE tasktype ADD VALUE IF NOT EXISTS '{value.value}'"))
+    await run_startup_migrations(engine)
     yield
 
 
@@ -48,6 +50,7 @@ app.include_router(categories.router, prefix="/api/v1")
 app.include_router(assets.router, prefix="/api/v1")
 app.include_router(annotations.router, prefix="/api/v1")
 app.include_router(exports.router, prefix="/api/v1")
+app.include_router(datasets.router, prefix="/api/v1")
 app.include_router(models.router, prefix="/api/v1")
 app.include_router(experiments.router, prefix="/api/v1")
 app.include_router(deployments.router, prefix="/api/v1")

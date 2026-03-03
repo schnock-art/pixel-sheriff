@@ -3,7 +3,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sheriff_api.config import get_settings
-from sheriff_api.db.models import Annotation, Asset, Category, DatasetVersion, Project, Suggestion
+from sheriff_api.db.models import Annotation, Asset, Category, Project, Suggestion
 from sheriff_api.db.session import get_db
 from sheriff_api.errors import api_error
 from sheriff_api.schemas.projects import ProjectCreate, ProjectRead
@@ -70,7 +70,6 @@ async def delete_project(project_id: str, db: AsyncSession = Depends(get_db)) ->
     if asset_ids:
         await db.execute(delete(Suggestion).where(Suggestion.asset_id.in_(asset_ids)))
     await db.execute(delete(Annotation).where(Annotation.project_id == project_id))
-    await db.execute(delete(DatasetVersion).where(DatasetVersion.project_id == project_id))
     await db.execute(delete(Category).where(Category.project_id == project_id))
     await db.execute(delete(Asset).where(Asset.project_id == project_id))
     await db.delete(project)
@@ -82,7 +81,13 @@ async def delete_project(project_id: str, db: AsyncSession = Depends(get_db)) ->
         except ValueError:
             continue
 
-    for relative_dir in (f"assets/{project_id}", f"exports/{project_id}", f"models/{project_id}", f"experiments/{project_id}"):
+    for relative_dir in (
+        f"assets/{project_id}",
+        f"exports/{project_id}",
+        f"models/{project_id}",
+        f"experiments/{project_id}",
+        f"datasets/{project_id}",
+    ):
         try:
             storage.delete_tree(relative_dir)
         except ValueError:

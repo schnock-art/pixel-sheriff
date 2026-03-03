@@ -24,7 +24,7 @@ $project = Invoke-RestMethod -Method Post -Uri "$api/projects" -ContentType "app
 } | ConvertTo-Json)
 $projectId = $project.id
 
-# 2) Create category + upload + annotate + export (needed so model/experiment creation works)
+# 2) Create category + upload + annotate + dataset version (needed so model/experiment creation works)
 $cat = Invoke-RestMethod -Method Post -Uri "$api/projects/$projectId/categories" -ContentType "application/json" -Body (@{
   name = "class_a"
 } | ConvertTo-Json)
@@ -39,12 +39,27 @@ $asset = Invoke-RestMethod -Method Post -Uri "$api/projects/$projectId/assets/up
 Invoke-RestMethod -Method Post -Uri "$api/projects/$projectId/annotations" -ContentType "application/json" -Body (@{
   asset_id = $asset.id
   status = "approved"
-  payload_json = @{ category_ids = @($cat.id) }
+  payload_json = @{ category_ids = @($cat.id); classification = @{ category_ids = @($cat.id); primary_category_id = $cat.id } }
 } | ConvertTo-Json -Depth 8) | Out-Null
 
-Invoke-RestMethod -Method Post -Uri "$api/projects/$projectId/exports" -ContentType "application/json" -Body (@{
-  selection_criteria_json = @{ status = "approved" }
-} | ConvertTo-Json -Depth 8) | Out-Null
+$datasetVersion = Invoke-RestMethod -Method Post -Uri "$api/projects/$projectId/datasets/versions" -ContentType "application/json" -Body (@{
+  name = "qa-dataset-v1"
+  task = "classification"
+  set_active = $true
+  selection = @{
+    mode = "filter_snapshot"
+    filters = @{
+      include_labeled_only = $true
+      include_statuses = @("approved")
+    }
+  }
+  split = @{
+    seed = 1337
+    ratios = @{ train = 0.8; val = 0.1; test = 0.1 }
+    stratify = @{ enabled = $true; by = "label_primary"; strict_stratify = $false }
+  }
+} | ConvertTo-Json -Depth 12)
+$datasetVersionId = $datasetVersion.version.dataset_version_id
 
 # 3) Create model
 $model = Invoke-RestMethod -Method Post -Uri "$api/projects/$projectId/models" -ContentType "application/json" -Body "{}"
@@ -53,6 +68,7 @@ $modelId = $model.id
 # 4) Create experiment
 $experiment = Invoke-RestMethod -Method Post -Uri "$api/projects/$projectId/experiments" -ContentType "application/json" -Body (@{
   model_id = $modelId
+  dataset_version_id = $datasetVersionId
 } | ConvertTo-Json)
 $experimentId = $experiment.id
 
