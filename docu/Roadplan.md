@@ -212,3 +212,7 @@ Planned sequence:
 4. regression coverage:
    - replace placeholder hotkey tests with real UI interaction tests
    - add delete + folder-scope + submit regression suites
+
+Completed in current milestone:
+- decomposed API experiments router into concern-focused modules (`crud`, `analytics`, `evaluation`, `runs`, shared helpers)
+- paired decomposition with dedicated experiments regression coverage (`apps/api/tests/test_experiments_api.py`)

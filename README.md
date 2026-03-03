@@ -92,6 +92,9 @@ Local-first CV annotation platform.
   - MAL contract tests added (queueing, persistence/retrieval, accept/reject lifecycle)
   - model export contract tests added (artifact generation, validation failures, deterministic hash)
   - trainer queue-path integration test added (`payload -> parse -> runner -> persisted events/artifacts`)
+- Experiments API maintainability pass completed:
+  - monolithic experiments router was decomposed into concern-focused modules under `apps/api/src/sheriff_api/routers/experiments/` (`crud`, `analytics`, `evaluation`, `runs`, `shared`)
+  - dedicated API regression module added at `apps/api/tests/test_experiments_api.py` for decomposition-safety coverage
 - Initial MAL + model-export API contracts are now implemented:
   - batch suggestion queueing and per-asset suggestion persistence
   - suggestion decision lifecycle (`accept` / `reject`)
@@ -294,6 +297,8 @@ docker compose up --build
 - API tests (local, non-ML only):
   - `cd apps/api && python3 -m pip install -e ".[dev]"`
   - `cd apps/api && DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5433/pixel_sheriff STORAGE_ROOT=/tmp/pixel_sheriff_test_data python3 -m pytest -s tests/test_api.py tests/test_model_store.py`
+- API experiments-focused regressions (local):
+  - `cd apps/api && DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5433/pixel_sheriff STORAGE_ROOT=/tmp/pixel_sheriff_test_data python3 -m pytest -s tests/test_experiments_api.py`
 - ML tests only (local):
   - `cd apps/api && python3 -m pytest tests/ml -q --confcutdir=tests/ml`
 - API tests (container):

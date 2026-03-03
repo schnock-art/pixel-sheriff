@@ -324,6 +324,12 @@ Project-scoped experiments:
 - create flow derives default `TrainingConfig v0` from model + latest `DatasetVersion` and persists in `draft`
 - start flow pins dataset export, creates run attempt metadata, enqueues Redis job, and transitions to `queued`
 - SSE events stream by tailing run-attempt `events.jsonl` with optional resume cursor (`from_line`) and run selection (`attempt`)
+- router implementation is decomposed by concern under `apps/api/src/sheriff_api/routers/experiments/`:
+  - `crud.py`
+  - `analytics.py`
+  - `evaluation.py`
+  - `runs.py`
+  - shared helpers/dependencies in `shared.py`
 - default training config sets `advanced.num_workers = 0` (user-editable in Advanced Parameters)
 - analytics endpoint returns multi-run `series` with `max_points` query support (default 200, bounded server-side)
 - router registration keeps `/analytics` before `/{experiment_id}` to avoid path shadowing
