@@ -276,6 +276,15 @@ cp .env.example .env
 docker compose up --build
 ```
 
+Trainer CUDA defaults (Docker):
+- trainer image installs `torch`/`torchvision` from `https://download.pytorch.org/whl/cu129` (includes `sm_120` support for RTX 50-series)
+- trainer service requests GPU (`gpus: all`) and sets NVIDIA runtime envs
+- override via `.env` if needed:
+  - `TRAINER_GPUS=all|none`
+  - `TRAINER_PYTORCH_INDEX_URL=https://download.pytorch.org/whl/cu129`
+  - `NVIDIA_VISIBLE_DEVICES=all`
+  - `NVIDIA_DRIVER_CAPABILITIES=compute,utility`
+
 3. Open (`.env.example` defaults):
 
 - Web: `http://localhost:3010`
@@ -352,6 +361,8 @@ docker compose up --build
 - `GET /api/v1/projects/{project_id}/experiments/{experiment_id}/events` (SSE)
 - `GET /api/v1/projects/{project_id}/experiments/{experiment_id}/evaluation` (includes top-level `attempt`; returns `evaluation_not_found` when unavailable)
 - `GET /api/v1/projects/{project_id}/experiments/{experiment_id}/samples` (supports mode/class filters + `limit`; includes top-level `attempt`)
+- `GET /api/v1/projects/{project_id}/experiments/{experiment_id}/runtime` (latest runtime info; returns `runtime_not_found` when unavailable)
+- `GET /api/v1/projects/{project_id}/experiments/{experiment_id}/logs` (byte-range tailing for `training.log`; returns `training_log_not_found` when unavailable)
 - `GET/POST /api/v1/models`
 - `GET /api/v1/assets/{asset_id}/suggestions`
 - `POST /api/v1/projects/{project_id}/suggestions/batch`

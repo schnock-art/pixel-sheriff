@@ -9,6 +9,7 @@ Status reflects current repository behavior.
 - [x] Configurable host ports via `.env`
 - [x] API data volume mount (`./data -> /app/data`)
 - [x] DB init script wiring
+- [x] Trainer GPU runtime defaults wired in compose (`gpus`, NVIDIA envs) with CUDA wheel index override (`TRAINER_PYTORCH_INDEX_URL`)
 
 ### API (`apps/api`)
 - [x] FastAPI app + router mounting under `/api/v1`
@@ -119,6 +120,7 @@ Status reflects current repository behavior.
   - [x] resume support (`resume.enabled`, `resume.checkpoint_kind`) with explicit transparency logs/events on success or invalid resume state
   - [x] numeric parsing hardening for zero-valid fields (`lr`, `weight_decay`, scheduler values)
   - [x] run artifacts: per-attempt `training.log` and `runtime.json` + latest runtime mirror
+  - [x] trainer Docker CUDA baseline moved to `cu129` for RTX 50-series (`sm_120`) compatibility
 
 ### Docs
 - [x] README aligned with implemented stack/workflow
