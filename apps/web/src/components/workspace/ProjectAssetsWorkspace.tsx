@@ -23,10 +23,22 @@ import { useAssets } from "../../lib/hooks/useAssets";
 import { useDeleteWorkflow } from "../../lib/hooks/useDeleteWorkflow";
 import { buildTargetRelativePath, isImageCandidate, useImportWorkflow } from "../../lib/hooks/useImportWorkflow";
 import { useLabels } from "../../lib/hooks/useLabels";
+import { useProjectMultiLabelSettings } from "../../lib/hooks/useProjectMultiLabelSettings";
 import { useProject } from "../../lib/hooks/useProject";
+import { useWorkspaceHotkeys } from "../../lib/hooks/useWorkspaceHotkeys";
+import {
+  buildAssetReviewStateById,
+  buildFolderDirtyByPath,
+  buildFolderReviewStatusByPath,
+  buildVisibleTreeEntries,
+  deriveMessageTone,
+} from "../../lib/workspace/projectAssetsDerived";
 import { buildModelBuilderHref } from "../../lib/workspace/projectRouting";
-import { resolveWorkspaceHotkeyAction } from "../../lib/workspace/hotkeys";
-import { asRelativePath, buildTreeEntries, collectFolderPathsFromRelativePaths, folderChain, type TreeEntry } from "../../lib/workspace/tree";
+import { asRelativePath, buildTreeEntries, collectFolderPathsFromRelativePaths, folderChain } from "../../lib/workspace/tree";
+import { ProjectAssetsFooterActions } from "./project-assets/ProjectAssetsFooterActions";
+import { ProjectAssetsImportModal } from "./project-assets/ProjectAssetsImportModal";
+import { ProjectAssetsStatusOverlay } from "./project-assets/ProjectAssetsStatusOverlay";
+import { ProjectAssetsTreeSidebar } from "./project-assets/ProjectAssetsTreeSidebar";
 import { useProjectNavigationGuard } from "./ProjectNavigationContext";
 
 const PROJECT_MULTILABEL_STORAGE_KEY = "pixel-sheriff:project-multilabel:v1";
@@ -61,7 +73,7 @@ export default function ProjectAssetsWorkspace() {
   const [isExporting, setIsExporting] = useState(false);
   const [isCreatingModel, setIsCreatingModel] = useState(false);
   const [editMode, setEditMode] = useState(false);
-  const [projectMultiLabelSettings, setProjectMultiLabelSettings] = useState<Record<string, boolean>>({});
+  const { projectMultiLabelSettings, setProjectMultiLabelSettings } = useProjectMultiLabelSettings(PROJECT_MULTILABEL_STORAGE_KEY);
   const [message, setMessage] = useState<string | null>(null);
   const [annotationMode, setAnnotationMode] = useState<WorkspaceAnnotationMode>("labels");
   const [importNewProjectTaskType, setImportNewProjectTaskType] = useState<NewProjectTaskType>("classification_single");
@@ -69,29 +81,6 @@ export default function ProjectAssetsWorkspace() {
   const [hoveredGeometryObjectId, setHoveredGeometryObjectId] = useState<string | null>(null);
   const [selectedTreeFolderPath, setSelectedTreeFolderPath] = useState<string | null>(null);
   const [collapsedFolders, setCollapsedFolders] = useState<Record<string, boolean>>({});
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    try {
-      const raw = window.localStorage.getItem(PROJECT_MULTILABEL_STORAGE_KEY);
-      if (!raw) return;
-      const parsed: unknown = JSON.parse(raw);
-      if (!parsed || typeof parsed !== "object") return;
-
-      const normalized: Record<string, boolean> = {};
-      for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
-        normalized[key] = Boolean(value);
-      }
-      setProjectMultiLabelSettings(normalized);
-    } catch {
-      setProjectMultiLabelSettings({});
-    }
-  }, []);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    window.localStorage.setItem(PROJECT_MULTILABEL_STORAGE_KEY, JSON.stringify(projectMultiLabelSettings));
-  }, [projectMultiLabelSettings]);
 
   const selectedProject = useMemo(
     () => projects.find((project) => project.id === selectedProjectId) ?? null,
@@ -124,7 +113,6 @@ export default function ProjectAssetsWorkspace() {
     setImportFailures,
     importDialog,
     importMode,
-    setImportMode,
     importExistingProjectId,
     setImportExistingProjectId,
     importNewProjectName,
@@ -153,18 +141,7 @@ export default function ProjectAssetsWorkspace() {
   const treeBuild = useMemo(() => buildTreeEntries(assets), [assets]);
   const treeEntries = treeBuild.entries;
   const treeFolderPaths = useMemo(() => Object.keys(treeBuild.folderAssetIds), [treeBuild.folderAssetIds]);
-  const visibleTreeEntries = useMemo(() => {
-    function isHiddenByCollapsedAncestor(entry: TreeEntry): boolean {
-      const parentPath = entry.kind === "folder" ? entry.path.split("/").slice(0, -1).join("/") : entry.folderPath ?? "";
-      if (!parentPath) return false;
-      for (const ancestor of folderChain(parentPath)) {
-        if (collapsedFolders[ancestor]) return true;
-      }
-      return false;
-    }
-
-    return treeEntries.filter((entry) => !isHiddenByCollapsedAncestor(entry));
-  }, [collapsedFolders, treeEntries]);
+  const visibleTreeEntries = useMemo(() => buildVisibleTreeEntries(treeEntries, collapsedFolders), [collapsedFolders, treeEntries]);
   const orderedAssetRows = useMemo(
     () =>
       treeBuild.orderedAssetIds
@@ -297,21 +274,15 @@ export default function ProjectAssetsWorkspace() {
     resetDeleteWorkflow,
   } = deleteWorkflow;
 
-  const assetReviewStateById = useMemo(() => {
-    const map = new Map<string, { status: "labeled" | "unlabeled"; isDirty: boolean }>();
-    for (const asset of orderedAssetRows) {
-      const pending = pendingAnnotations[asset.id];
-      if (pending) {
-        const isLabeled = pending.status !== "unlabeled" || pending.objects.length > 0;
-        map.set(asset.id, { status: isLabeled ? "labeled" : "unlabeled", isDirty: true });
-        continue;
-      }
-      const annotation = annotationByAssetId.get(asset.id);
-      const isLabeled = Boolean(annotation && annotation.status !== "unlabeled");
-      map.set(asset.id, { status: isLabeled ? "labeled" : "unlabeled", isDirty: false });
-    }
-    return map;
-  }, [annotationByAssetId, orderedAssetRows, pendingAnnotations]);
+  const assetReviewStateById = useMemo(
+    () =>
+      buildAssetReviewStateById({
+        orderedAssetRows,
+        pendingAnnotations,
+        annotationByAssetId,
+      }),
+    [annotationByAssetId, orderedAssetRows, pendingAnnotations],
+  );
 
   const pageStatuses = useMemo(
     () => assetRows.map((asset) => assetReviewStateById.get(asset.id)?.status ?? "unlabeled"),
@@ -325,12 +296,7 @@ export default function ProjectAssetsWorkspace() {
     if (!selectedTreeFolderPath) return 0;
     return treeBuild.folderAssetIds[selectedTreeFolderPath]?.length ?? 0;
   }, [selectedTreeFolderPath, treeBuild.folderAssetIds]);
-  const messageTone = useMemo(() => {
-    if (!message) return "info";
-    const lower = message.toLowerCase();
-    if (lower.includes("failed") || lower.includes("error")) return "error";
-    return "success";
-  }, [message]);
+  const messageTone = useMemo(() => deriveMessageTone(message), [message]);
   const labeledImageCount = useMemo(() => {
     const labeledAssetIds = new Set<string>();
     for (const annotation of annotations) {
@@ -359,25 +325,14 @@ export default function ProjectAssetsWorkspace() {
     );
   }, [labeledImageCount, labels.length, selectedProjectId]);
 
-  const folderReviewStatusByPath = useMemo(() => {
-    const status: Record<string, FolderReviewStatus> = {};
-    for (const [folderPath, assetIds] of Object.entries(treeBuild.folderAssetIds)) {
-      if (assetIds.length === 0) {
-        status[folderPath] = "empty";
-        continue;
-      }
-      const hasUnlabeled = assetIds.some((assetId) => (assetReviewStateById.get(assetId)?.status ?? "unlabeled") === "unlabeled");
-      status[folderPath] = hasUnlabeled ? "has_unlabeled" : "all_labeled";
-    }
-    return status;
-  }, [assetReviewStateById, treeBuild.folderAssetIds]);
-  const folderDirtyByPath = useMemo(() => {
-    const flags: Record<string, boolean> = {};
-    for (const [folderPath, assetIds] of Object.entries(treeBuild.folderAssetIds)) {
-      flags[folderPath] = assetIds.some((assetId) => Boolean(assetReviewStateById.get(assetId)?.isDirty));
-    }
-    return flags;
-  }, [assetReviewStateById, treeBuild.folderAssetIds]);
+  const folderReviewStatusByPath = useMemo(
+    () => buildFolderReviewStatusByPath({ folderAssetIds: treeBuild.folderAssetIds, assetReviewStateById }) as Record<string, FolderReviewStatus>,
+    [assetReviewStateById, treeBuild.folderAssetIds],
+  );
+  const folderDirtyByPath = useMemo(
+    () => buildFolderDirtyByPath({ folderAssetIds: treeBuild.folderAssetIds, assetReviewStateById }),
+    [assetReviewStateById, treeBuild.folderAssetIds],
+  );
 
   useEffect(() => {
     setAssetIndex((previous) => Math.min(previous, Math.max(assetRows.length - 1, 0)));
@@ -388,40 +343,6 @@ export default function ProjectAssetsWorkspace() {
     const timeout = window.setTimeout(() => setMessage(null), 6000);
     return () => window.clearTimeout(timeout);
   }, [message]);
-
-  useEffect(() => {
-    function onKeyDown(event: KeyboardEvent) {
-      const action = resolveWorkspaceHotkeyAction(event, { activeLabelCount: activeLabelRows.length });
-      if (!action) return;
-
-      if (action.type === "navigate_prev") {
-        event.preventDefault();
-        setAssetIndex((previous) => (previous <= 0 ? 0 : previous - 1));
-        return;
-      }
-      if (action.type === "navigate_next") {
-        event.preventDefault();
-        setAssetIndex((previous) => (previous >= assetRows.length - 1 ? previous : previous + 1));
-        return;
-      }
-
-      const label = activeLabelRows[action.labelIndex];
-      if (!label) return;
-
-      event.preventDefault();
-      if (annotationMode === "labels") {
-        handleToggleLabel(label.id);
-      } else {
-        setGeometryCategoryId(label.id);
-        if (selectedObjectId) {
-          assignSelectedGeometryCategory(label.id);
-        }
-      }
-    }
-
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [activeLabelRows, annotationMode, assetRows.length, assignSelectedGeometryCategory, handleToggleLabel, selectedObjectId]);
 
   useEffect(() => {
     if (annotationMode === "labels") return;
@@ -462,6 +383,25 @@ export default function ProjectAssetsWorkspace() {
   function handleNextAsset() {
     setAssetIndex((previous) => (previous >= assetRows.length - 1 ? previous : previous + 1));
   }
+
+  useWorkspaceHotkeys({
+    activeLabelRows,
+    annotationMode,
+    assetRowsLength: assetRows.length,
+    selectedObjectId,
+    onPrev: handlePrevAsset,
+    onNext: handleNextAsset,
+    onLabelHotkey: (labelId, selectedHotkeyObjectId) => {
+      if (annotationMode === "labels") {
+        handleToggleLabel(labelId);
+      } else {
+        setGeometryCategoryId(labelId);
+        if (selectedHotkeyObjectId) {
+          assignSelectedGeometryCategory(labelId);
+        }
+      }
+    },
+  });
 
   function handleToggleProjectMultiLabel() {
     if (!selectedProjectId) return;
@@ -827,138 +767,33 @@ export default function ProjectAssetsWorkspace() {
         </header>
 
         <div className="workspace-body">
-          <aside className="workspace-sidebar">
-            <section className="project-tree">
-              <div className="project-tree-head">
-                <h3>Files</h3>
-                <div className="tree-head-actions">
-                  <button type="button" className="tree-scope-button" onClick={handleCollapseAllFolders}>
-                    Collapse all
-                  </button>
-                  <button type="button" className="tree-scope-button" onClick={handleExpandAllFolders}>
-                    Expand all
-                  </button>
-                  <button
-                    type="button"
-                    className={selectedTreeFolderPath === null ? "tree-scope-button active" : "tree-scope-button"}
-                    onClick={() => handleSelectFolderScope(null)}
-                  >
-                    All files
-                  </button>
-                </div>
-              </div>
-              <div className="tree-delete-toolbar">
-                <button
-                  type="button"
-                  className={bulkDeleteMode ? "tree-scope-button danger active" : "tree-scope-button danger"}
-                  onClick={handleToggleBulkDeleteMode}
-                  disabled={!selectedProjectId || isDeletingAssets}
-                >
-                  {bulkDeleteMode ? "Exit multi-delete" : "Multi-delete"}
-                </button>
-                {bulkDeleteMode ? (
-                  <>
-                    <button type="button" className="tree-scope-button" onClick={handleSelectAllDeleteScope} disabled={isDeletingAssets}>
-                      Select scope
-                    </button>
-                    <button type="button" className="tree-scope-button" onClick={handleClearDeleteSelection} disabled={isDeletingAssets}>
-                      Clear
-                    </button>
-                    <button
-                      type="button"
-                      className="tree-scope-button danger"
-                      onClick={handleDeleteSelectedAssets}
-                      disabled={isDeletingAssets || selectedDeleteAssetIds.length === 0}
-                    >
-                      Delete selected ({selectedDeleteAssetIds.length})
-                    </button>
-                  </>
-                ) : null}
-                {selectedTreeFolderPath ? (
-                  <button
-                    type="button"
-                    className="tree-scope-button danger"
-                    onClick={handleDeleteSelectedFolder}
-                    disabled={isDeletingAssets || selectedFolderAssetCount === 0}
-                  >
-                    Delete folder ({selectedFolderAssetCount})
-                  </button>
-                ) : null}
-              </div>
-              {selectedTreeFolderPath ? <p className="tree-scope-caption">Scope: {selectedTreeFolderPath}</p> : null}
-              <ul>
-                {visibleTreeEntries.map((entry) => (
-                  <li key={entry.key}>
-                    {entry.kind === "folder" ? (
-                      <div className="tree-folder-row" style={{ paddingLeft: `${entry.depth * 14 + 8}px` }}>
-                        <button
-                          type="button"
-                          className="tree-folder-toggle"
-                          aria-label={collapsedFolders[entry.path] ? "Expand folder" : "Collapse folder"}
-                          onClick={() => handleToggleFolderCollapsed(entry.path)}
-                        >
-                          {collapsedFolders[entry.path] ? ">" : "v"}
-                        </button>
-                        <button
-                          type="button"
-                          className={`tree-folder-button${selectedTreeFolderPath === entry.path ? " active" : ""} ${
-                            folderReviewStatusByPath[entry.path] === "all_labeled"
-                              ? "is-labeled"
-                              : folderReviewStatusByPath[entry.path] === "has_unlabeled"
-                                ? "has-unlabeled"
-                                : "is-empty"
-                          }${folderDirtyByPath[entry.path] ? " is-dirty" : ""}`}
-                          onClick={() => handleSelectFolderScope(entry.path)}
-                          title={folderDirtyByPath[entry.path] ? `Folder "${entry.path}" has staged edits` : undefined}
-                        >
-                          {entry.name}
-                        </button>
-                        <button
-                          type="button"
-                          className="tree-row-delete"
-                          onClick={() => void handleDeleteFolderPath(entry.path)}
-                          disabled={isDeletingAssets}
-                          title={`Delete "${entry.path}"`}
-                        >
-                          x
-                        </button>
-                      </div>
-                    ) : (
-                      <div className="tree-file-row" style={{ paddingLeft: `${entry.depth * 14 + 8}px` }}>
-                        {bulkDeleteMode && entry.assetId ? (
-                          <input
-                            className="tree-file-checkbox"
-                            type="checkbox"
-                            checked={Boolean(selectedDeleteAssets[entry.assetId])}
-                            onChange={() => {
-                              if (entry.assetId) handleToggleDeleteSelection(entry.assetId);
-                            }}
-                            disabled={isDeletingAssets}
-                            aria-label={`Select ${entry.name} for delete`}
-                          />
-                        ) : null}
-                        <button
-                          type="button"
-                          className={`tree-file${entry.assetId === currentAsset?.id ? " active" : ""} ${
-                            entry.assetId && assetReviewStateById.get(entry.assetId)?.status === "labeled" ? "is-labeled" : "is-unlabeled"
-                          }${entry.assetId && selectedDeleteAssets[entry.assetId] ? " delete-selected" : ""}${
-                            entry.assetId && assetReviewStateById.get(entry.assetId)?.isDirty ? " is-dirty" : ""
-                          }`}
-                          onClick={() =>
-                            entry.assetId &&
-                            (bulkDeleteMode ? handleToggleDeleteSelection(entry.assetId) : handleSelectTreeAsset(entry.assetId, entry.folderPath))
-                          }
-                          title={entry.assetId && assetReviewStateById.get(entry.assetId)?.isDirty ? `${entry.name} has staged edits` : undefined}
-                        >
-                          {entry.name}
-                        </button>
-                      </div>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            </section>
-          </aside>
+          <ProjectAssetsTreeSidebar
+            selectedTreeFolderPath={selectedTreeFolderPath}
+            bulkDeleteMode={bulkDeleteMode}
+            isDeletingAssets={isDeletingAssets}
+            selectedProjectId={selectedProjectId}
+            selectedDeleteAssetIdsLength={selectedDeleteAssetIds.length}
+            selectedFolderAssetCount={selectedFolderAssetCount}
+            visibleTreeEntries={visibleTreeEntries}
+            collapsedFolders={collapsedFolders}
+            folderReviewStatusByPath={folderReviewStatusByPath}
+            folderDirtyByPath={folderDirtyByPath}
+            selectedDeleteAssets={selectedDeleteAssets}
+            currentAssetId={currentAsset?.id ?? null}
+            assetReviewStateById={assetReviewStateById}
+            onCollapseAllFolders={handleCollapseAllFolders}
+            onExpandAllFolders={handleExpandAllFolders}
+            onSelectFolderScope={handleSelectFolderScope}
+            onToggleBulkDeleteMode={handleToggleBulkDeleteMode}
+            onSelectAllDeleteScope={handleSelectAllDeleteScope}
+            onClearDeleteSelection={handleClearDeleteSelection}
+            onDeleteSelectedAssets={handleDeleteSelectedAssets}
+            onDeleteSelectedFolder={handleDeleteSelectedFolder}
+            onToggleFolderCollapsed={handleToggleFolderCollapsed}
+            onDeleteFolderPath={handleDeleteFolderPath}
+            onToggleDeleteSelection={handleToggleDeleteSelection}
+            onSelectTreeAsset={handleSelectTreeAsset}
+          />
 
           <Viewer
             currentAsset={viewerAsset}
@@ -1011,219 +846,58 @@ export default function ProjectAssetsWorkspace() {
           />
         </div>
 
-        <footer className="workspace-footer">
-          <div className="footer-left">
-            <button type="button" className="ghost-button" onClick={handleImport} disabled={isImporting}>
-              {isImporting ? "Importing..." : "Import"}
-            </button>
-            <button type="button" className="ghost-button" onClick={handleExport} disabled={isExporting || !selectedProjectId}>
-              {isExporting ? "Exporting..." : "Export Dataset"}
-            </button>
-            <button
-              type="button"
-              className="ghost-button danger-button"
-              onClick={handleDeleteCurrentAsset}
-              disabled={isDeletingAssets || !selectedProjectId || !currentAsset}
-            >
-              {isDeletingAssets ? "Removing..." : "Remove Image"}
-            </button>
-            <button
-              type="button"
-              className={bulkDeleteMode ? "ghost-button active-toggle" : "ghost-button"}
-              onClick={handleToggleBulkDeleteMode}
-              disabled={!selectedProjectId || isDeletingAssets}
-            >
-              {bulkDeleteMode ? "Exit Multi-delete" : "Multi-delete"}
-            </button>
-            <button
-              type="button"
-              className="ghost-button danger-button"
-              onClick={handleDeleteSelectedAssets}
-              disabled={isDeletingAssets || selectedDeleteAssetIds.length === 0}
-            >
-              {isDeletingAssets ? "Removing..." : `Delete Selected (${selectedDeleteAssetIds.length})`}
-            </button>
-            <button
-              type="button"
-              className="ghost-button danger-button"
-              onClick={handleDeleteSelectedFolder}
-              disabled={isDeletingAssets || !selectedTreeFolderPath || selectedFolderAssetCount === 0}
-            >
-              Delete Folder
-            </button>
-            <button
-              type="button"
-              className="ghost-button danger-button"
-              onClick={handleDeleteCurrentProject}
-              disabled={isDeletingProject || !selectedProjectId}
-            >
-              {isDeletingProject ? "Deleting..." : "Delete Project"}
-            </button>
-            <button type="button" className="primary-button" onClick={handleBuildModel} disabled={!selectedProjectId || isCreatingModel}>
-              {isCreatingModel ? "Building..." : "Build Model"}
-            </button>
-          </div>
-        </footer>
+        <ProjectAssetsFooterActions
+          isImporting={isImporting}
+          isExporting={isExporting}
+          selectedProjectId={selectedProjectId}
+          isDeletingAssets={isDeletingAssets}
+          hasCurrentAsset={Boolean(currentAsset)}
+          bulkDeleteMode={bulkDeleteMode}
+          selectedDeleteAssetIdsLength={selectedDeleteAssetIds.length}
+          selectedTreeFolderPath={selectedTreeFolderPath}
+          selectedFolderAssetCount={selectedFolderAssetCount}
+          isDeletingProject={isDeletingProject}
+          isCreatingModel={isCreatingModel}
+          onImport={handleImport}
+          onExport={handleExport}
+          onDeleteCurrentAsset={handleDeleteCurrentAsset}
+          onToggleBulkDeleteMode={handleToggleBulkDeleteMode}
+          onDeleteSelectedAssets={handleDeleteSelectedAssets}
+          onDeleteSelectedFolder={handleDeleteSelectedFolder}
+          onDeleteCurrentProject={handleDeleteCurrentProject}
+          onBuildModel={handleBuildModel}
+        />
       </section>
-      {message ? (
-        <div className={`status-toast ${messageTone === "error" ? "is-error" : "is-success"}`} role="status" aria-live="polite">
-          <span>{message}</span>
-          <button type="button" aria-label="Dismiss message" onClick={() => setMessage(null)}>
-            x
-          </button>
-        </div>
-      ) : null}
-      {importFailures.length > 0 ? (
-        <ul className="status-errors">
-          {importFailures.map((failure) => (
-            <li key={failure}>{failure}</li>
-          ))}
-        </ul>
-      ) : null}
-      {importDialog.open ? (
-        <div className="import-modal-backdrop">
-          <div className="import-modal">
-            <h3>Import Images</h3>
-            <p className="import-selection-summary">
-              {importDialog.files.length} file{importDialog.files.length === 1 ? "" : "s"} selected
-            </p>
-            <div className="import-mode-row">
-              <label>
-                <input
-                  type="radio"
-                  checked={importMode === "existing"}
-                  onChange={() => setImportModeWithDefaults("existing")}
-                  disabled={projects.length === 0}
-                />
-                Existing Project
-              </label>
-              <label>
-                <input
-                  type="radio"
-                  checked={importMode === "new"}
-                  onChange={() => setImportModeWithDefaults("new")}
-                />
-                New Project
-              </label>
-            </div>
-            <label className="import-field">
-              <span>Project</span>
-              {importMode === "new" ? (
-                <input
-                  value={importNewProjectName}
-                  onChange={(event) => setImportNewProjectName(event.target.value)}
-                  placeholder="Project name"
-                  aria-invalid={Boolean(importValidation.projectError)}
-                />
-              ) : (
-                <select
-                  value={importExistingProjectId}
-                  onChange={(event) => setImportExistingProjectWithDefaults(event.target.value)}
-                  aria-invalid={Boolean(importValidation.projectError)}
-                >
-                  <option value="">Select project</option>
-                  {projects.map((project) => (
-                    <option key={project.id} value={project.id}>
-                      {project.name}
-                    </option>
-                  ))}
-                </select>
-              )}
-              {importValidation.projectError ? (
-                <span className="import-field-error">{importValidation.projectError}</span>
-              ) : (
-                <span className="import-field-hint">
-                  {importMode === "new" ? "Create a new project for this import." : "Choose the project to receive these files."}
-                </span>
-              )}
-            </label>
-            {importMode === "new" ? (
-              <label className="import-field">
-                <span>Project Task Mode</span>
-                <select
-                  value={importNewProjectTaskType}
-                  onChange={(event) => setImportNewProjectTaskType(event.target.value as NewProjectTaskType)}
-                >
-                  <option value="classification_single">Labels (single-label classification)</option>
-                  <option value="bbox">Bounding Boxes</option>
-                  <option value="segmentation">Segmentation</option>
-                </select>
-                <span className="import-field-hint">This mode is locked per project and controls available annotation tools.</span>
-              </label>
-            ) : null}
-            {importMode === "existing" ? (
-              <label className="import-field">
-                <span>Existing Folder/Subfolder (optional)</span>
-                <select
-                  value={selectedImportExistingFolder}
-                  onChange={(event) => setImportExistingFolderWithDefaults(event.target.value)}
-                >
-                  <option value="">Create new / custom</option>
-                  {importExistingFolderOptions.map((folderPath) => (
-                    <option key={folderPath} value={folderPath}>
-                      {folderPath}
-                    </option>
-                  ))}
-                </select>
-                <span className="import-field-hint">Defaults remember your last selected destination folder per project.</span>
-              </label>
-            ) : null}
-            <label className="import-field">
-              <span>Folder Name</span>
-              <input
-                value={importFolderName}
-                onChange={(event) => setImportFolderName(event.target.value)}
-                placeholder={importDialog.sourceFolderName}
-                aria-invalid={Boolean(importValidation.folderError)}
-              />
-              {importValidation.folderError ? (
-                <span className="import-field-error">{importValidation.folderError}</span>
-              ) : (
-                <span className="import-field-hint">You can use nested paths like train/cats.</span>
-              )}
-            </label>
-            {isImporting && importProgressView ? (
-              <section className="import-progress" aria-live="polite">
-                <div className="import-progress-head">
-                  <strong>Importing {importProgressView.progressText}</strong>
-                  <span>{importProgressView.percent}%</span>
-                </div>
-                <div className="import-progress-bar">
-                  <span style={{ width: `${importProgressView.percent}%` }} />
-                </div>
-                <div className="import-progress-metrics">
-                  <span>{importProgressView.bytesText}</span>
-                  <span>{importProgressView.speedText}</span>
-                  <span>{importProgressView.fileRateText}</span>
-                </div>
-                <div className="import-progress-metrics">
-                  <span>{importProgressView.uploadedFilesText}</span>
-                  <span>{importProgressView.failedFilesText}</span>
-                  <span>{importProgressView.remainingFilesText}</span>
-                </div>
-                <div className="import-progress-metrics">
-                  <span>Elapsed: {importProgressView.elapsedText}</span>
-                  <span>ETA: {importProgressView.etaText}</span>
-                </div>
-                {importProgressView.activeFileName ? <p className="import-progress-file">Uploading: {importProgressView.activeFileName}</p> : null}
-              </section>
-            ) : null}
-            <div className="import-modal-actions">
-              <button
-                type="button"
-                className="ghost-button"
-                onClick={closeImportDialog}
-                disabled={isImporting}
-                >
-                Cancel
-              </button>
-              <button type="button" className="primary-button" onClick={confirmImportFromDialog} disabled={isImporting || !importValidation.canSubmit}>
-                {isImporting ? "Importing..." : "Import"}
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
+      <ProjectAssetsStatusOverlay
+        message={message}
+        messageTone={messageTone}
+        importFailures={importFailures}
+        onDismissMessage={() => setMessage(null)}
+      />
+      <ProjectAssetsImportModal
+        open={importDialog.open}
+        filesCount={importDialog.files.length}
+        isImporting={isImporting}
+        projects={projects}
+        importMode={importMode}
+        importNewProjectName={importNewProjectName}
+        importExistingProjectId={importExistingProjectId}
+        importExistingFolderOptions={importExistingFolderOptions}
+        selectedImportExistingFolder={selectedImportExistingFolder}
+        importFolderName={importFolderName}
+        importSourceFolderName={importDialog.sourceFolderName}
+        importNewProjectTaskType={importNewProjectTaskType}
+        importValidation={importValidation}
+        importProgressView={importProgressView}
+        onSetImportModeWithDefaults={setImportModeWithDefaults}
+        onSetImportNewProjectName={setImportNewProjectName}
+        onSetImportExistingProjectWithDefaults={setImportExistingProjectWithDefaults}
+        onSetImportNewProjectTaskType={setImportNewProjectTaskType}
+        onSetImportExistingFolderWithDefaults={setImportExistingFolderWithDefaults}
+        onSetImportFolderName={setImportFolderName}
+        onClose={closeImportDialog}
+        onConfirm={confirmImportFromDialog}
+      />
     </main>
   );
 }

@@ -115,7 +115,7 @@ Status reflects current repository behavior.
   - [x] keep project-scoped model records behavior stable while preparing migration from file-backed store to DB-backed table
   - [x] verify targeted regressions + full API test suite on Postgres-backed local test runtime
 - [ ] Surgical decomposition of complexity hotspots
-  - [ ] split `apps/web/src/components/workspace/ProjectAssetsWorkspace.tsx` into focused subcomponents/hooks without behavior changes
+  - [x] split `apps/web/src/components/workspace/ProjectAssetsWorkspace.tsx` into focused subcomponents/hooks without behavior changes
   - [ ] split `apps/api/src/sheriff_api/routers/experiments.py` by concern (analytics/start-cancel/events/evaluation) to reduce regression risk
   - [ ] ensure each extraction is paired with regression tests in the same PR
 

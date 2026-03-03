@@ -19,6 +19,11 @@ Local-first CV annotation platform.
 - Workspace internals were refactored:
   - root route now redirects to project-scoped routes
   - datasets workspace moved to `apps/web/src/components/workspace/ProjectAssetsWorkspace.tsx`
+  - datasets workspace composition was further decomposed into focused project-assets subcomponents/hooks:
+    - `apps/web/src/components/workspace/project-assets/*`
+    - `apps/web/src/lib/hooks/useProjectMultiLabelSettings.ts`
+    - `apps/web/src/lib/hooks/useWorkspaceHotkeys.ts`
+    - `apps/web/src/lib/workspace/projectAssetsDerived.*`
   - project shell layout now handles project selector, top tabs, and project status bar
   - annotation, import, and delete workflows remain in dedicated hooks
   - tree/pagination/annotation-state logic moved into pure workspace helpers with unit tests

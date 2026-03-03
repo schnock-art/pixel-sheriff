@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- `ProjectAssetsWorkspace` decomposition coverage:
+  - added focused workspace subcomponents under `apps/web/src/components/workspace/project-assets/`:
+    - `ProjectAssetsTreeSidebar`
+    - `ProjectAssetsFooterActions`
+    - `ProjectAssetsImportModal`
+    - `ProjectAssetsStatusOverlay`
+  - added focused hooks:
+    - `useProjectMultiLabelSettings`
+    - `useWorkspaceHotkeys`
+  - added extracted pure workspace-derivation helpers:
+    - `apps/web/src/lib/workspace/projectAssetsDerived.*`
+  - added regression coverage for extracted derivations:
+    - `apps/web/tests/projectAssetsDerived.test.js`
 - Consistency hardening pass:
   - standardized project/category/export-download router failures onto `api_error` with stable domain codes (`project_not_found`, `category_not_found`, `export_path_invalid`, `export_file_not_found`)
   - extracted shared dataset export pipeline service used by both exports and experiments flows to remove duplicated selection/rebuild logic
@@ -165,6 +178,7 @@ All notable changes to this project will be documented in this file.
   - web helper tests for analytics shaping, confusion normalization, and prediction drill-down filtering
 
 ### Changed
+- `apps/web/src/components/workspace/ProjectAssetsWorkspace.tsx` was reduced to orchestration/composition wiring while preserving behavior and existing CSS/UX contracts.
 - Docs refreshed to align with current implementation:
   - `README.md`
   - `docu/Architecture.md`

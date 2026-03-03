@@ -21,6 +21,11 @@ Primary workflow:
 7. Create experiments from project models, tune training params, and run worker-executed training with live SSE metrics + checkpoints.
 8. Compare project runs from analytics dashboard and inspect classification evaluation artifacts (confusion matrix, per-class metrics, prediction explorer).
 
+Current frontend workspace decomposition note:
+- `ProjectAssetsWorkspace` now acts as a composition/orchestration container.
+- Sidebar/footer/import-modal/status-toast rendering are extracted into focused components under `apps/web/src/components/workspace/project-assets/`.
+- Workspace-specific local-storage settings, hotkey handling, and view-model derivations are extracted into dedicated hooks/helpers under `apps/web/src/lib/hooks/*` and `apps/web/src/lib/workspace/projectAssetsDerived.*`.
+
 ## 2. Runtime Topology
 
 Compose services and default host ports:
