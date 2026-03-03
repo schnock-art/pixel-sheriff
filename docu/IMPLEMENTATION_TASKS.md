@@ -114,10 +114,10 @@ Status reflects current repository behavior.
   - [x] remove duplicated export selection/rebuild logic shared across `exports` and `experiments` flows
   - [x] keep project-scoped model records behavior stable while preparing migration from file-backed store to DB-backed table
   - [x] verify targeted regressions + full API test suite on Postgres-backed local test runtime
-- [ ] Surgical decomposition of complexity hotspots
+- [x] Surgical decomposition of complexity hotspots
   - [x] split `apps/web/src/components/workspace/ProjectAssetsWorkspace.tsx` into focused subcomponents/hooks without behavior changes
-  - [ ] split `apps/api/src/sheriff_api/routers/experiments.py` by concern (analytics/start-cancel/events/evaluation) to reduce regression risk
-  - [ ] ensure each extraction is paired with regression tests in the same PR
+  - [x] split `apps/api/src/sheriff_api/routers/experiments.py` by concern (analytics/start-cancel/events/evaluation) to reduce regression risk
+  - [x] ensure each extraction is paired with regression tests in the same PR
 
 ### Open Bugfixes
 - [ ] Investigate intermittent `POST /projects/{project_id}/annotations` `404` in some submit flows:

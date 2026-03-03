@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- Experiments router decomposition + regression pairing:
+  - split monolithic `apps/api/src/sheriff_api/routers/experiments.py` into concern-focused package modules:
+    - `experiments/crud.py`
+    - `experiments/analytics.py`
+    - `experiments/evaluation.py`
+    - `experiments/runs.py`
+    - shared deps/helpers in `experiments/shared.py`
+  - preserved import/runtime compatibility for existing wiring and tests (`router`, `train_queue`, `experiment_store` exported from `sheriff_api.routers.experiments`)
+  - added focused API regression module `apps/api/tests/test_experiments_api.py` covering:
+    - queue failure path (`train_queue_unavailable`) and failed-run event emission
+    - events non-follow snapshot behavior for no-attempt and terminal states
+    - evaluation-backed samples fallback when predictions are missing
+    - samples empty-message and `evaluation_not_found` branches
+  - no HTTP contract changes (endpoint paths/methods/payloads/error envelopes preserved)
 - `ProjectAssetsWorkspace` decomposition coverage:
   - added focused workspace subcomponents under `apps/web/src/components/workspace/project-assets/`:
     - `ProjectAssetsTreeSidebar`
