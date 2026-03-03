@@ -52,6 +52,7 @@ def _preprocess_from_model(model_config: dict[str, Any], *, input_shape: tuple[i
     if not isinstance(normalization, dict):
         normalization = {"type": "imagenet"}
     return {
+        "resize_policy": "stretch",
         "resize": {"width": int(width), "height": int(height)},
         "normalization": normalization,
         "channels": int(channels),

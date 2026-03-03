@@ -1,5 +1,5 @@
 ﻿function normalizeSection(section) {
-  return section === "datasets" || section === "models" || section === "experiments" ? section : "datasets";
+  return section === "datasets" || section === "models" || section === "experiments" || section === "deploy" ? section : "datasets";
 }
 
 function deriveProjectSectionFromPathname(pathname) {

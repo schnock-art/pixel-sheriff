@@ -7,6 +7,8 @@ import { LabelPanel } from "../LabelPanel";
 import { Viewer } from "../Viewer";
 import {
   ApiError,
+  listDeployments,
+  predict,
   createProjectModel,
   createExport,
   createCategory,
@@ -98,6 +100,15 @@ export default function ProjectAssetsWorkspace() {
 
   const { data: assets, annotations, setAnnotations, refetch: refetchAssets, isLoading: isAssetsLoading } = useAssets(selectedProjectId);
   const { data: labels, refetch: refetchLabels } = useLabels(selectedProjectId);
+  const [deploymentsState, setDeploymentsState] = useState<{
+    active_deployment_id: string | null;
+    items: Array<{ deployment_id: string; name: string; device_preference: string; status: string }>;
+  }>({ active_deployment_id: null, items: [] });
+  const [suggestionPredictions, setSuggestionPredictions] = useState<
+    Array<{ class_id: number; class_name: string; score: number }>
+  >([]);
+  const [lastInferenceDeviceSelected, setLastInferenceDeviceSelected] = useState<string | null>(null);
+  const [isSuggesting, setIsSuggesting] = useState(false);
   const availableAssetIds = useMemo(() => assets.map((asset) => asset.id), [assets]);
   const selectedProjectName = selectedProject?.name ?? "No project selected";
   const importWorkflow = useImportWorkflow({
@@ -169,6 +180,10 @@ export default function ProjectAssetsWorkspace() {
     for (const label of allLabelRows) map.set(label.id, label.name);
     return map;
   }, [allLabelRows]);
+  const activeDeployment = useMemo(
+    () => deploymentsState.items.find((item) => item.deployment_id === deploymentsState.active_deployment_id) ?? null,
+    [deploymentsState.active_deployment_id, deploymentsState.items],
+  );
 
   const safeAssetIndex = Math.min(assetIndex, Math.max(assetRows.length - 1, 0));
   const currentAsset = assetRows[safeAssetIndex] ?? null;
@@ -308,6 +323,28 @@ export default function ProjectAssetsWorkspace() {
   useEffect(() => {
     setHasUnsavedDrafts(pendingCount > 0);
   }, [pendingCount, setHasUnsavedDrafts]);
+
+  useEffect(() => {
+    let mounted = true;
+    async function loadDeployments() {
+      if (!selectedProjectId) {
+        setDeploymentsState({ active_deployment_id: null, items: [] });
+        return;
+      }
+      try {
+        const response = await listDeployments(selectedProjectId);
+        if (!mounted) return;
+        setDeploymentsState(response);
+      } catch {
+        if (!mounted) return;
+        setDeploymentsState({ active_deployment_id: null, items: [] });
+      }
+    }
+    void loadDeployments();
+    return () => {
+      mounted = false;
+    };
+  }, [selectedProjectId]);
 
   useEffect(() => () => setHasUnsavedDrafts(false), [setHasUnsavedDrafts]);
 
@@ -695,6 +732,42 @@ export default function ProjectAssetsWorkspace() {
     });
   }
 
+  async function handleSuggest() {
+    if (!selectedProjectId || !currentAsset) {
+      setMessage("Select an image before requesting suggestions.");
+      return;
+    }
+    try {
+      setIsSuggesting(true);
+      const response = await predict(selectedProjectId, {
+        asset_id: currentAsset.id,
+        deployment_id: null,
+        top_k: 5,
+      });
+      setSuggestionPredictions(
+        (response.predictions ?? []).map((row) => ({
+          class_id: row.class_id,
+          class_name: row.class_name,
+          score: row.score,
+        })),
+      );
+      setLastInferenceDeviceSelected(response.device_selected ?? null);
+    } catch (error) {
+      if (error instanceof ApiError && error.responseBody) {
+        setMessage(`Suggest failed: ${error.responseBody}`);
+      } else {
+        setMessage(error instanceof Error ? `Suggest failed: ${error.message}` : "Suggest failed.");
+      }
+    } finally {
+      setIsSuggesting(false);
+    }
+  }
+
+  function handleApplySuggestedLabel(categoryId: number) {
+    clearSelectedLabels();
+    handleToggleLabelForCurrentMode(categoryId);
+  }
+
   function handleSelectFolderScope(folderPath: string | null) {
     if (folderPath) {
       setCollapsedFolders((previous) => {
@@ -843,6 +916,14 @@ export default function ProjectAssetsWorkspace() {
             onHoverObject={setHoveredGeometryObjectId}
             onSelectObject={handleSelectGeometryObject}
             onDeleteSelectedObject={deleteSelectedGeometryObject}
+            activeDeploymentName={activeDeployment?.name ?? null}
+            activeDeploymentDevicePreference={activeDeployment?.device_preference ?? null}
+            lastInferenceDeviceSelected={lastInferenceDeviceSelected}
+            suggestionPredictions={suggestionPredictions}
+            isSuggesting={isSuggesting}
+            hasActiveDeployment={Boolean(activeDeployment)}
+            onSuggest={handleSuggest}
+            onApplySuggestedLabel={handleApplySuggestedLabel}
           />
         </div>
 

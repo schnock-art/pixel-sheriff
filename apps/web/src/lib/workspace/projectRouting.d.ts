@@ -1,4 +1,4 @@
-﻿export type ProjectShellSection = "datasets" | "models" | "experiments";
+﻿export type ProjectShellSection = "datasets" | "models" | "experiments" | "deploy";
 
 export function normalizeSection(section: unknown): ProjectShellSection;
 export function deriveProjectSectionFromPathname(pathname: unknown): ProjectShellSection;

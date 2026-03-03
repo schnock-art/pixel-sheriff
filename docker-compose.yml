@@ -30,6 +30,7 @@ services:
       JOB_QUEUE_KEY: ${JOB_QUEUE_KEY:-pixel_sheriff:train_jobs:v1}
       STORAGE_ROOT: /app/data
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      TRAINER_INFERENCE_BASE_URL: ${TRAINER_INFERENCE_BASE_URL:-http://trainer:8020}
     ports:
       - "${API_PORT:-8000}:8000"
     depends_on:
@@ -49,6 +50,10 @@ services:
       JOB_QUEUE_KEY: ${JOB_QUEUE_KEY:-pixel_sheriff:train_jobs:v1}
       STORAGE_ROOT: /app/data
       TRAINER_POLL_SECONDS: ${TRAINER_POLL_SECONDS:-5}
+      TRAINER_INFERENCE_PORT: ${TRAINER_INFERENCE_PORT:-8020}
+      INFERENCE_CACHE_MAX_MODELS_GPU: ${INFERENCE_CACHE_MAX_MODELS_GPU:-1}
+      INFERENCE_CACHE_MAX_MODELS_CPU: ${INFERENCE_CACHE_MAX_MODELS_CPU:-3}
+      INFERENCE_CACHE_TTL_SECONDS: ${INFERENCE_CACHE_TTL_SECONDS:-600}
       NVIDIA_VISIBLE_DEVICES: ${NVIDIA_VISIBLE_DEVICES:-all}
       NVIDIA_DRIVER_CAPABILITIES: ${NVIDIA_DRIVER_CAPABILITIES:-compute,utility}
     depends_on:
@@ -56,6 +61,8 @@ services:
       - db
     volumes:
       - ./data:/app/data
+    expose:
+      - "${TRAINER_INFERENCE_PORT:-8020}"
     gpus: ${TRAINER_GPUS:-all}
     restart: unless-stopped
 

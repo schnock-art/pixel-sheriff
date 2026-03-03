@@ -54,6 +54,14 @@ interface LabelPanelProps {
   onHoverObject: (objectId: string | null) => void;
   onSelectObject: (objectId: string | null) => void;
   onDeleteSelectedObject: () => void;
+  activeDeploymentName?: string | null;
+  activeDeploymentDevicePreference?: string | null;
+  lastInferenceDeviceSelected?: string | null;
+  suggestionPredictions?: Array<{ class_id: number; class_name: string; score: number }>;
+  isSuggesting?: boolean;
+  hasActiveDeployment?: boolean;
+  onSuggest?: () => void;
+  onApplySuggestedLabel?: (categoryId: number) => void;
 }
 
 export function LabelPanel({
@@ -84,6 +92,14 @@ export function LabelPanel({
   onHoverObject,
   onSelectObject,
   onDeleteSelectedObject,
+  activeDeploymentName = null,
+  activeDeploymentDevicePreference = null,
+  lastInferenceDeviceSelected = null,
+  suggestionPredictions = [],
+  isSuggesting = false,
+  hasActiveDeployment = false,
+  onSuggest,
+  onApplySuggestedLabel,
 }: LabelPanelProps) {
   const [manageMode, setManageMode] = useState(false);
   const [draftLabels, setDraftLabels] = useState<ManageLabelItem[]>([]);
@@ -209,6 +225,48 @@ export function LabelPanel({
         >
           Clear Selected Labels
         </button>
+      ) : null}
+
+      {annotationMode === "labels" ? (
+        <section className="placeholder-card">
+          <h4>Suggestions</h4>
+          {hasActiveDeployment ? (
+            <>
+              <p className="labels-empty">
+                Model: {activeDeploymentName ?? "-"} | preference: {activeDeploymentDevicePreference ?? "-"} | last device: {lastInferenceDeviceSelected ?? "-"}
+              </p>
+              <div className="label-actions">
+                <button type="button" className="ghost-button" onClick={onSuggest} disabled={isSuggesting || !onSuggest}>
+                  {isSuggesting ? "Suggesting..." : "Suggest"}
+                </button>
+                <button
+                  type="button"
+                  className="primary-button"
+                  onClick={() => onApplySuggestedLabel?.(suggestionPredictions[0].class_id)}
+                  disabled={suggestionPredictions.length === 0 || !onApplySuggestedLabel}
+                >
+                  Apply top-1
+                </button>
+              </div>
+              {suggestionPredictions.length > 0 ? (
+                <ol className="label-list">
+                  {suggestionPredictions.map((row) => (
+                    <li key={`${row.class_id}-${row.class_name}`}>
+                      <button type="button" className="label-item" onClick={() => onApplySuggestedLabel?.(row.class_id)}>
+                        <span>{row.class_name}</span>
+                        <span className="label-check">{row.score.toFixed(3)}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ol>
+              ) : (
+                <p className="labels-empty">No suggestions yet.</p>
+              )}
+            </>
+          ) : (
+            <p className="labels-empty">No active deployment. Open Deploy tab to configure one.</p>
+          )}
+        </section>
       ) : null}
 
       {annotationMode !== "labels" ? (

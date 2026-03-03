@@ -5,7 +5,9 @@ import os
 from pathlib import Path
 
 from redis.asyncio import Redis
+import uvicorn
 
+from pixel_sheriff_trainer.inference.app import create_app
 from pixel_sheriff_trainer.jobs import parse_train_job
 from pixel_sheriff_trainer.runner import TrainRunner
 
@@ -44,8 +46,30 @@ async def worker_loop() -> None:
         await redis.aclose()
 
 
+async def inference_loop() -> None:
+    host = os.getenv("TRAINER_INFERENCE_HOST", "0.0.0.0")
+    port = int(os.getenv("TRAINER_INFERENCE_PORT", "8020"))
+    app = create_app()
+    config = uvicorn.Config(app=app, host=host, port=port, log_level="info")
+    server = uvicorn.Server(config=config)
+    await server.serve()
+
+
+async def service_loop() -> None:
+    worker_task = asyncio.create_task(worker_loop(), name="trainer-worker")
+    inference_task = asyncio.create_task(inference_loop(), name="trainer-inference")
+    done, pending = await asyncio.wait({worker_task, inference_task}, return_when=asyncio.FIRST_COMPLETED)
+    for task in pending:
+        task.cancel()
+    await asyncio.gather(*pending, return_exceptions=True)
+    for task in done:
+        exc = task.exception()
+        if exc is not None:
+            raise exc
+
+
 def main() -> None:
-    asyncio.run(worker_loop())
+    asyncio.run(service_loop())
 
 
 if __name__ == "__main__":

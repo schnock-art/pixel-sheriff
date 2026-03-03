@@ -221,7 +221,11 @@ function ProjectRouteLayout({ children }: ProjectRouteLayoutProps) {
               >
                 Experiments
               </button>
-              <button type="button" className="project-nav-tab disabled" disabled title="Coming soon">
+              <button
+                type="button"
+                className={currentSection === "deploy" ? "project-nav-tab active" : "project-nav-tab"}
+                onClick={() => handleTabSelect("deploy")}
+              >
                 Deploy
               </button>
             </nav>

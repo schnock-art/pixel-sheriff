@@ -26,7 +26,12 @@ Status reflects current repository behavior.
 - [x] Export metadata endpoints (create/list)
 - [x] Export zip build (`manifest.json`, `coco_instances.json`, `assets/`)
 - [x] Export download endpoint
-- [x] MAL placeholder endpoints (models/suggestions)
+- [x] MAL v1 deployment + prediction endpoints:
+  - [x] `POST /projects/{project_id}/deployments`
+  - [x] `GET /projects/{project_id}/deployments`
+  - [x] `PATCH /projects/{project_id}/deployments/{deployment_id}`
+  - [x] `POST /projects/{project_id}/predict`
+  - [x] `POST /projects/{project_id}/deployments/{deployment_id}/warmup` (optional warm-start)
 - [x] Project-scoped model scaffold endpoints:
   - [x] `GET /projects/{project_id}/models`
   - [x] `POST /projects/{project_id}/models` (manifest-derived deterministic `ModelConfig` + schema validation)
@@ -44,6 +49,10 @@ Status reflects current repository behavior.
   - [x] `GET /projects/{project_id}/experiments/{experiment_id}/onnx` (metadata + artifact URLs)
   - [x] `GET /projects/{project_id}/experiments/{experiment_id}/onnx/download?file=model|metadata`
   - [x] stable `onnx_not_found` error code for absent ONNX artifacts
+- [x] Deployment predict hardening:
+  - [x] strict `class_ids` mapping from ONNX metadata
+  - [x] `deployment_output_dim_mismatch` validation on response class-index bounds/output dimension
+  - [x] internal trainer inference HTTP client (`TRAINER_INFERENCE_BASE_URL`)
 
 ### Web (`apps/web`)
 - [x] Root route now redirects to `/projects`
@@ -57,7 +66,7 @@ Status reflects current repository behavior.
 - [x] Project shell UI:
   - [x] project selector dropdown
   - [x] create-project modal
-  - [x] section tabs (`Datasets`, `Models`, `Experiments`, disabled `Deploy`)
+  - [x] section tabs (`Datasets`, `Models`, `Experiments`, `Deploy`)
   - [x] project status summary bar
 - [x] Datasets workspace extracted to `ProjectAssetsWorkspace`
 - [x] Unsaved-draft guard on project/tab/build-model navigation
@@ -114,6 +123,12 @@ Status reflects current repository behavior.
   - [x] model + metadata download actions
   - [x] ONNX metadata display (input shape, class order, validation badge)
   - [x] SSE-driven ONNX refresh on `onnx_export` events
+- [x] Deploy + MAL UI:
+  - [x] `/projects/{project_id}/deploy` page with active deployment selection + device preference
+  - [x] deploy-from-experiment flow
+  - [x] warmup button
+  - [x] labeling suggestions panel (`Suggest`, top-k chips, `Apply top-1`)
+  - [x] show configured `device_preference` and last `device_selected`
 
 ### Trainer (`apps/trainer`)
 - [x] Classification-first trainer scalability/efficiency pass:
@@ -138,6 +153,14 @@ Status reflects current repository behavior.
   - [x] ONNX + ONNXRuntime validation pass (dummy inference, batch size 1 and 4)
   - [x] SSE event emission for ONNX export completion/failure
   - [x] dependency updates: `onnx`, `onnxruntime`, `onnxscript`
+- [x] Inference service + cache hardening:
+  - [x] internal FastAPI inference endpoints in trainer (`/infer/classification`, `/infer/classification/warmup`)
+  - [x] on-demand ONNXRuntime session loading (no eager deploy-time load)
+  - [x] LRU + TTL cache with per-entry lease counters (`in_use`) and eviction safety
+  - [x] cache key uses `(model_key, device_selected)` where `model_key` is ONNX SHA-256
+  - [x] saturation behavior: attempt CPU fallback; return `cache_busy` when no capacity is available
+  - [x] `asyncio.to_thread` offload for preprocessing + ORT inference
+  - [x] explicit preprocess contract now includes `resize_policy` (`stretch` default)
 
 ### Docs
 - [x] README aligned with implemented stack/workflow
@@ -328,6 +351,6 @@ Status reflects current repository behavior.
 ## Deferred (Roadmap-aligned)
 - [ ] Review/QA mode
 - [ ] Video ingestion + frame extraction
-- [ ] MAL integration beyond placeholders
+- [ ] MAL batch inference endpoint/workflow (`/predict/batch`) for curation-scale operations
 - [ ] Reference-mode asset ingestion (cloud/object-store links)
 - [ ] Shared asset library with project-specific annotations

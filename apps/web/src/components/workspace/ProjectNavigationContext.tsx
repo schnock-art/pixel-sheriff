@@ -4,7 +4,7 @@ import { createContext, useCallback, useContext, useMemo, useState, type ReactNo
 
 import { shouldAllowNavigation } from "../../lib/workspace/navigationGuard";
 
-export type ProjectShellSection = "datasets" | "models" | "experiments";
+export type ProjectShellSection = "datasets" | "models" | "experiments" | "deploy";
 
 export interface ProjectNavigationGuardState {
   hasUnsavedDrafts: boolean;

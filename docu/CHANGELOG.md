@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- Deploy + MAL v1 (classification ONNX) end-to-end:
+  - API deployment registry + prediction endpoints:
+    - `POST /api/v1/projects/{project_id}/deployments`
+    - `GET /api/v1/projects/{project_id}/deployments`
+    - `PATCH /api/v1/projects/{project_id}/deployments/{deployment_id}`
+    - `POST /api/v1/projects/{project_id}/predict`
+    - `POST /api/v1/projects/{project_id}/deployments/{deployment_id}/warmup`
+  - deployment records now persist stable `model_key` (ONNX SHA-256) for cache identity
+  - prediction mapping hardened with strict `class_ids` contract and `deployment_output_dim_mismatch` guardrails
+  - trainer now serves internal inference HTTP endpoints and keeps Redis worker behavior
+  - ONNXRuntime inference cache added with LRU + TTL + lease-safe eviction and CUDA->CPU saturation fallback
+  - inference path offloads preprocessing + ORT execution using `asyncio.to_thread`
+  - ONNX metadata preprocess contract now writes explicit `resize_policy` (`stretch` default)
+  - compose wiring adds trainer inference port/env + API trainer inference base URL
+  - web deploy section enabled with active deployment selector, device preference selector, deploy-from-experiment, and warmup action
+  - labeling UI now includes MAL suggestions panel with `Suggest`, top-k chips, `Apply top-1`, and requested-vs-actual device display
+  - added trainer tests for cache behavior/preprocess ordering and web helper tests for deploy/suggestions state
 - Experiments router decomposition + regression pairing:
   - split monolithic `apps/api/src/sheriff_api/routers/experiments.py` into concern-focused package modules:
     - `experiments/crud.py`

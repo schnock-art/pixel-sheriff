@@ -21,6 +21,8 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
     job_queue_key: str = "pixel_sheriff:train_jobs:v1"
     suggestion_queue_key: str = "pixel_sheriff:suggest_jobs:v1"
+    trainer_inference_base_url: str = "http://trainer:8020"
+    trainer_inference_timeout_seconds: float = 15.0
 
     @model_validator(mode="after")
     def apply_database_url_default(self) -> "Settings":

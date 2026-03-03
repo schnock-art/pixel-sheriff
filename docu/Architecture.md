@@ -32,7 +32,7 @@ Compose services and default host ports:
 
 - `web` -> `WEB_PORT` (default `3010`)
 - `api` -> `API_PORT` (default `8010`)
-- `trainer` -> background worker service (no host port)
+- `trainer` -> worker + internal inference service (`TRAINER_INFERENCE_PORT`, default `8020`, container-network only)
 - `db` -> `POSTGRES_PORT` (default `5433`)
 - `redis` -> `REDIS_PORT` (default `6380`)
 
@@ -217,6 +217,20 @@ Trainer responsibilities and runtime behavior:
 - Worker entrypoint: `apps/trainer/src/pixel_sheriff_trainer/main.py`
 - Queue contract: Redis `RPUSH/BLPOP` on `pixel_sheriff:train_jobs:v1`
 - Job dispatcher: `apps/trainer/src/pixel_sheriff_trainer/runner.py`
+- Internal inference service:
+  - FastAPI app at `pixel_sheriff_trainer/inference/app.py`
+  - endpoints: `POST /infer/classification`, `POST /infer/classification/warmup`
+  - request path includes `model_key` + ONNX/metadata/asset relpaths and device preference
+  - response returns `device_selected` and top-k class-index scores
+- ONNXRuntime session cache (inference):
+  - LRU + TTL policy with env knobs:
+    - `INFERENCE_CACHE_MAX_MODELS_GPU`
+    - `INFERENCE_CACHE_MAX_MODELS_CPU`
+    - `INFERENCE_CACHE_TTL_SECONDS`
+  - cache key: `(model_key, device_selected)` where `model_key` is ONNX SHA-256
+  - per-entry lease counter (`in_use`) prevents eviction while requests are in-flight
+  - saturation policy: fallback CUDA->CPU where possible; return `cache_busy` when no capacity remains
+  - inference/preprocess work is offloaded with `asyncio.to_thread`
 - Classification implementation:
   - export-zip dataset loader (`classification/dataset.py`)
   - epoch train/eval loops (`classification/train.py`, `classification/eval.py`)
@@ -286,7 +300,7 @@ Exports:
 - `GET /api/v1/projects/{project_id}/exports`
 - `GET /api/v1/projects/{project_id}/exports/{content_hash}/download`
 
-MAL contract (initial):
+MAL contracts:
 
 - `POST /api/v1/models`
 - `GET /api/v1/models`
@@ -294,6 +308,11 @@ MAL contract (initial):
 - `POST /api/v1/projects/{project_id}/suggestions/batch`
 - `POST /api/v1/projects/{project_id}/suggestions/{suggestion_id}/accept`
 - `POST /api/v1/projects/{project_id}/suggestions/{suggestion_id}/reject`
+- `POST /api/v1/projects/{project_id}/deployments`
+- `GET /api/v1/projects/{project_id}/deployments`
+- `PATCH /api/v1/projects/{project_id}/deployments/{deployment_id}`
+- `POST /api/v1/projects/{project_id}/predict`
+- `POST /api/v1/projects/{project_id}/deployments/{deployment_id}/warmup`
 
 Project model export contract:
 
@@ -352,10 +371,11 @@ App-router entry and project shell:
 - `apps/web/src/app/projects/page.tsx` resolves last/first project or shows empty-state create flow
 - `apps/web/src/app/projects/[projectId]/layout.tsx` provides:
   - project selector dropdown + create-project modal
-  - section tabs (`Datasets`, `Models`, `Experiments`, disabled `Deploy`)
+  - section tabs (`Datasets`, `Models`, `Experiments`, `Deploy`)
   - project status summary bar
   - guarded navigation for unsaved drafts
 - `apps/web/src/app/projects/[projectId]/datasets/page.tsx` mounts the datasets workspace
+- `apps/web/src/app/projects/[projectId]/deploy/page.tsx` manages active deployment selection, device preference, deployment creation from experiments, and warmup
 - `apps/web/src/app/projects/[projectId]/models/page.tsx` renders project-scoped model list/empty state + create flow
 - `apps/web/src/app/projects/[projectId]/models/[modelId]/page.tsx` renders editable Model Builder controls with draft/save state, AJV validation, and live summary updates
 - `apps/web/src/app/projects/[projectId]/experiments/page.tsx` renders experiment list plus analytics dashboard (summary cards, multi-run chart, hyperparameter scatter)
@@ -583,7 +603,8 @@ Supported statuses:
 - Review/QA moderation workflow not implemented
 - Geometry tooling polish pending (no polygon vertex dragging/editing yet)
 - Auth/multi-user permissions not implemented
-- MAL inference/generation runtime remains partial (queue + persistence + decision contracts implemented; inference quality pipeline pending)
+- MAL runtime v1 is implemented for classification ONNX (`deployments` + on-demand `/predict` via trainer inference service with session cache)
+- MAL batch/curation inference workflows are still pending (`/predict/batch` and queue-driven bulk scoring)
 - Detection/segmentation training execution remains TODO (unsupported jobs fail gracefully)
 - Classification training currently supports `resnet_classifier` family only in worker runtime
 - Detection/segmentation deep evaluation dashboards are placeholders (classification analytics only in this phase)

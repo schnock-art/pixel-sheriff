@@ -10,7 +10,7 @@ from sheriff_api.config import get_settings
 from sheriff_api.db.models import Base, TaskType
 from sheriff_api.db.session import engine
 from sheriff_api.errors import http_exception_handler, request_validation_exception_handler
-from sheriff_api.routers import annotations, assets, categories, experiments, exports, health, models, projects
+from sheriff_api.routers import annotations, assets, categories, deployments, experiments, exports, health, models, projects
 
 settings = get_settings()
 
@@ -50,3 +50,4 @@ app.include_router(annotations.router, prefix="/api/v1")
 app.include_router(exports.router, prefix="/api/v1")
 app.include_router(models.router, prefix="/api/v1")
 app.include_router(experiments.router, prefix="/api/v1")
+app.include_router(deployments.router, prefix="/api/v1")

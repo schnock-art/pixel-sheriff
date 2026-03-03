@@ -414,6 +414,77 @@ export interface ExperimentLogsChunk {
   content: string;
 }
 
+export type DeploymentDevicePreference = "auto" | "cuda" | "cpu";
+export type DeploymentStatus = "available" | "archived";
+
+export interface DeploymentSource {
+  experiment_id: string;
+  attempt: number;
+  checkpoint_kind: "best_metric" | "best_loss" | "latest";
+  onnx_relpath: string;
+  metadata_relpath: string;
+}
+
+export interface DeploymentItem {
+  deployment_id: string;
+  name: string;
+  task: "classification";
+  provider: "onnxruntime";
+  device_preference: DeploymentDevicePreference;
+  model_key: string;
+  source: DeploymentSource;
+  status: DeploymentStatus;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DeploymentListResponse {
+  active_deployment_id: string | null;
+  items: DeploymentItem[];
+}
+
+export interface CreateDeploymentPayload {
+  name: string;
+  task?: "classification";
+  device_preference?: DeploymentDevicePreference;
+  source: {
+    experiment_id: string;
+    attempt: number;
+    checkpoint_kind?: "best_metric" | "best_loss" | "latest";
+  };
+  is_active?: boolean;
+}
+
+export interface PatchDeploymentPayload {
+  is_active?: boolean;
+  name?: string;
+  device_preference?: DeploymentDevicePreference;
+  status?: DeploymentStatus;
+}
+
+export interface PredictPayload {
+  asset_id: string;
+  deployment_id?: string | null;
+  top_k?: number;
+}
+
+export interface PredictPrediction {
+  class_index: number;
+  class_id: number;
+  class_name: string;
+  score: number;
+}
+
+export interface PredictResponse {
+  asset_id: string;
+  deployment_id: string;
+  task: "classification";
+  device_selected: "cuda" | "cpu";
+  predictions: PredictPrediction[];
+  deployment_name?: string | null;
+  device_preference?: DeploymentDevicePreference | null;
+}
+
 export type ExperimentEvent =
   | { type: "status"; status: ExperimentStatus; attempt?: number; job_id?: string; ts?: string; message?: string }
   | ({ type: "metric"; attempt?: number; ts?: string } & ExperimentMetricPoint)
@@ -653,6 +724,37 @@ export function startExperiment(projectId: string, experimentId: string): Promis
 export function cancelExperiment(projectId: string, experimentId: string): Promise<ExperimentActionResponse> {
   return apiPost<ExperimentActionResponse, Record<string, never>>(
     `/projects/${projectId}/experiments/${experimentId}/cancel`,
+    {},
+  );
+}
+
+export function listDeployments(projectId: string): Promise<DeploymentListResponse> {
+  return apiGet<DeploymentListResponse>(`/projects/${projectId}/deployments`);
+}
+
+export function createDeployment(projectId: string, payload: CreateDeploymentPayload): Promise<{ deployment: DeploymentItem }> {
+  return apiPost<{ deployment: DeploymentItem }, CreateDeploymentPayload>(`/projects/${projectId}/deployments`, payload);
+}
+
+export function patchDeployment(
+  projectId: string,
+  deploymentId: string,
+  payload: PatchDeploymentPayload,
+): Promise<{ deployment: DeploymentItem }> {
+  return requestJson<{ deployment: DeploymentItem }>(`/projects/${projectId}/deployments/${deploymentId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export function predict(projectId: string, payload: PredictPayload): Promise<PredictResponse> {
+  return apiPost<PredictResponse, PredictPayload>(`/projects/${projectId}/predict`, payload);
+}
+
+export function warmupDeployment(projectId: string, deploymentId: string): Promise<{ ok: boolean; device_selected: "cuda" | "cpu" }> {
+  return apiPost<{ ok: boolean; device_selected: "cuda" | "cpu" }, Record<string, never>>(
+    `/projects/${projectId}/deployments/${deploymentId}/warmup`,
     {},
   );
 }

@@ -8,6 +8,7 @@ import zipfile
 from httpx import AsyncClient
 import pytest
 import sheriff_api.routers.assets as assets_router
+import sheriff_api.routers.deployments as deployments_router
 import sheriff_api.routers.exports as exports_router
 import sheriff_api.routers.models as models_router
 from sheriff_api.config import get_settings
@@ -1796,6 +1797,171 @@ async def test_experiment_onnx_endpoint_returns_not_found_when_missing(client: A
         status_code=404,
         code="onnx_not_found",
         message="ONNX export not available for this experiment",
+    )
+
+
+@pytest.mark.asyncio
+async def test_create_deployment_resolves_onnx_and_persists_model_key(client: AsyncClient) -> None:
+    project_id, model_id = await _create_project_model(client, project_name="deploy-create")
+    created = await client.post(
+        f"/api/v1/projects/{project_id}/experiments",
+        json={"model_id": model_id, "name": "deploy-exp"},
+    )
+    assert created.status_code == 200
+    experiment_id = created.json()["id"]
+    _seed_experiment_run_artifacts(project_id=project_id, experiment_id=experiment_id, attempt=1, include_onnx=True)
+
+    response = await client.post(
+        f"/api/v1/projects/{project_id}/deployments",
+        json={
+            "name": "deploy-v1",
+            "task": "classification",
+            "device_preference": "auto",
+            "source": {"experiment_id": experiment_id, "attempt": 1, "checkpoint_kind": "best_metric"},
+            "is_active": True,
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()["deployment"]
+    assert payload["name"] == "deploy-v1"
+    assert len(payload["model_key"]) == 64
+
+    listing = await client.get(f"/api/v1/projects/{project_id}/deployments")
+    assert listing.status_code == 200
+    assert listing.json()["active_deployment_id"] == payload["deployment_id"]
+
+
+@pytest.mark.asyncio
+async def test_predict_without_active_returns_no_active_deployment(client: AsyncClient) -> None:
+    project = (await client.post("/api/v1/projects", json={"name": "predict-no-active"})).json()
+    project_id = project["id"]
+    upload = await client.post(
+        f"/api/v1/projects/{project_id}/assets/upload",
+        files={"file": ("sample.jpg", b"fake-image-bytes", "image/jpeg")},
+    )
+    assert upload.status_code == 200
+    asset_id = upload.json()["id"]
+
+    response = await client.post(f"/api/v1/projects/{project_id}/predict", json={"asset_id": asset_id, "top_k": 5})
+    assert_api_error(response, status_code=409, code="no_active_deployment", message="No active deployment is configured")
+
+
+@pytest.mark.asyncio
+async def test_predict_maps_inference_predictions_with_class_ids(client: AsyncClient) -> None:
+    project_id, model_id = await _create_project_model(client, project_name="predict-mapped")
+    cat_a = await client.post(f"/api/v1/projects/{project_id}/categories", json={"name": "rock", "display_order": 0})
+    cat_b = await client.post(f"/api/v1/projects/{project_id}/categories", json={"name": "paper", "display_order": 1})
+    assert cat_a.status_code == 200
+    assert cat_b.status_code == 200
+    class_ids = [cat_a.json()["id"], cat_b.json()["id"]]
+    upload = await client.post(
+        f"/api/v1/projects/{project_id}/assets/upload",
+        files={"file": ("sample.jpg", b"fake-image-bytes", "image/jpeg")},
+    )
+    assert upload.status_code == 200
+    asset_id = upload.json()["id"]
+
+    created = await client.post(
+        f"/api/v1/projects/{project_id}/experiments",
+        json={"model_id": model_id, "name": "predict-exp"},
+    )
+    assert created.status_code == 200
+    experiment_id = created.json()["id"]
+    _seed_experiment_run_artifacts(project_id=project_id, experiment_id=experiment_id, attempt=1, include_onnx=True)
+
+    settings = get_settings()
+    metadata_path = Path(settings.storage_root) / "experiments" / project_id / experiment_id / "runs" / "1" / "onnx" / "onnx.metadata.json"
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    metadata["class_ids"] = class_ids
+    metadata_path.write_text(json.dumps(metadata, indent=2, sort_keys=True), encoding="utf-8")
+
+    deployed = await client.post(
+        f"/api/v1/projects/{project_id}/deployments",
+        json={
+            "name": "predict-deploy",
+            "task": "classification",
+            "device_preference": "auto",
+            "source": {"experiment_id": experiment_id, "attempt": 1, "checkpoint_kind": "best_metric"},
+            "is_active": True,
+        },
+    )
+    assert deployed.status_code == 200
+
+    async def _infer(_payload: dict) -> dict:
+        return {
+            "device_selected": "cpu",
+            "predictions": [
+                {"class_index": 0, "score": 0.9},
+                {"class_index": 1, "score": 0.1},
+            ],
+            "output_dim": 2,
+        }
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(deployments_router.inference_client, "infer_classification", _infer)
+    response = await client.post(f"/api/v1/projects/{project_id}/predict", json={"asset_id": asset_id, "top_k": 5})
+    monkeypatch.undo()
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["device_selected"] == "cpu"
+    assert payload["predictions"][0]["class_id"] == class_ids[0]
+    assert payload["predictions"][0]["class_name"] == "rock"
+
+
+@pytest.mark.asyncio
+async def test_predict_returns_output_dim_mismatch(client: AsyncClient) -> None:
+    project_id, model_id = await _create_project_model(client, project_name="predict-dim-mismatch")
+    category = await client.post(f"/api/v1/projects/{project_id}/categories", json={"name": "only", "display_order": 0})
+    assert category.status_code == 200
+    upload = await client.post(
+        f"/api/v1/projects/{project_id}/assets/upload",
+        files={"file": ("sample.jpg", b"fake-image-bytes", "image/jpeg")},
+    )
+    assert upload.status_code == 200
+    asset_id = upload.json()["id"]
+
+    created = await client.post(
+        f"/api/v1/projects/{project_id}/experiments",
+        json={"model_id": model_id, "name": "predict-exp-mismatch"},
+    )
+    assert created.status_code == 200
+    experiment_id = created.json()["id"]
+    _seed_experiment_run_artifacts(project_id=project_id, experiment_id=experiment_id, attempt=1, include_onnx=True)
+
+    settings = get_settings()
+    metadata_path = Path(settings.storage_root) / "experiments" / project_id / experiment_id / "runs" / "1" / "onnx" / "onnx.metadata.json"
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    metadata["class_ids"] = [category.json()["id"]]
+    metadata_path.write_text(json.dumps(metadata, indent=2, sort_keys=True), encoding="utf-8")
+
+    deployed = await client.post(
+        f"/api/v1/projects/{project_id}/deployments",
+        json={
+            "name": "predict-deploy-mismatch",
+            "task": "classification",
+            "device_preference": "auto",
+            "source": {"experiment_id": experiment_id, "attempt": 1, "checkpoint_kind": "best_metric"},
+            "is_active": True,
+        },
+    )
+    assert deployed.status_code == 200
+
+    async def _infer(_payload: dict) -> dict:
+        return {
+            "device_selected": "cpu",
+            "predictions": [{"class_index": 3, "score": 0.9}],
+            "output_dim": 4,
+        }
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(deployments_router.inference_client, "infer_classification", _infer)
+    response = await client.post(f"/api/v1/projects/{project_id}/predict", json={"asset_id": asset_id, "top_k": 5})
+    monkeypatch.undo()
+    assert_api_error(
+        response,
+        status_code=409,
+        code="deployment_output_dim_mismatch",
+        message="Inference output does not match deployment class_ids",
     )
 
 
