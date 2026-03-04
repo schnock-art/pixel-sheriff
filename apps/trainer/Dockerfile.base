@@ -4,5 +4,5 @@ FROM python:3.11-slim
 ARG PYTORCH_INDEX_URL=https://download.pytorch.org/whl/cu129
 
 # Prebuild CUDA-heavy wheels once and reuse as a base image.
-RUN --mount=type=cache,target=/root/.cache/pip \
+RUN --mount=type=cache,id=pixel-sheriff-pip-cache,target=/root/.cache/pip \
   pip install --index-url ${PYTORCH_INDEX_URL} torch torchvision

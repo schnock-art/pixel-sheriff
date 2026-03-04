@@ -13,6 +13,7 @@ import {
   getExperimentOnnx,
   getExperimentRuntime,
   listExperimentSamples,
+  listDatasetVersions,
   listProjectModels,
   resolveAssetUri,
   startExperiment,
@@ -38,6 +39,7 @@ import {
   metricKeyForTask,
 } from "../../../../../lib/workspace/experimentMetrics";
 import { filterPredictionRows, normalizeConfusion } from "../../../../../lib/workspace/experimentDashboard";
+import { buildDatasetVersionOptions } from "../../../../../lib/workspace/experimentDatasetSelection";
 import { onnxClassNamesText, onnxInputShapeText, onnxStatusLabel, onnxValidationText } from "../../../../../lib/workspace/experimentOnnx";
 import { mergeLogChunk, runtimeBadgeLabel } from "../../../../../lib/workspace/experimentRuntime";
 
@@ -89,6 +91,23 @@ function formatDateTime(value: string | null | undefined): string {
   return parsed.toLocaleString();
 }
 
+function formatDurationSeconds(value: number | null | undefined): string {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return "-";
+  const total = Math.round(value);
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const seconds = total % 60;
+  if (hours > 0) return `${hours}h ${minutes}m ${seconds}s`;
+  if (minutes > 0) return `${minutes}m ${seconds}s`;
+  return `${seconds}s`;
+}
+
+function formatEtaClock(value: number | null | undefined): string {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return "-";
+  const finishAt = new Date(Date.now() + (value * 1000));
+  return finishAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
 function formatCheckpoint(checkpoint: Pick<ExperimentCheckpoint, "epoch" | "metric_name" | "value"> | null): string {
   if (!checkpoint || checkpoint.epoch == null) return "Not available yet";
   const metricName = checkpoint.metric_name ?? "metric";
@@ -122,6 +141,7 @@ function asMetricValue(value: unknown): number | null {
 
 function metricValueByKey(row: ExperimentMetricPoint, key: string): number | null {
   if (key === "train_loss") return asMetricValue(row.train_loss);
+  if (key === "train_accuracy") return asMetricValue(row.train_accuracy);
   if (key === "val_loss") return asMetricValue(row.val_loss);
   if (key === "val_accuracy") return asMetricValue(row.val_accuracy);
   if (key === "val_macro_f1") return asMetricValue(row.val_macro_f1);
@@ -129,6 +149,8 @@ function metricValueByKey(row: ExperimentMetricPoint, key: string): number | nul
   if (key === "val_macro_recall") return asMetricValue(row.val_macro_recall);
   if (key === "val_map") return asMetricValue(row.val_map);
   if (key === "val_iou") return asMetricValue(row.val_iou);
+  if (key === "epoch_seconds") return asMetricValue(row.epoch_seconds);
+  if (key === "eta_seconds") return asMetricValue(row.eta_seconds);
   return null;
 }
 
@@ -144,6 +166,7 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
   const [checkpoints, setCheckpoints] = useState<ExperimentCheckpoint[]>([]);
   const [status, setStatus] = useState<ExperimentStatus>("draft");
   const [modelName, setModelName] = useState<string | null>(null);
+  const [datasetVersionOptions, setDatasetVersionOptions] = useState<Array<{ id: string; name: string }>>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isStarting, setIsStarting] = useState(false);
@@ -421,14 +444,22 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
 
   const modelId = savedRecord?.model_id ?? "";
   const backToExperimentsHref = `/projects/${encodeURIComponent(projectId)}/experiments`;
+  const modelHref = modelId ? `/projects/${encodeURIComponent(projectId)}/models/${encodeURIComponent(modelId)}` : null;
 
   const loadDetail = useCallback(async () => {
     setIsLoading(true);
     setErrorMessage(null);
     setSaveError(null);
     try {
-      const [record, models] = await Promise.all([getExperiment(projectId, experimentId), listProjectModels(projectId)]);
+      const [record, models, datasetVersions] = await Promise.all([
+        getExperiment(projectId, experimentId),
+        listProjectModels(projectId),
+        listDatasetVersions(projectId),
+      ]);
       const resolvedModelName = models.find((model) => model.id === record.model_id)?.name ?? record.model_id;
+      const configDatasetVersionId =
+        typeof record.config_json?.dataset_version_id === "string" ? record.config_json.dataset_version_id : "";
+      setDatasetVersionOptions(buildDatasetVersionOptions(datasetVersions.items ?? [], configDatasetVersionId));
       setSavedRecord(record);
       setDraftName(record.name);
       setDraftConfig(cloneConfig(record.config_json));
@@ -717,6 +748,7 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
 
   const optimizer = asRecord(draftConfig?.optimizer);
   const advanced = asRecord(draftConfig?.advanced);
+  const runtimeConfig = asRecord(draftConfig?.runtime);
   const datasetVersionId = typeof draftConfig?.dataset_version_id === "string" ? draftConfig.dataset_version_id : "-";
   const optimizerType = typeof optimizer.type === "string" ? optimizer.type : "adam";
   const learningRate = typeof optimizer.lr === "number" ? String(optimizer.lr) : "";
@@ -725,7 +757,22 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
   const augmentationProfile = typeof draftConfig?.augmentation_profile === "string" ? draftConfig.augmentation_profile : "light";
   const precision = typeof draftConfig?.precision === "string" ? draftConfig.precision : "fp32";
   const seed = typeof advanced.seed === "number" ? String(advanced.seed) : "1337";
-  const numWorkers = typeof advanced.num_workers === "number" ? String(advanced.num_workers) : "0";
+  const numWorkers =
+    typeof runtimeConfig.num_workers === "number"
+      ? String(runtimeConfig.num_workers)
+      : typeof advanced.num_workers === "number"
+        ? String(advanced.num_workers)
+        : "0";
+  const pinMemoryMode = typeof runtimeConfig.pin_memory === "boolean" ? (runtimeConfig.pin_memory ? "true" : "false") : "auto";
+  const persistentWorkersMode =
+    typeof runtimeConfig.persistent_workers === "boolean" ? (runtimeConfig.persistent_workers ? "true" : "false") : "auto";
+  const prefetchFactor = typeof runtimeConfig.prefetch_factor === "number" ? String(runtimeConfig.prefetch_factor) : "2";
+  const cacheResizedImages = typeof runtimeConfig.cache_resized_images === "boolean" ? runtimeConfig.cache_resized_images : true;
+  const maxCachedImages = typeof runtimeConfig.max_cached_images === "number" ? String(runtimeConfig.max_cached_images) : "1024";
+  const latestMetric = metrics.length > 0 ? metrics[metrics.length - 1] : null;
+  const latestEpochSeconds = typeof latestMetric?.epoch_seconds === "number" ? latestMetric.epoch_seconds : null;
+  const latestEtaSeconds = typeof latestMetric?.eta_seconds === "number" ? latestMetric.eta_seconds : null;
+  const latestEtaClock = formatEtaClock(latestEtaSeconds);
   const isClassificationTask = task === "classification";
   const classNames = useMemo(
     () => (Array.isArray(evaluation?.classes?.class_names) ? evaluation?.classes?.class_names : []),
@@ -776,7 +823,10 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
       ];
     }
     if (dashboardChartTab === "accuracy") {
-      return [{ key: "val_accuracy", label: "val accuracy", color: "#2f6fca" }];
+      return [
+        { key: "train_accuracy", label: "train accuracy", color: "#2f9d58" },
+        { key: "val_accuracy", label: "val accuracy", color: "#2f6fca" },
+      ];
     }
     return [
       { key: "val_macro_f1", label: "val macro f1", color: "#2f6fca" },
@@ -923,7 +973,14 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
             <div className="experiment-header-title">
               <h2>Train Experiment</h2>
               <p>
-                Model: <strong>{modelName ?? modelId}</strong>
+                Model:{" "}
+                {modelHref ? (
+                  <Link href={modelHref}>
+                    <strong>{modelName ?? modelId}</strong>
+                  </Link>
+                ) : (
+                  <strong>{modelName ?? modelId}</strong>
+                )}
               </p>
               {activeAttempt ? <p>Run #{activeAttempt}</p> : null}
             </div>
@@ -964,7 +1021,22 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
                   <h3>Training Details</h3>
                   <label className="project-field">
                     <span>Training Dataset</span>
-                    <input type="text" value={datasetVersionId} readOnly />
+                    <select
+                      value={datasetVersionId === "-" ? "" : datasetVersionId}
+                      disabled={!isEditable || datasetVersionOptions.length === 0}
+                      onChange={(event) =>
+                        patchConfig((next) => {
+                          next.dataset_version_id = event.target.value;
+                        })
+                      }
+                    >
+                      {datasetVersionOptions.length === 0 ? <option value="">No dataset versions</option> : null}
+                      {datasetVersionOptions.map((row) => (
+                        <option key={row.id} value={row.id}>
+                          {row.name}
+                        </option>
+                      ))}
+                    </select>
                   </label>
                   <label className="project-field">
                     <span>Optimizer</span>
@@ -1084,13 +1156,113 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
                           disabled={!isEditable}
                           onChange={(event) =>
                             patchConfig((next) => {
+                              const runtime = asRecord(next.runtime);
                               const adv = asRecord(next.advanced);
                               const parsed = Number.parseInt(event.target.value, 10);
-                              if (Number.isFinite(parsed)) adv.num_workers = parsed;
+                              if (Number.isFinite(parsed)) {
+                                runtime.num_workers = parsed;
+                                adv.num_workers = parsed;
+                              }
+                              next.runtime = runtime;
                               next.advanced = adv;
                             })
                           }
                         />
+                      </label>
+                      <label className="project-field">
+                        <span>Pin Memory</span>
+                        <select
+                          value={pinMemoryMode}
+                          disabled={!isEditable}
+                          onChange={(event) =>
+                            patchConfig((next) => {
+                              const runtime = asRecord(next.runtime);
+                              if (event.target.value === "auto") {
+                                delete runtime.pin_memory;
+                              } else {
+                                runtime.pin_memory = event.target.value === "true";
+                              }
+                              next.runtime = runtime;
+                            })
+                          }
+                        >
+                          <option value="auto">auto</option>
+                          <option value="true">true</option>
+                          <option value="false">false</option>
+                        </select>
+                      </label>
+                      <label className="project-field">
+                        <span>Persistent Workers</span>
+                        <select
+                          value={persistentWorkersMode}
+                          disabled={!isEditable}
+                          onChange={(event) =>
+                            patchConfig((next) => {
+                              const runtime = asRecord(next.runtime);
+                              if (event.target.value === "auto") {
+                                delete runtime.persistent_workers;
+                              } else {
+                                runtime.persistent_workers = event.target.value === "true";
+                              }
+                              next.runtime = runtime;
+                            })
+                          }
+                        >
+                          <option value="auto">auto</option>
+                          <option value="true">true</option>
+                          <option value="false">false</option>
+                        </select>
+                      </label>
+                      <label className="project-field">
+                        <span>Prefetch Factor</span>
+                        <input
+                          type="number"
+                          min="1"
+                          step="1"
+                          value={prefetchFactor}
+                          disabled={!isEditable}
+                          onChange={(event) =>
+                            patchConfig((next) => {
+                              const runtime = asRecord(next.runtime);
+                              const parsed = Number.parseInt(event.target.value, 10);
+                              if (Number.isFinite(parsed) && parsed >= 1) runtime.prefetch_factor = parsed;
+                              next.runtime = runtime;
+                            })
+                          }
+                        />
+                      </label>
+                      <label className="project-field">
+                        <span>Max Cached Images</span>
+                        <input
+                          type="number"
+                          min="0"
+                          step="1"
+                          value={maxCachedImages}
+                          disabled={!isEditable}
+                          onChange={(event) =>
+                            patchConfig((next) => {
+                              const runtime = asRecord(next.runtime);
+                              const parsed = Number.parseInt(event.target.value, 10);
+                              if (Number.isFinite(parsed) && parsed >= 0) runtime.max_cached_images = parsed;
+                              next.runtime = runtime;
+                            })
+                          }
+                        />
+                      </label>
+                      <label className="model-builder-checkbox">
+                        <input
+                          type="checkbox"
+                          checked={cacheResizedImages}
+                          disabled={!isEditable}
+                          onChange={(event) =>
+                            patchConfig((next) => {
+                              const runtime = asRecord(next.runtime);
+                              runtime.cache_resized_images = event.target.checked;
+                              next.runtime = runtime;
+                            })
+                          }
+                        />
+                        <span>Cache resized images in memory</span>
                       </label>
                       <label className="project-field">
                         <span>Precision</span>
@@ -1132,6 +1304,14 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
                     <strong>{runtimeInfo?.num_workers ?? "-"}</strong>
                     <span>pin_memory</span>
                     <strong>{asYesNo(runtimeInfo?.pin_memory)}</strong>
+                    <span>persistent_workers</span>
+                    <strong>{asYesNo(runtimeInfo?.persistent_workers)}</strong>
+                    <span>prefetch_factor</span>
+                    <strong>{runtimeInfo?.prefetch_factor ?? "-"}</strong>
+                    <span>cache_resized_images</span>
+                    <strong>{asYesNo(runtimeInfo?.cache_resized_images)}</strong>
+                    <span>max_cached_images</span>
+                    <strong>{runtimeInfo?.max_cached_images ?? "-"}</strong>
                   </div>
                   {runtimeError ? <p className="project-field-error">{runtimeError}</p> : null}
                   <div className="experiment-logs-toolbar">
@@ -1246,6 +1426,10 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
 
                 <div className="experiment-card">
                   <h3>Metrics</h3>
+                  <p className="experiment-log-cursor">
+                    Last epoch time: {formatDurationSeconds(latestEpochSeconds)} | ETA: {formatDurationSeconds(latestEtaSeconds)} (finishes ~
+                    {latestEtaClock})
+                  </p>
                   <div className="experiment-series-toggle-row">
                     <label className="model-builder-checkbox">
                       <input type="checkbox" checked={showPrimary} onChange={(event) => setShowPrimary(event.target.checked)} />
@@ -1488,6 +1672,10 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
                         </label>
                       </div>
                     </div>
+                    <p className="experiment-log-cursor">
+                      Last epoch time: {formatDurationSeconds(latestEpochSeconds)} | ETA: {formatDurationSeconds(latestEtaSeconds)} (finishes ~
+                      {latestEtaClock})
+                    </p>
                     <div className="experiment-chart-legend">
                       {dashboardLinePoints.map((series) => (
                         <span key={series.key} className="experiment-legend-item">

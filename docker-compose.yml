@@ -16,6 +16,16 @@ services:
     ports:
       - "${REDIS_PORT:-6379}:6379"
 
+  trainer-base:
+    image: ${TRAINER_BASE_TAG:-pixel-sheriff/trainer-base:cu129}
+    build:
+      context: .
+      dockerfile: apps/trainer/Dockerfile.base
+      args:
+        PYTORCH_INDEX_URL: ${TRAINER_PYTORCH_INDEX_URL:-https://download.pytorch.org/whl/cu129}
+    profiles:
+      - build-tools
+
   api:
     build:
       context: .

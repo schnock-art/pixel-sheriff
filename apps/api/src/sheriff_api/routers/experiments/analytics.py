@@ -110,6 +110,7 @@ async def project_experiments_analytics(
             last_row = valid_rows[-1]
             for key in (
                 "train_loss",
+                "train_accuracy",
                 "val_loss",
                 "val_accuracy",
                 "val_macro_f1",
@@ -117,6 +118,8 @@ async def project_experiments_analytics(
                 "val_macro_recall",
                 "val_map",
                 "val_iou",
+                "epoch_seconds",
+                "eta_seconds",
             ):
                 value = safe_float(last_row.get(key))
                 if value is not None:

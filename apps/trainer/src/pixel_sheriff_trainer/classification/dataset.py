@@ -4,7 +4,7 @@ import json
 import random
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 import zipfile
 
 from PIL import Image
@@ -13,18 +13,37 @@ from torchvision import transforms
 
 
 class ClassificationDataset(Dataset):
-    def __init__(self, samples: list["ClassificationSample"], transform: transforms.Compose) -> None:
+    def __init__(
+        self,
+        samples: list["ClassificationSample"],
+        base_transform: Callable[[Image.Image], Image.Image] | None,
+        transform: Callable[[Image.Image], Any],
+        *,
+        cache_base_images: bool = False,
+        max_cached_images: int = 0,
+    ) -> None:
         self.samples = samples
+        self.base_transform = base_transform
         self.transform = transform
+        self.cache_base_images = bool(cache_base_images)
+        self.max_cached_images = max(0, int(max_cached_images))
+        self._base_image_cache: dict[int, Image.Image] = {}
 
     def __len__(self) -> int:
         return len(self.samples)
 
     def __getitem__(self, index: int) -> tuple[Any, int]:
         sample = self.samples[index]
-        with Image.open(sample.path) as image:
-            rgb = image.convert("RGB")
-            tensor = self.transform(rgb)
+        cached = self._base_image_cache.get(index)
+        if cached is not None:
+            base_image = cached.copy()
+        else:
+            with Image.open(sample.path) as image:
+                rgb = image.convert("RGB")
+                base_image = self.base_transform(rgb) if self.base_transform is not None else rgb
+            if self.cache_base_images and len(self._base_image_cache) < self.max_cached_images:
+                self._base_image_cache[index] = base_image.copy()
+        tensor = self.transform(base_image)
         return tensor, int(sample.label)
 
 
@@ -246,7 +265,9 @@ def build_classification_loaders(
     width, height = _target_size_from_model(model_config)
     mean, std = _normalization_from_model(model_config)
 
-    train_steps: list[Any] = [transforms.Resize((height, width))]
+    resize_transform = transforms.Resize((height, width))
+
+    train_steps: list[Any] = []
     augmentation = str(training_config.get("augmentation_profile") or "none")
     if augmentation in {"light", "medium", "heavy"}:
         train_steps.append(transforms.RandomHorizontalFlip(p=0.5))
@@ -259,7 +280,7 @@ def build_classification_loaders(
         train_steps.append(transforms.Normalize(mean=mean, std=std))
     train_transform = transforms.Compose(train_steps)
 
-    val_steps: list[Any] = [transforms.Resize((height, width)), transforms.ToTensor()]
+    val_steps: list[Any] = [transforms.ToTensor()]
     if mean is not None and std is not None:
         val_steps.append(transforms.Normalize(mean=mean, std=std))
     val_transform = transforms.Compose(val_steps)
@@ -288,13 +309,37 @@ def build_classification_loaders(
     if num_workers < 1:
         persistent_workers = False
 
+    prefetch_factor = 2
+    if isinstance(runtime, dict) and isinstance(runtime.get("prefetch_factor"), int):
+        prefetch_factor = max(1, int(runtime["prefetch_factor"]))
+
+    cache_base_images_default = num_workers == 0
+    cache_base_images = cache_base_images_default
+    if isinstance(runtime, dict) and isinstance(runtime.get("cache_resized_images"), bool):
+        cache_base_images = bool(runtime["cache_resized_images"])
+    max_cached_images = 1024
+    if isinstance(runtime, dict) and isinstance(runtime.get("max_cached_images"), int):
+        max_cached_images = max(0, int(runtime["max_cached_images"]))
+
     training_block = training_config.get("training")
     drop_last = True
     if isinstance(training_block, dict) and isinstance(training_block.get("drop_last"), bool):
         drop_last = bool(training_block.get("drop_last"))
 
-    train_dataset = ClassificationDataset(train_samples, train_transform)
-    val_dataset = ClassificationDataset(val_samples, val_transform)
+    train_dataset = ClassificationDataset(
+        train_samples,
+        resize_transform,
+        train_transform,
+        cache_base_images=cache_base_images,
+        max_cached_images=max_cached_images,
+    )
+    val_dataset = ClassificationDataset(
+        val_samples,
+        resize_transform,
+        val_transform,
+        cache_base_images=cache_base_images,
+        max_cached_images=max_cached_images,
+    )
 
     train_loader_kwargs: dict[str, Any] = {
         "batch_size": batch_size,
@@ -313,6 +358,8 @@ def build_classification_loaders(
     if num_workers > 0:
         train_loader_kwargs["persistent_workers"] = persistent_workers
         val_loader_kwargs["persistent_workers"] = persistent_workers
+        train_loader_kwargs["prefetch_factor"] = prefetch_factor
+        val_loader_kwargs["prefetch_factor"] = prefetch_factor
 
     train_loader: DataLoader[Any] = DataLoader(train_dataset, **train_loader_kwargs)
     val_loader: DataLoader[Any] = DataLoader(val_dataset, **val_loader_kwargs)

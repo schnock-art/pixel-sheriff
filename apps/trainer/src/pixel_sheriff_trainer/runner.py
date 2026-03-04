@@ -243,6 +243,9 @@ class TrainRunner:
                 "num_workers": runtime_info.num_workers,
                 "pin_memory": runtime_info.pin_memory,
                 "persistent_workers": runtime_info.persistent_workers,
+                "prefetch_factor": runtime_info.prefetch_factor,
+                "cache_resized_images": runtime_info.cache_resized_images,
+                "max_cached_images": runtime_info.max_cached_images,
             }
             write_runtime_info(
                 self.storage,
@@ -292,6 +295,9 @@ class TrainRunner:
                     "attempt": job.attempt,
                     "epoch": int(epoch_metrics.epoch),
                     "train_loss": float(epoch_metrics.train_loss),
+                    "train_accuracy": float(epoch_metrics.train_accuracy)
+                    if isinstance(epoch_metrics.train_accuracy, (int, float))
+                    else None,
                     "val_loss": float(epoch_metrics.val_loss) if isinstance(epoch_metrics.val_loss, (int, float)) else None,
                     "val_accuracy": float(epoch_metrics.val_accuracy) if isinstance(epoch_metrics.val_accuracy, (int, float)) else None,
                     "val_macro_f1": float(epoch_metrics.val_macro_f1)
@@ -305,6 +311,7 @@ class TrainRunner:
                     else None,
                     "lr": float(epoch_metrics.lr),
                     "epoch_seconds": float(epoch_metrics.epoch_seconds),
+                    "eta_seconds": float(epoch_metrics.eta_seconds) if isinstance(epoch_metrics.eta_seconds, (int, float)) else None,
                     "evaluated": bool(epoch_metrics.evaluated),
                     "created_at": utc_now_iso(),
                 }
@@ -389,6 +396,9 @@ class TrainRunner:
                     "num_workers": runtime_info.num_workers,
                     "pin_memory": runtime_info.pin_memory,
                     "persistent_workers": runtime_info.persistent_workers,
+                    "prefetch_factor": runtime_info.prefetch_factor,
+                    "cache_resized_images": runtime_info.cache_resized_images,
+                    "max_cached_images": runtime_info.max_cached_images,
                 }
                 write_runtime_info(
                     self.storage,

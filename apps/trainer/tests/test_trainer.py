@@ -218,6 +218,29 @@ def test_dataset_loader_reads_tiny_export_zip(tmp_path: Path) -> None:
     assert loaded.train_count >= 1
     assert loaded.val_count >= 1
     assert loaded.train_loader.drop_last is True
+    assert bool(getattr(loaded.train_loader.dataset, "cache_base_images", False)) is True
+
+
+def test_dataset_loader_runtime_prefetch_and_cache_overrides(tmp_path: Path) -> None:
+    if not HAS_TORCH:
+        pytest.skip("torch/torchvision not available")
+    project_id = str(uuid.uuid4())
+    _content_hash, zip_path = _write_tiny_export_zip(tmp_path, project_id)
+    loaded = build_classification_loaders(
+        export_zip_path=zip_path,
+        workdir=tmp_path / "workdir_prefetch",
+        model_config={"input": {"input_size": [32, 32], "normalization": {"type": "none"}}},
+        training_config={
+            "batch_size": 2,
+            "runtime": {
+                "num_workers": 1,
+                "prefetch_factor": 3,
+                "cache_resized_images": False,
+            },
+        },
+    )
+    assert bool(getattr(loaded.train_loader.dataset, "cache_base_images", True)) is False
+    assert int(getattr(loaded.train_loader, "prefetch_factor", 0)) == 3
 
 
 @pytest.mark.skipif(not HAS_TORCH, reason="torch is required")
@@ -317,6 +340,16 @@ def test_runner_process_writes_events_metrics_and_checkpoints(tmp_path: Path) ->
         runtime_payload = json.loads((run_dir / "runtime.json").read_text(encoding="utf-8"))
         assert runtime_payload["device_selected"] in {"cpu", "cuda", "mps"}
         assert isinstance(runtime_payload["amp_enabled"], bool)
+        assert "prefetch_factor" in runtime_payload
+        assert "cache_resized_images" in runtime_payload
+        assert "max_cached_images" in runtime_payload
+
+        metrics_lines = [line for line in (run_dir / "metrics.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
+        assert metrics_lines
+        first_metric = json.loads(metrics_lines[0])
+        assert "train_accuracy" in first_metric
+        assert "epoch_seconds" in first_metric
+        assert "eta_seconds" in first_metric
 
         latest_state = torch.load(run_dir / "checkpoints" / "latest.pt", map_location="cpu")
         best_metric_state = torch.load(run_dir / "checkpoints" / "best_metric.pt", map_location="cpu")

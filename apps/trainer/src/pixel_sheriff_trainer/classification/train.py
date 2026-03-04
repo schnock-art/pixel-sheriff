@@ -63,7 +63,11 @@ def resolve_device(training_config: dict[str, Any]) -> torch.device:
     return torch.device("cpu")
 
 
-def resolve_runtime_loader_settings(training_config: dict[str, Any], *, device: torch.device) -> tuple[int, bool, bool]:
+def resolve_runtime_loader_settings(
+    training_config: dict[str, Any],
+    *,
+    device: torch.device,
+) -> tuple[int, bool, bool, int, bool, int]:
     runtime = training_config.get("runtime")
     advanced = training_config.get("advanced")
 
@@ -83,7 +87,19 @@ def resolve_runtime_loader_settings(training_config: dict[str, Any], *, device: 
     if num_workers < 1:
         persistent_workers = False
 
-    return num_workers, pin_memory, persistent_workers
+    prefetch_factor = 2
+    if isinstance(runtime, dict) and runtime.get("prefetch_factor") is not None:
+        prefetch_factor = max(1, _as_int(runtime.get("prefetch_factor"), prefetch_factor))
+
+    cache_resized_images = num_workers == 0
+    if isinstance(runtime, dict) and runtime.get("cache_resized_images") is not None:
+        cache_resized_images = _as_bool(runtime.get("cache_resized_images"), cache_resized_images)
+
+    max_cached_images = 1024
+    if isinstance(runtime, dict) and runtime.get("max_cached_images") is not None:
+        max_cached_images = max(0, _as_int(runtime.get("max_cached_images"), max_cached_images))
+
+    return num_workers, pin_memory, persistent_workers, prefetch_factor, cache_resized_images, max_cached_images
 
 
 @dataclass(frozen=True)
@@ -97,10 +113,16 @@ class RuntimeInfo:
     num_workers: int
     pin_memory: bool
     persistent_workers: bool
+    prefetch_factor: int
+    cache_resized_images: bool
+    max_cached_images: int
 
 
 def resolve_runtime_info(training_config: dict[str, Any], *, device: torch.device) -> RuntimeInfo:
-    num_workers, pin_memory, persistent_workers = resolve_runtime_loader_settings(training_config, device=device)
+    num_workers, pin_memory, persistent_workers, prefetch_factor, cache_resized_images, max_cached_images = resolve_runtime_loader_settings(
+        training_config,
+        device=device,
+    )
     precision = str(training_config.get("precision", "fp32")).lower()
     amp_enabled = precision == "amp" and device.type == "cuda"
     torchvision_version = "unknown"
@@ -122,6 +144,9 @@ def resolve_runtime_info(training_config: dict[str, Any], *, device: torch.devic
         num_workers=int(num_workers),
         pin_memory=bool(pin_memory),
         persistent_workers=bool(persistent_workers),
+        prefetch_factor=int(prefetch_factor),
+        cache_resized_images=bool(cache_resized_images),
+        max_cached_images=int(max_cached_images),
     )
 
 
@@ -129,6 +154,7 @@ def resolve_runtime_info(training_config: dict[str, Any], *, device: torch.devic
 class EpochMetrics:
     epoch: int
     train_loss: float
+    train_accuracy: float | None
     val_loss: float | None
     val_accuracy: float | None
     val_macro_f1: float | None
@@ -136,6 +162,7 @@ class EpochMetrics:
     val_macro_recall: float | None
     lr: float
     epoch_seconds: float
+    eta_seconds: float | None
     evaluated: bool
 
 
@@ -265,6 +292,7 @@ def run_training(
     best_loss: float | None = None
     best_metric: float | None = None
     final_evaluation: ClassifierEvaluation | None = None
+    total_epoch_seconds = 0.0
 
     val_sample_records = getattr(getattr(val_loader, "dataset", None), "samples", None)
     if not isinstance(val_sample_records, list):
@@ -278,6 +306,7 @@ def run_training(
         model.train()
         total_loss = 0.0
         total_samples = 0
+        total_correct = 0
         non_blocking = resolved_device.type == "cuda"
         for images, labels in train_loader:
             images = images.to(resolved_device, non_blocking=non_blocking)
@@ -294,12 +323,15 @@ def run_training(
             scaler.update()
 
             batch_size = int(labels.size(0))
+            preds = logits.argmax(dim=1)
             total_samples += batch_size
             total_loss += float(loss.item()) * batch_size
+            total_correct += int((preds == labels).sum().item())
 
         if scheduler is not None:
             scheduler.step()
         train_loss = (total_loss / total_samples) if total_samples > 0 else 0.0
+        train_accuracy = (total_correct / total_samples) if total_samples > 0 else None
 
         do_eval = _should_evaluate(epoch, total_epochs=epochs, eval_interval=eval_interval)
         evaluation: ClassifierEvaluation | None = None
@@ -324,10 +356,15 @@ def run_training(
 
         current_lr = float(optimizer.param_groups[0]["lr"]) if optimizer.param_groups else 0.0
         epoch_seconds = float(time.perf_counter() - epoch_started)
+        total_epoch_seconds += epoch_seconds
+        average_epoch_seconds = total_epoch_seconds / max(1, (epoch - start_epoch + 1))
+        remaining_epochs = max(0, epochs - epoch)
+        eta_seconds = float(average_epoch_seconds * remaining_epochs) if remaining_epochs > 0 else 0.0
         on_epoch(
             EpochMetrics(
                 epoch=epoch,
                 train_loss=float(train_loss),
+                train_accuracy=float(train_accuracy) if isinstance(train_accuracy, (int, float)) else None,
                 val_loss=val_loss,
                 val_accuracy=val_accuracy,
                 val_macro_f1=val_macro_f1,
@@ -335,18 +372,22 @@ def run_training(
                 val_macro_recall=val_macro_recall,
                 lr=current_lr,
                 epoch_seconds=epoch_seconds,
+                eta_seconds=eta_seconds,
                 evaluated=bool(evaluation is not None),
             )
         )
 
         metrics_payload = {
             "train_loss": float(train_loss),
+            "train_accuracy": float(train_accuracy) if isinstance(train_accuracy, (int, float)) else None,
             "val_loss": val_loss,
             "val_accuracy": val_accuracy,
             "val_macro_f1": val_macro_f1,
             "val_macro_precision": val_macro_precision,
             "val_macro_recall": val_macro_recall,
             "lr": current_lr,
+            "epoch_seconds": epoch_seconds,
+            "eta_seconds": eta_seconds,
         }
 
         should_save_latest = epoch == epochs or (epoch % save_every == 0)

@@ -67,10 +67,11 @@ def evaluate_classifier(
     confusion_matrix = _zeros_matrix(resolved_num_classes)
     predictions: list[PredictionRow] = []
     sample_cursor = 0
+    non_blocking = device.type == "cuda"
 
     for images, labels in loader:
-        images = images.to(device)
-        labels = labels.to(device)
+        images = images.to(device, non_blocking=non_blocking)
+        labels = labels.to(device, non_blocking=non_blocking)
         logits = model(images)
         loss = criterion(logits, labels)
         probs = torch.softmax(logits, dim=1)

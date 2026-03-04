@@ -96,6 +96,7 @@ $samples = Invoke-RestMethod -Method Get -Uri "$api/projects/$projectId/experime
 # 8) Runtime/log observability contracts
 $runtime = Invoke-RestMethod -Method Get -Uri "$api/projects/$projectId/experiments/$experimentId/runtime"
 "runtime_device=$($runtime.device_selected), amp=$($runtime.amp_enabled), torch=$($runtime.torch_version)"
+"runtime_prefetch=$($runtime.prefetch_factor), cache_resized=$($runtime.cache_resized_images), max_cached=$($runtime.max_cached_images)"
 
 $logChunk1 = Invoke-RestMethod -Method Get -Uri "$api/projects/$projectId/experiments/$experimentId/logs?from_byte=0&max_bytes=4096"
 "logs_chunk_1 from=$($logChunk1.from_byte) to=$($logChunk1.to_byte) bytes=$($logChunk1.content.Length)"
@@ -113,15 +114,26 @@ $logChunk2 = Invoke-RestMethod -Method Get -Uri "$api/projects/$projectId/experi
 - On experiment page:
   - Edit `epochs`/`batch size`/`lr`, click `Save`, refresh, verify values persist.
   - Verify default `Advanced Parameters -> Num Workers` is `0` (recommended in Docker).
+  - In `Advanced Parameters`, verify runtime tuning controls exist and persist after save/refresh:
+    - `Pin Memory`
+    - `Persistent Workers`
+    - `Prefetch Factor`
+    - `Cache resized images in memory`
+    - `Max Cached Images`
   - Click `Start Training`.
   - Verify status changes to `running`.
   - Verify runtime badge appears beside status (`CUDA`/`CPU`/`MPS`) once runtime info is available.
   - Verify chart updates every epoch without page refresh.
+  - Verify metrics timing line shows:
+    - `Last epoch time`
+    - `ETA`
+    - estimated finish clock (`finishes ~HH:MM`)
   - If `evaluation.eval_interval_epochs > 1`, verify skipped epochs still render a metric point and `val_*` is empty/null for those rows.
   - Verify checkpoints (`latest`, `best_loss`, `best_metric`) update.
   - Refresh mid-run and verify history remains and updates continue.
   - Open `Runtime & Logs` panel:
     - verify runtime fields are populated (`device`, `cuda_available`, `amp_enabled`, torch/torchvision versions)
+    - verify runtime tuning fields are visible (`prefetch_factor`, `cache_resized_images`, `max_cached_images`)
     - enable auto-refresh while run is active and verify log content keeps appending
     - verify refresh button appends content and cursor moves forward (`from_byte -> to_byte`)
     - complete/cancel run and verify auto-refresh stops on terminal status
@@ -150,8 +162,11 @@ $logChunk2 = Invoke-RestMethod -Method Get -Uri "$api/projects/$projectId/experi
   - click a dot and verify navigation to experiment detail page
 - On experiment detail page (`/experiments/{experimentId}`):
   - verify header action is `Back to Experiments` and returns to `/projects/{projectId}/experiments`
+  - verify model name in header links to `/projects/{projectId}/models/{modelId}`
   - verify dashboard appears below existing training sections
   - verify chart tabs (`Loss`, `Accuracy`, `F1/Precision/Recall`) switch correctly
+  - verify `Accuracy` tab contains both `train accuracy` and `val accuracy` series
+  - verify dashboard timing row shows epoch duration + ETA + finish clock
   - verify confusion normalization modes:
     - `none` = raw counts
     - `by_true` = row-normalized

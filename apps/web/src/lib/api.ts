@@ -181,6 +181,7 @@ export interface ExportVersion {
 export interface DatasetSelectionFilters {
   include_labeled_only?: boolean;
   include_statuses?: AnnotationStatus[];
+  exclude_statuses?: AnnotationStatus[];
   include_category_ids?: string[];
   exclude_category_ids?: string[];
   include_folder_paths?: string[];
@@ -298,6 +299,7 @@ export interface ExperimentMetricPoint {
   attempt?: number | null;
   epoch: number;
   train_loss?: number;
+  train_accuracy?: number;
   val_loss?: number;
   val_accuracy?: number;
   val_macro_f1?: number;
@@ -305,6 +307,8 @@ export interface ExperimentMetricPoint {
   val_macro_recall?: number;
   val_map?: number;
   val_iou?: number;
+  epoch_seconds?: number;
+  eta_seconds?: number;
   created_at?: string;
 }
 
@@ -456,6 +460,9 @@ export interface ExperimentRuntimePayload {
   num_workers: number;
   pin_memory: boolean;
   persistent_workers: boolean;
+  prefetch_factor?: number;
+  cache_resized_images?: boolean;
+  max_cached_images?: number;
 }
 
 export interface ExperimentOnnxPayload {

@@ -2,6 +2,34 @@
 
 Local-first CV annotation platform.
 
+## Most-Used Commands
+
+If you use Make shortcuts:
+
+```bash
+make build-web-api
+make up-web-api
+```
+
+Trainer optimization flow:
+
+```bash
+make build-trainer-base   # only when torch/cuda base changes
+make build-trainer        # trainer only (fast iteration)
+make build-trainer-bootstrap # one-time: base then trainer
+make up-trainer
+```
+
+Other handy shortcuts:
+
+```bash
+make up
+make down
+make logs
+make ps
+make help
+```
+
 ## What Changed Since Last Milestone
 
 - Import UX was unified into one dialog with existing/new project targets plus optional existing folder/subfolder destination.
@@ -153,17 +181,24 @@ Local-first CV annotation platform.
   - best run highlighted in legend
 - Experiment detail page includes:
   - editable training params (optimizer/lr/epochs/batch/augmentation/advanced)
-  - advanced runtime defaults to `num_workers=0` (editable)
+  - advanced runtime controls:
+    - `num_workers`, `pin_memory`, `persistent_workers`
+    - `prefetch_factor`, `cache_resized_images`, `max_cached_images`
   - save gating based on light config validation
   - checkpoint panel (`best_metric`, `best_loss`, `latest`) with selection placeholder action
   - metrics chart with axis/ticks/legend/toggles
+  - live timing row (`Last epoch time`, `ETA`, estimated finish clock time)
   - hover crosshair + tooltip values per epoch
   - refresh-safe history rehydration and SSE resume while running
   - queued/running/terminal state handling and attempt-aware event cursors (`from_line`, `attempt`)
   - trainer failure reasons surfaced in UI toast and inline `Last run error`
-  - header quick navigation action: `Back to Experiments`
+  - header quick navigation actions:
+    - `Back to Experiments`
+    - model name links to the model detail page
 - Experiment detail deep dashboard (classification) includes:
   - chart tabs (`Loss`, `Accuracy`, `F1/Precision/Recall`) + log scale
+  - accuracy tab overlays `train_accuracy` and `val_accuracy`
+  - timing row (`Last epoch time`, `ETA`, estimated finish clock time)
   - confusion matrix with `none`/`by_true`/`by_pred` client-side normalization
   - confusion-cell drill-down modal with thumbnails
   - per-class metrics sortable table
@@ -264,8 +299,15 @@ Local-first CV annotation platform.
   - trainer uses shared classifier builder for real classification runs
   - API experiment queue/start flow uses shared architecture-family resolution
 - Trainer reliability safeguards:
-  - classification dataloader defaults to `advanced.num_workers=0` for container-safe execution
+  - classification dataloader defaults to `runtime.num_workers=0` (falls back to `advanced.num_workers`) for container-safe execution
   - if a shared-memory dataloader failure occurs with `num_workers > 0`, trainer retries once with `num_workers=0`
+  - runtime loader tuning is available via config/UI:
+    - `runtime.num_workers`, `runtime.pin_memory`, `runtime.persistent_workers`
+    - `runtime.prefetch_factor`, `runtime.cache_resized_images`, `runtime.max_cached_images`
+  - trainer metrics now include:
+    - `train_accuracy`, `epoch_seconds`, `eta_seconds`
+  - runtime payload now includes:
+    - `prefetch_factor`, `cache_resized_images`, `max_cached_images`
 - Backend ML model runtime (API internal library scope) remains available:
   - `build_model(config, verify_metadata=False)` and adapter registry in `apps/api/src/sheriff_api/ml`
   - metadata verification + registry generation utilities remain unchanged
@@ -278,7 +320,21 @@ Local-first CV annotation platform.
 cp .env.example .env
 ```
 
-2. Start:
+2. Start (normal day-to-day):
+
+```bash
+docker compose up -d
+```
+
+Only rebuild when needed:
+
+```bash
+docker compose --profile build-tools build trainer-base   # when torch/cuda base changes
+docker compose build trainer api web                      # day-to-day image rebuilds
+docker compose up -d
+```
+
+If you want a full rebuild from Dockerfiles:
 
 ```bash
 docker compose up --build
@@ -297,20 +353,17 @@ Trainer CUDA defaults (Docker):
 Optional: prebuild a reusable trainer CUDA base image (recommended):
 
 ```bash
-DOCKER_BUILDKIT=1 docker build \
-  -f apps/trainer/Dockerfile.base \
-  --build-arg PYTORCH_INDEX_URL=https://download.pytorch.org/whl/cu129 \
-  -t pixel-sheriff/trainer-base:cu129 \
-  .
+docker compose --profile build-tools build trainer-base
 ```
 
 Then set `.env`:
 
 ```bash
-TRAINER_BASE_IMAGE=pixel-sheriff/trainer-base:cu129
+TRAINER_BASE_IMAGE=${TRAINER_BASE_TAG}
 ```
 
 After that, `docker compose build trainer` reuses the prebuilt CUDA/PyTorch layer and only rebuilds app code layers.
+Also, trainer Dockerfiles now share a named BuildKit pip cache (`id=pixel-sheriff-pip-cache`) so wheel downloads are reused across trainer/base builds.
 
 3. Open (`.env.example` defaults):
 
@@ -329,12 +382,13 @@ After that, `docker compose build trainer` reuses the prebuilt CUDA/PyTorch laye
 - API tests (local, full suite):
   - `docker compose up -d db redis`
   - `cd apps/api && python3 -m pip install -e ".[dev,ml]"`
-  - `cd apps/api && DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5433/pixel_sheriff STORAGE_ROOT=/tmp/pixel_sheriff_test_data python3 -m pytest -s tests`
+  - `cd apps/api && DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5433/pixel_sheriff_test STORAGE_ROOT=/tmp/pixel_sheriff_test_data python3 -m pytest -s tests`
 - API tests (local, non-ML only):
   - `cd apps/api && python3 -m pip install -e ".[dev]"`
-  - `cd apps/api && DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5433/pixel_sheriff STORAGE_ROOT=/tmp/pixel_sheriff_test_data python3 -m pytest -s tests/test_api.py tests/test_model_store.py`
+  - `cd apps/api && DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5433/pixel_sheriff_test STORAGE_ROOT=/tmp/pixel_sheriff_test_data python3 -m pytest -s tests/test_api.py tests/test_model_store.py`
 - API experiments-focused regressions (local):
-  - `cd apps/api && DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5433/pixel_sheriff STORAGE_ROOT=/tmp/pixel_sheriff_test_data python3 -m pytest -s tests/test_experiments_api.py`
+  - `cd apps/api && DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5433/pixel_sheriff_test STORAGE_ROOT=/tmp/pixel_sheriff_test_data python3 -m pytest -s tests/test_experiments_api.py`
+- Safety note: never point test commands at your app DB (`pixel_sheriff`), because test fixtures reset schema/tables.
 - ML tests only (local):
   - `cd apps/api && python3 -m pytest tests/ml -q --confcutdir=tests/ml`
 - API tests (container):

@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- Experiment runtime/metrics UX and contract upgrades:
+  - experiment detail advanced settings now expose runtime tuning controls:
+    - `num_workers`, `pin_memory`, `persistent_workers`
+    - `prefetch_factor`, `cache_resized_images`, `max_cached_images`
+  - model name in experiment header now links to model detail page
+  - metrics pipeline now includes:
+    - `train_accuracy`
+    - `epoch_seconds`
+    - `eta_seconds`
+  - experiment detail Metrics + Dashboard now show:
+    - last epoch time
+    - ETA duration
+    - estimated finish clock time (`finishes ~HH:MM`)
+  - runtime payload now surfaces tuning fields for observability:
+    - `prefetch_factor`, `cache_resized_images`, `max_cached_images`
 - Deploy + MAL v1 (classification ONNX) end-to-end:
   - API deployment registry + prediction endpoints:
     - `POST /api/v1/projects/{project_id}/deployments`

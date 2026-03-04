@@ -118,6 +118,9 @@ Status reflects current repository behavior.
   - [x] refresh + auto-refresh polling for logs while status is `queued`/`running`
   - [x] status-adjacent runtime badge in detail view (`CUDA`/`CPU`/`MPS`)
   - [x] runtime badge surfaced in experiments list table
+  - [x] advanced runtime tuning controls in experiment detail:
+    - [x] `num_workers`, `pin_memory`, `persistent_workers`
+    - [x] `prefetch_factor`, `cache_resized_images`, `max_cached_images`
 - [x] Experiment ONNX export panel:
   - [x] ONNX status card on experiment detail (`Exported`/`Pending`/`Failed`)
   - [x] model + metadata download actions
@@ -144,6 +147,14 @@ Status reflects current repository behavior.
   - [x] resume support (`resume.enabled`, `resume.checkpoint_kind`) with explicit transparency logs/events on success or invalid resume state
   - [x] numeric parsing hardening for zero-valid fields (`lr`, `weight_decay`, scheduler values)
   - [x] run artifacts: per-attempt `training.log` and `runtime.json` + latest runtime mirror
+  - [x] runtime payload enrichment:
+    - [x] `prefetch_factor`
+    - [x] `cache_resized_images`
+    - [x] `max_cached_images`
+  - [x] per-epoch metrics enrichment:
+    - [x] `train_accuracy`
+    - [x] `epoch_seconds`
+    - [x] `eta_seconds`
   - [x] trainer Docker CUDA baseline moved to `cu129` for RTX 50-series (`sm_120`) compatibility
 - [x] Post-training ONNX export flow:
   - [x] export best checkpoint via `torch.onnx.export` (opset 17)

@@ -243,9 +243,12 @@ Trainer responsibilities and runtime behavior:
   - appends `events.jsonl` for SSE tail streaming
 - Classification evaluation contract:
   - per-epoch `metrics.jsonl` now includes:
+    - `train_accuracy`
     - `val_macro_f1`
     - `val_macro_precision`
     - `val_macro_recall`
+    - `epoch_seconds`
+    - `eta_seconds`
   - end-of-run classification artifacts include:
     - confusion matrix raw counts
     - per-class precision/recall/f1/support
@@ -255,8 +258,11 @@ Trainer responsibilities and runtime behavior:
   - validates `status.json` active job/attempt before execution
   - stale/duplicate jobs are ignored
 - Worker reliability safeguards:
-  - default `TrainingConfig v0.1` uses `advanced.num_workers = 0` for container-safe data loading
+  - default `TrainingConfig v0.1` uses `runtime.num_workers = 0` (fallback `advanced.num_workers`) for container-safe data loading
   - if a shared-memory dataloader failure occurs with `num_workers > 0`, trainer retries once with `num_workers=0` and emits a status message event
+  - runtime tuning fields supported in config:
+    - `runtime.pin_memory`, `runtime.persistent_workers`
+    - `runtime.prefetch_factor`, `runtime.cache_resized_images`, `runtime.max_cached_images`
 
 ## 4. Implemented API Surface
 
@@ -524,13 +530,17 @@ Workspace container components (`apps/web/src/components/workspace/*`):
     - hyperparameter scatter with hover tooltip (experiment identity + x/y values) and click-through to experiment detail
     - defaults: last 3 completed runs selected, failed runs hidden unless toggled, best run highlighted
   - experiment detail supports editable training params in `draft`/`failed` states
+  - experiment detail header model name links to model detail page
   - experiment detail header includes `Back to Experiments` navigation to project experiments list
   - `Start Training` enqueues worker job and transitions `queued -> running -> terminal`
   - `Cancel` supports queued cancel and running cancel-request semantics
   - checkpoints tracked as `best_metric`, `best_loss`, `latest` with selection placeholder (`Pick`)
   - metrics chart supports axis/ticks, legend, series toggles, crosshair hover, and per-epoch tooltip values
+  - metrics panel shows last epoch duration + ETA + estimated finish clock time
   - experiment detail dashboard (classification only) includes:
     - metric tabs (`Loss`, `Accuracy`, `F1/Precision/Recall`) with log-scale toggle
+    - accuracy tab overlays `train_accuracy` and `val_accuracy`
+    - timing row shows epoch duration + ETA + estimated finish clock time
     - confusion matrix heatmap with client-side normalization (`none`, `by_true`, `by_pred`)
     - confusion-cell drill-down modal with sample thumbnails
     - per-class metrics table with sortable columns

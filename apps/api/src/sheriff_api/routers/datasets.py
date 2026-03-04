@@ -177,6 +177,9 @@ def _apply_filters(
     include_statuses = {
         str(value) for value in filters.get("include_statuses", []) if str(value) in {status.value for status in AnnotationStatus}
     }
+    exclude_statuses = {
+        str(value) for value in filters.get("exclude_statuses", []) if str(value) in {status.value for status in AnnotationStatus}
+    }
     include_category_ids = {str(value) for value in filters.get("include_category_ids", []) if str(value).strip()}
     exclude_category_ids = {str(value) for value in filters.get("exclude_category_ids", []) if str(value).strip()}
     include_folder_paths = [str(value) for value in filters.get("include_folder_paths", []) if str(value).strip()]
@@ -189,10 +192,15 @@ def _apply_filters(
             continue
         if include_statuses and row.status not in include_statuses:
             continue
+        if exclude_statuses and row.status in exclude_statuses:
+            continue
         if include_category_ids and not (include_category_ids & set(row.category_ids)):
             continue
         if exclude_category_ids and (exclude_category_ids & set(row.category_ids)):
             continue
+        # Include folders are a restrictive baseline when provided.
+        # Exclude folders always subtract from that baseline.
+        # final_membership = included_set - excluded_set (exclude wins)
         if include_folder_paths and not _folder_match(row.relative_path, include_folder_paths):
             continue
         if exclude_folder_paths and _folder_match(row.relative_path, exclude_folder_paths):
@@ -784,7 +792,10 @@ async def list_dataset_version_assets(
                 split_by_asset[asset_id] = split_value
 
     rows = await _load_asset_rows(db, project_id)
-    scoped = [row for row in rows if row.asset.id in set(str(asset_id) for asset_id in version_asset_ids)]
+    version_asset_id_set = {str(asset_id) for asset_id in version_asset_ids}
+    # For saved dataset versions, membership comes only from stored version assets/splits.
+    # Live DB rows are used only to enrich display fields such as status/labels/path.
+    scoped = [row for row in rows if row.asset.id in version_asset_id_set]
     if split in {"train", "val", "test"}:
         scoped = [row for row in scoped if split_by_asset.get(row.asset.id) == split]
     if status is not None:

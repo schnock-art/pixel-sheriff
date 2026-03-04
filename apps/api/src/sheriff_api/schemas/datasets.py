@@ -14,6 +14,7 @@ SplitName = Literal["train", "val", "test"]
 class DatasetSelectionFilters(BaseModel):
     include_labeled_only: bool = False
     include_statuses: list[AnnotationStatus] = Field(default_factory=list)
+    exclude_statuses: list[AnnotationStatus] = Field(default_factory=list)
     include_category_ids: list[str] = Field(default_factory=list)
     exclude_category_ids: list[str] = Field(default_factory=list)
     include_folder_paths: list[str] = Field(default_factory=list)

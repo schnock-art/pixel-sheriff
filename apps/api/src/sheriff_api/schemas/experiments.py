@@ -52,6 +52,9 @@ class TrainingRuntime(BaseModel):
     num_workers: int = Field(default=0, ge=0)
     pin_memory: bool | None = None
     persistent_workers: bool | None = None
+    prefetch_factor: int = Field(default=2, ge=1)
+    cache_resized_images: bool | None = None
+    max_cached_images: int = Field(default=1024, ge=0)
 
 
 class TrainingLogging(BaseModel):
@@ -117,6 +120,7 @@ class ExperimentMetricPoint(BaseModel):
     attempt: int | None = Field(default=None, ge=1)
     epoch: int = Field(ge=1)
     train_loss: float | None = None
+    train_accuracy: float | None = None
     val_loss: float | None = None
     val_accuracy: float | None = None
     val_macro_f1: float | None = None
@@ -124,6 +128,8 @@ class ExperimentMetricPoint(BaseModel):
     val_macro_recall: float | None = None
     val_map: float | None = None
     val_iou: float | None = None
+    epoch_seconds: float | None = None
+    eta_seconds: float | None = None
     created_at: datetime | None = None
 
 
@@ -241,6 +247,9 @@ class ExperimentRuntimeResponse(BaseModel):
     num_workers: int
     pin_memory: bool
     persistent_workers: bool
+    prefetch_factor: int | None = None
+    cache_resized_images: bool | None = None
+    max_cached_images: int | None = None
 
 
 class ExperimentLogsChunkResponse(BaseModel):

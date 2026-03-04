@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
   ApiError,
   createDatasetVersion,
   exportDatasetVersion,
+  listAssets,
   listCategories,
   listDatasetVersionAssets,
   listDatasetVersions,
@@ -16,12 +17,38 @@ import {
   type DatasetVersionAssetsPayload,
   type DatasetVersionSummaryEnvelope,
 } from "../../../../lib/api";
+import { useDatasetBrowserState } from "../../../../lib/hooks/useDatasetBrowserState";
+import { useDatasetDraftState } from "../../../../lib/hooks/useDatasetDraftState";
+import { collectFolderPaths } from "../../../../lib/workspace/tree";
+import {
+  ALL_STATUSES,
+  buildDescendantsByPath,
+  buildFolderTree,
+  contentUrlForAsset,
+  folderCheckState,
+  toggleFolderPathSelection,
+  toggleStatusSelection,
+} from "../../../../lib/workspace/datasetPage";
 
 interface DatasetPageProps {
   params: {
     projectId: string;
   };
 }
+
+type DatasetMode = "browse" | "draft";
+type SummaryPayload = {
+  total: number;
+  class_counts: Record<string, number>;
+  split_counts: { train: number; val: number; test: number };
+  warnings: string[];
+};
+
+type FolderTreeNode = {
+  name: string;
+  path: string;
+  children: FolderTreeNode[];
+};
 
 function parseApiErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof ApiError && error.responseBody) {
@@ -49,11 +76,249 @@ function versionIdOf(item: DatasetVersionSummaryEnvelope): string {
   return typeof value === "string" ? value : "";
 }
 
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
+
+function summaryFromVersion(versionEnvelope: DatasetVersionSummaryEnvelope | null): SummaryPayload | null {
+  if (!versionEnvelope) return null;
+  const stats = asRecord(asRecord(versionEnvelope.version).stats);
+  const splitCounts = asRecord(stats.split_counts);
+  const warnings = Array.isArray(stats.warnings) ? stats.warnings.filter((item): item is string => typeof item === "string") : [];
+  const classCountsRaw = asRecord(stats.class_counts);
+  const classCounts: Record<string, number> = {};
+  for (const [key, value] of Object.entries(classCountsRaw)) {
+    if (typeof value === "number" && Number.isFinite(value)) classCounts[key] = value;
+  }
+
+  const total = typeof stats.asset_count === "number" ? stats.asset_count : Object.values(splitCounts).reduce((sum, value) => sum + (typeof value === "number" ? value : 0), 0);
+  return {
+    total,
+    class_counts: classCounts,
+    split_counts: {
+      train: typeof splitCounts.train === "number" ? splitCounts.train : 0,
+      val: typeof splitCounts.val === "number" ? splitCounts.val : 0,
+      test: typeof splitCounts.test === "number" ? splitCounts.test : 0,
+    },
+    warnings,
+  };
+}
+
+function selectedVersionName(item: DatasetVersionSummaryEnvelope | null): string {
+  if (!item) return "(none)";
+  const name = asRecord(item.version).name;
+  const id = asRecord(item.version).dataset_version_id;
+  if (typeof name === "string" && name.trim()) return name;
+  if (typeof id === "string" && id.trim()) return id;
+  return "(unnamed version)";
+}
+
+function FolderTreeRow({
+  node,
+  depth,
+  selectedPaths,
+  descendantsByPath,
+  collapsed,
+  onToggleCollapsed,
+  onToggleChecked,
+}: {
+  node: FolderTreeNode;
+  depth: number;
+  selectedPaths: string[];
+  descendantsByPath: Record<string, string[]>;
+  collapsed: Record<string, boolean>;
+  onToggleCollapsed: (path: string) => void;
+  onToggleChecked: (path: string, checked: boolean) => void;
+}) {
+  const checkState = folderCheckState(node.path, selectedPaths, descendantsByPath);
+  const isCollapsed = Boolean(collapsed[node.path]);
+  const checkboxRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!checkboxRef.current) return;
+    checkboxRef.current.indeterminate = checkState === "indeterminate";
+  }, [checkState]);
+
+  return (
+    <div>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, paddingLeft: depth * 12 }}>
+        <button
+          type="button"
+          className="ghost-button"
+          style={{ width: 22, height: 22, padding: 0 }}
+          onClick={() => onToggleCollapsed(node.path)}
+          aria-label={isCollapsed ? "Expand folder" : "Collapse folder"}
+        >
+          {isCollapsed ? ">" : "v"}
+        </button>
+        <input
+          ref={checkboxRef}
+          type="checkbox"
+          checked={checkState === "checked"}
+          onChange={(event) => onToggleChecked(node.path, event.target.checked)}
+        />
+        <span>{node.name}</span>
+      </div>
+      {!isCollapsed && node.children.length > 0
+        ? node.children.map((child) => (
+            <FolderTreeRow
+              key={child.path}
+              node={child}
+              depth={depth + 1}
+              selectedPaths={selectedPaths}
+              descendantsByPath={descendantsByPath}
+              collapsed={collapsed}
+              onToggleCollapsed={onToggleCollapsed}
+              onToggleChecked={onToggleChecked}
+            />
+          ))
+        : null}
+    </div>
+  );
+}
+
+function FolderMultiSelectDropdown({
+  label,
+  folderPaths,
+  selectedPaths,
+  opposingSelectedPaths,
+  onSelectedChange,
+  onOpposingChange,
+}: {
+  label: string;
+  folderPaths: string[];
+  selectedPaths: string[];
+  opposingSelectedPaths: string[];
+  onSelectedChange: (value: string[]) => void;
+  onOpposingChange: (value: string[]) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  const tree = useMemo(() => buildFolderTree(folderPaths), [folderPaths]);
+  const descendantsByPath = useMemo(() => buildDescendantsByPath(folderPaths), [folderPaths]);
+
+  function toggleChecked(path: string, checked: boolean) {
+    const next = toggleFolderPathSelection({
+      selectedPaths,
+      opposingSelectedPaths,
+      path,
+      checked,
+      descendantsByPath,
+    });
+    onSelectedChange(next.selectedPaths);
+    onOpposingChange(next.opposingSelectedPaths);
+  }
+
+  return (
+    <div style={{ position: "relative" }}>
+      <button type="button" className="ghost-button" onClick={() => setOpen((value) => !value)}>
+        {label}: {selectedPaths.length} selected
+      </button>
+      {open ? (
+        <div
+          style={{
+            position: "absolute",
+            zIndex: 20,
+            top: "calc(100% + 6px)",
+            left: 0,
+            right: 0,
+            maxHeight: 260,
+            overflow: "auto",
+            border: "1px solid var(--line, #d8dce6)",
+            borderRadius: 8,
+            background: "var(--frame, #f8f9fc)",
+            padding: 8,
+            boxShadow: "0 6px 16px rgba(0,0,0,0.12)",
+          }}
+        >
+          {tree.length === 0 ? <p style={{ margin: 0 }}>No folders found.</p> : null}
+          {tree.map((node) => (
+            <FolderTreeRow
+              key={node.path}
+              node={node}
+              depth={0}
+              selectedPaths={selectedPaths}
+              descendantsByPath={descendantsByPath}
+              collapsed={collapsed}
+              onToggleCollapsed={(path) => setCollapsed((previous) => ({ ...previous, [path]: !previous[path] }))}
+              onToggleChecked={toggleChecked}
+            />
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function StatusMultiSelectDropdown({
+  label,
+  selected,
+  otherSelected,
+  onSelectedChange,
+  onOtherSelectedChange,
+}: {
+  label: string;
+  selected: AnnotationStatus[];
+  otherSelected: AnnotationStatus[];
+  onSelectedChange: (value: AnnotationStatus[]) => void;
+  onOtherSelectedChange: (value: AnnotationStatus[]) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div style={{ position: "relative" }}>
+      <button type="button" className="ghost-button" onClick={() => setOpen((value) => !value)}>
+        {label}: {selected.length === 0 ? "none" : selected.join(", ")}
+      </button>
+      {open ? (
+        <div
+          style={{
+            position: "absolute",
+            zIndex: 20,
+            top: "calc(100% + 6px)",
+            left: 0,
+            right: 0,
+            border: "1px solid var(--line, #d8dce6)",
+            borderRadius: 8,
+            background: "var(--frame, #f8f9fc)",
+            padding: 8,
+            boxShadow: "0 6px 16px rgba(0,0,0,0.12)",
+          }}
+        >
+          <div style={{ display: "grid", gap: 6 }}>
+            {ALL_STATUSES.map((status) => (
+              <label key={status} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <input
+                  type="checkbox"
+                  checked={selected.includes(status as AnnotationStatus)}
+                  onChange={(event) => {
+                    const next = toggleStatusSelection({
+                      selected,
+                      otherSelected,
+                      status: status as AnnotationStatus,
+                      checked: event.target.checked,
+                    });
+                    onSelectedChange(next.selected as AnnotationStatus[]);
+                    onOtherSelectedChange(next.otherSelected as AnnotationStatus[]);
+                  }}
+                />
+                <span>{status}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export default function DatasetPage({ params }: DatasetPageProps) {
   const projectId = useMemo(() => decodeURIComponent(params.projectId), [params.projectId]);
+  const browser = useDatasetBrowserState();
+  const draft = useDatasetDraftState();
+
+  const [mode, setMode] = useState<DatasetMode>("browse");
   const [versions, setVersions] = useState<DatasetVersionSummaryEnvelope[]>([]);
   const [activeDatasetVersionId, setActiveDatasetVersionIdState] = useState<string | null>(null);
-  const [selectedDatasetVersionId, setSelectedDatasetVersionId] = useState<string | null>(null);
   const [assetsPayload, setAssetsPayload] = useState<DatasetVersionAssetsPayload | null>(null);
   const [isLoadingVersions, setIsLoadingVersions] = useState(true);
   const [isLoadingAssets, setIsLoadingAssets] = useState(false);
@@ -61,43 +326,47 @@ export default function DatasetPage({ params }: DatasetPageProps) {
   const [isCreating, setIsCreating] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [previewSummary, setPreviewSummary] = useState<{
-    total: number;
-    class_counts: Record<string, number>;
-    split_counts: { train: number; val: number; test: number };
-    warnings: string[];
-    sample_asset_ids: string[];
-  } | null>(null);
   const [categoryNameById, setCategoryNameById] = useState<Record<string, string>>({});
+  const [folderPaths, setFolderPaths] = useState<string[]>([]);
+  const [classFilter, setClassFilter] = useState<string>("all");
 
-  const [draftName, setDraftName] = useState("Dataset v1");
-  const [includeLabeledOnly, setIncludeLabeledOnly] = useState(true);
-  const [statusSelection, setStatusSelection] = useState<AnnotationStatus[]>(["labeled", "approved", "needs_review"]);
-  const [includeFolderPaths, setIncludeFolderPaths] = useState("");
-  const [excludeFolderPaths, setExcludeFolderPaths] = useState("");
-  const [seed, setSeed] = useState(1337);
-  const [trainRatio, setTrainRatio] = useState(0.8);
-  const [valRatio, setValRatio] = useState(0.1);
-  const [testRatio, setTestRatio] = useState(0.1);
-  const [stratify, setStratify] = useState(true);
-  const [splitFilter, setSplitFilter] = useState<"all" | "train" | "val" | "test">("all");
-  const [statusFilter, setStatusFilter] = useState<"all" | AnnotationStatus>("all");
-  const [searchText, setSearchText] = useState("");
-  const [page, setPage] = useState(1);
+  const selectedVersion = useMemo(
+    () => versions.find((item) => versionIdOf(item) === browser.selectedDatasetVersionId) ?? null,
+    [browser.selectedDatasetVersionId, versions],
+  );
+
+  const savedSummary = useMemo(() => summaryFromVersion(selectedVersion), [selectedVersion]);
+  const summarySource = mode === "draft" ? "draft" : "saved";
+  const summaryData = summarySource === "saved" ? savedSummary : draft.previewSummary;
+  const classFilterOptions = useMemo(() => {
+    const sourceIds =
+      savedSummary && savedSummary.class_counts
+        ? Object.keys(savedSummary.class_counts).filter((classId) => classId !== "__missing__")
+        : Object.keys(categoryNameById);
+    const deduped = Array.from(new Set(sourceIds));
+    return deduped
+      .map((classId) => ({
+        id: classId,
+        name: categoryNameById[classId] ?? classId,
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [categoryNameById, savedSummary]);
 
   async function loadVersions() {
     setIsLoadingVersions(true);
     try {
       const payload = await listDatasetVersions(projectId);
-      setVersions(payload.items ?? []);
+      const nextVersions = payload.items ?? [];
+      setVersions(nextVersions);
       setActiveDatasetVersionIdState(payload.active_dataset_version_id ?? null);
-      const firstId = payload.active_dataset_version_id ?? versionIdOf(payload.items?.[0] ?? { version: {}, is_active: false, is_archived: false });
-      setSelectedDatasetVersionId(firstId || null);
+      const firstId =
+        payload.active_dataset_version_id ?? versionIdOf(nextVersions[0] ?? { version: {}, is_active: false, is_archived: false });
+      browser.setSelectedDatasetVersionId(firstId || null);
       setErrorMessage(null);
     } catch (error) {
       setErrorMessage(parseApiErrorMessage(error, "Failed to load dataset versions"));
       setVersions([]);
-      setSelectedDatasetVersionId(null);
+      browser.setSelectedDatasetVersionId(null);
     } finally {
       setIsLoadingVersions(false);
     }
@@ -131,13 +400,31 @@ export default function DatasetPage({ params }: DatasetPageProps) {
     };
   }, [projectId]);
 
+  useEffect(() => {
+    let isMounted = true;
+    async function loadFolderPaths() {
+      try {
+        const assets = await listAssets(projectId);
+        if (!isMounted) return;
+        setFolderPaths(collectFolderPaths(assets));
+      } catch {
+        if (!isMounted) return;
+        setFolderPaths([]);
+      }
+    }
+    void loadFolderPaths();
+    return () => {
+      isMounted = false;
+    };
+  }, [projectId]);
+
   function classDisplayName(classId: string): string {
     if (classId === "__missing__") return "Unlabeled / missing primary";
     return categoryNameById[classId] ?? classId;
   }
 
   useEffect(() => {
-    if (!selectedDatasetVersionId) {
+    if (!browser.selectedDatasetVersionId) {
       setAssetsPayload(null);
       return;
     }
@@ -145,12 +432,13 @@ export default function DatasetPage({ params }: DatasetPageProps) {
     async function loadAssets() {
       setIsLoadingAssets(true);
       try {
-        const payload = await listDatasetVersionAssets(projectId, selectedDatasetVersionId, {
-          page,
+        const payload = await listDatasetVersionAssets(projectId, browser.selectedDatasetVersionId as string, {
+          page: browser.page,
           page_size: 50,
-          split: splitFilter === "all" ? undefined : splitFilter,
-          status: statusFilter === "all" ? undefined : statusFilter,
-          search: searchText.trim() || undefined,
+          split: browser.splitFilter === "all" ? undefined : browser.splitFilter,
+          status: browser.statusFilter === "all" ? undefined : browser.statusFilter,
+          class_id: classFilter === "all" ? undefined : classFilter,
+          search: browser.searchText.trim() || undefined,
         });
         if (!isMounted) return;
         setAssetsPayload(payload);
@@ -165,32 +453,38 @@ export default function DatasetPage({ params }: DatasetPageProps) {
     return () => {
       isMounted = false;
     };
-  }, [page, projectId, searchText, selectedDatasetVersionId, splitFilter, statusFilter]);
+  }, [
+    browser.page,
+    browser.searchText,
+    browser.selectedDatasetVersionId,
+    browser.splitFilter,
+    browser.statusFilter,
+    classFilter,
+    projectId,
+  ]);
 
-  function parseFolderPaths(raw: string): string[] {
-    return raw
-      .split(",")
-      .map((item) => item.trim())
-      .filter((item) => item.length > 0);
-  }
+  useEffect(() => {
+    setClassFilter("all");
+  }, [browser.selectedDatasetVersionId]);
 
   function selectionPayload() {
     return {
       mode: "filter_snapshot" as const,
       filters: {
-        include_labeled_only: includeLabeledOnly,
-        include_statuses: statusSelection,
-        include_folder_paths: parseFolderPaths(includeFolderPaths),
-        exclude_folder_paths: parseFolderPaths(excludeFolderPaths),
+        include_labeled_only: draft.includeLabeledOnly,
+        include_statuses: draft.includeStatuses,
+        exclude_statuses: draft.excludeStatuses,
+        include_folder_paths: draft.includeFolderPaths,
+        exclude_folder_paths: draft.excludeFolderPaths,
       },
     };
   }
 
   function splitPayload() {
     return {
-      seed,
-      ratios: { train: trainRatio, val: valRatio, test: testRatio },
-      stratify: { enabled: stratify, by: "label_primary" as const, strict_stratify: false },
+      seed: draft.seed,
+      ratios: { train: draft.trainRatio, val: draft.valRatio, test: draft.testRatio },
+      stratify: { enabled: draft.stratify, by: "label_primary" as const, strict_stratify: false },
     };
   }
 
@@ -202,13 +496,14 @@ export default function DatasetPage({ params }: DatasetPageProps) {
         selection: selectionPayload(),
         split: splitPayload(),
       });
-      setPreviewSummary({
+      draft.setPreviewSummary({
         total: payload.counts.total,
         class_counts: payload.counts.class_counts,
         split_counts: payload.counts.split_counts,
         warnings: payload.warnings ?? [],
         sample_asset_ids: payload.sample_asset_ids ?? [],
       });
+      setMode("draft");
       setErrorMessage(null);
     } catch (error) {
       setErrorMessage(parseApiErrorMessage(error, "Failed to preview dataset"));
@@ -221,7 +516,7 @@ export default function DatasetPage({ params }: DatasetPageProps) {
     setIsCreating(true);
     try {
       const created = await createDatasetVersion(projectId, {
-        name: draftName.trim() || "Dataset version",
+        name: draft.draftName.trim() || "Dataset version",
         task: "classification",
         selection: selectionPayload(),
         split: splitPayload(),
@@ -229,7 +524,9 @@ export default function DatasetPage({ params }: DatasetPageProps) {
       });
       const createdId = versionIdOf(created);
       await loadVersions();
-      if (createdId) setSelectedDatasetVersionId(createdId);
+      if (createdId) browser.setSelectedDatasetVersionId(createdId);
+      setMode("browse");
+      draft.resetDraft();
       setErrorMessage(null);
     } catch (error) {
       setErrorMessage(parseApiErrorMessage(error, "Failed to create dataset version"));
@@ -249,14 +546,14 @@ export default function DatasetPage({ params }: DatasetPageProps) {
   }
 
   async function handleExport() {
-    if (!selectedDatasetVersionId) return;
+    if (!browser.selectedDatasetVersionId) return;
     setIsExporting(true);
     try {
-      const exported = await exportDatasetVersion(projectId, selectedDatasetVersionId);
+      const exported = await exportDatasetVersion(projectId, browser.selectedDatasetVersionId);
       const url = resolveAssetUri(exported.export_uri);
       const anchor = document.createElement("a");
       anchor.href = url;
-      anchor.download = `${selectedDatasetVersionId}-${exported.hash.slice(0, 8)}.zip`;
+      anchor.download = `${browser.selectedDatasetVersionId}-${exported.hash.slice(0, 8)}.zip`;
       document.body.appendChild(anchor);
       anchor.click();
       anchor.remove();
@@ -266,6 +563,39 @@ export default function DatasetPage({ params }: DatasetPageProps) {
     } finally {
       setIsExporting(false);
     }
+  }
+
+  function handleDuplicateAndEdit() {
+    if (!selectedVersion) return;
+    const version = asRecord(selectedVersion.version);
+    const selection = asRecord(version.selection);
+    const filters = asRecord(selection.filters);
+    const splits = asRecord(version.splits);
+    const ratios = asRecord(splits.ratios);
+    const stratify = asRecord(splits.stratify);
+    draft.initDraftFromVersion({
+      name: typeof version.name === "string" ? version.name : "Dataset version",
+      include_labeled_only: Boolean(filters.include_labeled_only),
+      include_statuses: Array.isArray(filters.include_statuses) ? (filters.include_statuses as AnnotationStatus[]) : [],
+      exclude_statuses: Array.isArray(filters.exclude_statuses) ? (filters.exclude_statuses as AnnotationStatus[]) : [],
+      include_folder_paths: Array.isArray(filters.include_folder_paths) ? (filters.include_folder_paths as string[]) : [],
+      exclude_folder_paths: Array.isArray(filters.exclude_folder_paths) ? (filters.exclude_folder_paths as string[]) : [],
+      seed: typeof splits.seed === "number" ? splits.seed : 1337,
+      ratios: {
+        train: typeof ratios.train === "number" ? ratios.train : 0.8,
+        val: typeof ratios.val === "number" ? ratios.val : 0.1,
+        test: typeof ratios.test === "number" ? ratios.test : 0.1,
+      },
+      stratify: {
+        enabled: Boolean(stratify.enabled),
+      },
+    });
+    setMode("draft");
+  }
+
+  function handleDiscardDraft() {
+    draft.resetDraft();
+    setMode("browse");
   }
 
   return (
@@ -286,7 +616,7 @@ export default function DatasetPage({ params }: DatasetPageProps) {
               {versions.map((item) => {
                 const id = versionIdOf(item);
                 const isActive = activeDatasetVersionId === id;
-                const isSelected = selectedDatasetVersionId === id;
+                const isSelected = browser.selectedDatasetVersionId === id;
                 const name = typeof item.version?.name === "string" ? item.version.name : id;
                 return (
                   <button
@@ -294,8 +624,8 @@ export default function DatasetPage({ params }: DatasetPageProps) {
                     type="button"
                     className={isSelected ? "ghost-button active-toggle" : "ghost-button"}
                     onClick={() => {
-                      setSelectedDatasetVersionId(id);
-                      setPage(1);
+                      browser.setSelectedDatasetVersionId(id);
+                      setMode("browse");
                     }}
                     style={{ justifyContent: "space-between", display: "flex", alignItems: "center" }}
                   >
@@ -305,9 +635,9 @@ export default function DatasetPage({ params }: DatasetPageProps) {
                 );
               })}
             </div>
-            {selectedDatasetVersionId ? (
+            {browser.selectedDatasetVersionId ? (
               <div style={{ marginTop: 12, display: "grid", gap: 8 }}>
-                <button type="button" className="ghost-button" onClick={() => void handleSetActive(selectedDatasetVersionId)}>
+                <button type="button" className="ghost-button" onClick={() => void handleSetActive(browser.selectedDatasetVersionId as string)}>
                   Set Active
                 </button>
                 <button type="button" className="primary-button" disabled={isExporting} onClick={() => void handleExport()}>
@@ -318,60 +648,95 @@ export default function DatasetPage({ params }: DatasetPageProps) {
           </section>
 
           <section className="placeholder-card">
+            {mode === "browse" ? (
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
+                <strong>Browsing saved dataset version: {selectedVersionName(selectedVersion)}</strong>
+                <button type="button" className="ghost-button" disabled={!selectedVersion} onClick={handleDuplicateAndEdit}>
+                  Duplicate &amp; Edit
+                </button>
+              </div>
+            ) : (
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
+                <strong>Draft preview - not saved</strong>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button type="button" className="primary-button" disabled={isCreating} onClick={() => void handleCreate()}>
+                    {isCreating ? "Creating..." : "Create Version"}
+                  </button>
+                  <button type="button" className="ghost-button" onClick={handleDiscardDraft}>
+                    Discard Draft
+                  </button>
+                </div>
+              </div>
+            )}
+
             <h3>Create Version</h3>
             <div style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(2, minmax(0, 1fr))" }}>
               <label className="project-field">
                 <span>Name</span>
-                <input value={draftName} onChange={(event) => setDraftName(event.target.value)} />
+                <input value={draft.draftName} onChange={(event) => draft.setDraftName(event.target.value)} />
               </label>
               <label className="project-field">
                 <span>Seed</span>
-                <input type="number" value={seed} onChange={(event) => setSeed(Number(event.target.value) || 1337)} />
+                <input type="number" value={draft.seed} onChange={(event) => draft.setSeed(Number(event.target.value) || 1337)} />
               </label>
               <label className="project-field">
                 <span>Train Ratio</span>
-                <input type="number" step="0.01" value={trainRatio} onChange={(event) => setTrainRatio(Number(event.target.value) || 0)} />
+                <input type="number" step="0.01" value={draft.trainRatio} onChange={(event) => draft.setTrainRatio(Number(event.target.value) || 0)} />
               </label>
               <label className="project-field">
                 <span>Val Ratio</span>
-                <input type="number" step="0.01" value={valRatio} onChange={(event) => setValRatio(Number(event.target.value) || 0)} />
+                <input type="number" step="0.01" value={draft.valRatio} onChange={(event) => draft.setValRatio(Number(event.target.value) || 0)} />
               </label>
               <label className="project-field">
                 <span>Test Ratio</span>
-                <input type="number" step="0.01" value={testRatio} onChange={(event) => setTestRatio(Number(event.target.value) || 0)} />
-              </label>
-              <label className="project-field">
-                <span>Statuses (comma)</span>
-                <input
-                  value={statusSelection.join(",")}
-                  onChange={(event) =>
-                    setStatusSelection(
-                      event.target.value
-                        .split(",")
-                        .map((value) => value.trim())
-                        .filter((value): value is AnnotationStatus =>
-                          ["unlabeled", "labeled", "skipped", "needs_review", "approved"].includes(value),
-                        ),
-                    )
-                  }
-                />
-              </label>
-              <label className="project-field">
-                <span>Include folders (comma)</span>
-                <input value={includeFolderPaths} onChange={(event) => setIncludeFolderPaths(event.target.value)} />
-              </label>
-              <label className="project-field">
-                <span>Exclude folders (comma)</span>
-                <input value={excludeFolderPaths} onChange={(event) => setExcludeFolderPaths(event.target.value)} />
+                <input type="number" step="0.01" value={draft.testRatio} onChange={(event) => draft.setTestRatio(Number(event.target.value) || 0)} />
               </label>
             </div>
+
+            <div style={{ display: "grid", gap: 8, marginTop: 8, gridTemplateColumns: "repeat(2, minmax(0, 1fr))" }}>
+              <StatusMultiSelectDropdown
+                label="Include statuses"
+                selected={draft.includeStatuses}
+                otherSelected={draft.excludeStatuses}
+                onSelectedChange={draft.setIncludeStatuses}
+                onOtherSelectedChange={draft.setExcludeStatuses}
+              />
+              <StatusMultiSelectDropdown
+                label="Exclude statuses"
+                selected={draft.excludeStatuses}
+                otherSelected={draft.includeStatuses}
+                onSelectedChange={draft.setExcludeStatuses}
+                onOtherSelectedChange={draft.setIncludeStatuses}
+              />
+              <FolderMultiSelectDropdown
+                label="Include folders"
+                folderPaths={folderPaths}
+                selectedPaths={draft.includeFolderPaths}
+                opposingSelectedPaths={draft.excludeFolderPaths}
+                onSelectedChange={draft.setIncludeFolderPaths}
+                onOpposingChange={draft.setExcludeFolderPaths}
+              />
+              <FolderMultiSelectDropdown
+                label="Exclude folders"
+                folderPaths={folderPaths}
+                selectedPaths={draft.excludeFolderPaths}
+                opposingSelectedPaths={draft.includeFolderPaths}
+                onSelectedChange={draft.setExcludeFolderPaths}
+                onOpposingChange={draft.setIncludeFolderPaths}
+              />
+            </div>
+
+            <p style={{ marginTop: 6, marginBottom: 0, fontSize: 12, color: "var(--muted, #6f7b8a)" }}>
+              Exclude statuses: {draft.excludeStatuses.length === 0 ? "none" : draft.excludeStatuses.join(", ")}
+            </p>
+
             <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
               <label className="model-builder-checkbox">
-                <input type="checkbox" checked={includeLabeledOnly} onChange={(event) => setIncludeLabeledOnly(event.target.checked)} />
+                <input type="checkbox" checked={draft.includeLabeledOnly} onChange={(event) => draft.setIncludeLabeledOnly(event.target.checked)} />
                 <span>Labeled only</span>
               </label>
               <label className="model-builder-checkbox">
-                <input type="checkbox" checked={stratify} onChange={(event) => setStratify(event.target.checked)} />
+                <input type="checkbox" checked={draft.stratify} onChange={(event) => draft.setStratify(event.target.checked)} />
                 <span>Stratify by primary label</span>
               </label>
             </div>
@@ -379,27 +744,17 @@ export default function DatasetPage({ params }: DatasetPageProps) {
               <button type="button" className="ghost-button" disabled={isPreviewing} onClick={() => void handlePreview()}>
                 {isPreviewing ? "Previewing..." : "Preview"}
               </button>
-              <button type="button" className="primary-button" disabled={isCreating} onClick={() => void handleCreate()}>
-                {isCreating ? "Creating..." : "Create Version"}
-              </button>
             </div>
 
             <h3 style={{ marginTop: 16 }}>Preview Assets</h3>
-            {!selectedDatasetVersionId && previewSummary ? (
-              <p style={{ marginBottom: 8, fontSize: 13 }}>
-                Preview updated: {previewSummary.total} assets selected
-                {previewSummary.sample_asset_ids.length > 0 ? ` (sample ${previewSummary.sample_asset_ids.length})` : ""}.
-                Create a dataset version to browse paginated assets.
-              </p>
-            ) : null}
-            <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
-              <select value={splitFilter} onChange={(event) => setSplitFilter(event.target.value as "all" | "train" | "val" | "test")}>
+            <div style={{ display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
+              <select value={browser.splitFilter} onChange={(event) => browser.setSplitFilter(event.target.value as "all" | "train" | "val" | "test")}>
                 <option value="all">All splits</option>
                 <option value="train">Train</option>
                 <option value="val">Val</option>
                 <option value="test">Test</option>
               </select>
-              <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as "all" | AnnotationStatus)}>
+              <select value={browser.statusFilter} onChange={(event) => browser.setStatusFilter(event.target.value as "all" | AnnotationStatus)}>
                 <option value="all">All statuses</option>
                 <option value="unlabeled">unlabeled</option>
                 <option value="labeled">labeled</option>
@@ -407,20 +762,48 @@ export default function DatasetPage({ params }: DatasetPageProps) {
                 <option value="needs_review">needs_review</option>
                 <option value="approved">approved</option>
               </select>
-              <input
-                placeholder="Search assets..."
-                value={searchText}
+              <select
+                value={classFilter}
                 onChange={(event) => {
-                  setSearchText(event.target.value);
-                  setPage(1);
+                  setClassFilter(event.target.value);
+                  browser.setPage(1);
                 }}
-              />
+              >
+                <option value="all">All classes</option>
+                {classFilterOptions.map((row) => (
+                  <option key={row.id} value={row.id}>
+                    {row.name}
+                  </option>
+                ))}
+              </select>
+              <input placeholder="Search assets..." value={browser.searchText} onChange={(event) => browser.setSearchText(event.target.value)} />
+              <div style={{ display: "flex", gap: 6 }}>
+                <button
+                  type="button"
+                  className={browser.viewMode === "list" ? "ghost-button active-toggle" : "ghost-button"}
+                  onClick={() => browser.setViewMode("list")}
+                >
+                  List
+                </button>
+                <button
+                  type="button"
+                  className={browser.viewMode === "grid" ? "ghost-button active-toggle" : "ghost-button"}
+                  onClick={() => browser.setViewMode("grid")}
+                >
+                  Grid
+                </button>
+              </div>
             </div>
             {isLoadingAssets ? <p>Loading assets...</p> : null}
-            {!isLoadingAssets ? (
+            {!isLoadingAssets && browser.viewMode === "list" ? (
               <div style={{ display: "grid", gap: 6 }}>
                 {(assetsPayload?.items ?? []).map((item) => (
-                  <div key={item.asset_id} style={{ display: "grid", gridTemplateColumns: "1fr auto auto", gap: 8 }}>
+                  <div key={item.asset_id} style={{ display: "grid", gridTemplateColumns: "60px 1fr auto auto", gap: 8, alignItems: "center" }}>
+                    <img
+                      src={resolveAssetUri(contentUrlForAsset(item.asset_id))}
+                      alt={item.filename}
+                      style={{ width: 56, height: 42, objectFit: "cover", borderRadius: 6, border: "1px solid var(--line, #d8dce6)" }}
+                    />
                     <span>{item.relative_path || item.filename}</span>
                     <span>{item.status}</span>
                     <span>{item.split ?? "-"}</span>
@@ -428,9 +811,28 @@ export default function DatasetPage({ params }: DatasetPageProps) {
                 ))}
               </div>
             ) : null}
+            {!isLoadingAssets && browser.viewMode === "grid" ? (
+              <div style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))" }}>
+                {(assetsPayload?.items ?? []).map((item) => (
+                  <div key={item.asset_id} style={{ border: "1px solid var(--line, #d8dce6)", borderRadius: 8, padding: 8 }}>
+                    <img
+                      src={resolveAssetUri(contentUrlForAsset(item.asset_id))}
+                      alt={item.filename}
+                      style={{ width: "100%", height: 96, objectFit: "cover", borderRadius: 6, border: "1px solid var(--line, #d8dce6)" }}
+                    />
+                    <div style={{ marginTop: 6, display: "grid", gap: 4 }}>
+                      <span style={{ fontSize: 12, wordBreak: "break-word" }}>{item.relative_path || item.filename}</span>
+                      <span style={{ fontSize: 12, color: "var(--muted, #6f7b8a)" }}>
+                        {item.status} | {item.split ?? "-"}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : null}
             {assetsPayload ? (
               <div style={{ display: "flex", justifyContent: "space-between", marginTop: 10 }}>
-                <button type="button" className="ghost-button" disabled={page <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))}>
+                <button type="button" className="ghost-button" disabled={browser.page <= 1} onClick={() => browser.setPage((value) => Math.max(1, value - 1))}>
                   Prev
                 </button>
                 <span>
@@ -440,7 +842,7 @@ export default function DatasetPage({ params }: DatasetPageProps) {
                   type="button"
                   className="ghost-button"
                   disabled={assetsPayload.page * assetsPayload.page_size >= assetsPayload.total}
-                  onClick={() => setPage((value) => value + 1)}
+                  onClick={() => browser.setPage((value) => value + 1)}
                 >
                   Next
                 </button>
@@ -449,19 +851,18 @@ export default function DatasetPage({ params }: DatasetPageProps) {
           </section>
 
           <section className="placeholder-card">
-            <h3>Summary</h3>
-            {!previewSummary ? <p>Run preview to compute counts.</p> : null}
-            {previewSummary ? (
+            <h3>{summarySource === "saved" ? "Summary (Saved Version)" : "Summary (Draft Preview)"}</h3>
+            {!summaryData ? <p>{summarySource === "saved" ? "Select a dataset version." : "Run preview to compute counts."}</p> : null}
+            {summaryData ? (
               <div style={{ display: "grid", gap: 10 }}>
-                <p>Total: {previewSummary.total}</p>
+                <p>Total: {summaryData.total}</p>
                 <p>
-                  Splits: train {previewSummary.split_counts.train} | val {previewSummary.split_counts.val} | test{" "}
-                  {previewSummary.split_counts.test}
+                  Splits: train {summaryData.split_counts.train} | val {summaryData.split_counts.val} | test {summaryData.split_counts.test}
                 </p>
                 <div>
                   <h4>Class Distribution</h4>
                   <div style={{ display: "grid", gap: 6 }}>
-                    {Object.entries(previewSummary.class_counts).map(([classId, count]) => (
+                    {Object.entries(summaryData.class_counts).map(([classId, count]) => (
                       <div key={classId} style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 8 }}>
                         <span>{classDisplayName(classId)}</span>
                         <span>{count}</span>
@@ -469,11 +870,11 @@ export default function DatasetPage({ params }: DatasetPageProps) {
                     ))}
                   </div>
                 </div>
-                {previewSummary.warnings.length > 0 ? (
+                {summaryData.warnings.length > 0 ? (
                   <div>
                     <h4>Warnings</h4>
                     <ul>
-                      {previewSummary.warnings.map((warning) => (
+                      {summaryData.warnings.map((warning) => (
                         <li key={warning}>{warning}</li>
                       ))}
                     </ul>
