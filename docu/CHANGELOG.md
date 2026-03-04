@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- Task-scoped workflow contracts are now documented and reflected across API/web:
+  - project default-task bootstrap on create
+  - task CRUD endpoints (`/projects/{project_id}/tasks*`)
+  - task-scoped category/annotation/dataset query/payload contracts (`task_id`)
+  - category delete endpoint (`DELETE /api/v1/categories/{category_id}`)
+- Documentation alignment pass for current runtime behavior:
+  - refreshed `README.md`, `docu/Architecture.md`, `docu/TECHNICAL_REFERENCE.md`, `docu/IMPLEMENTATION_TASKS.md`, and `docu/Roadplan.md`
+  - removed stale placeholder/disabled references for Deploy/Experiments flows
 - Dataset/experiment split consistency regression coverage:
   - added API regression `test_experiment_export_preserves_saved_dataset_split_membership`
   - validates that experiment export `manifest.json` keeps saved dataset-version `train`/`val`/`test` membership

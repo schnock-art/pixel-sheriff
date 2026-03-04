@@ -5,7 +5,7 @@ Status reflects current repository behavior.
 ## Completed
 
 ### Infra / Compose
-- [x] Docker compose services for `web`, `api`, `db`, `redis`
+- [x] Docker compose services for `web`, `api`, `trainer`, `db`, `redis`
 - [x] Configurable host ports via `.env`
 - [x] API data volume mount (`./data -> /app/data`)
 - [x] DB init script wiring
@@ -16,14 +16,19 @@ Status reflects current repository behavior.
 - [x] Startup DB table initialization
 - [x] Project endpoints (create/list/get)
 - [x] Project delete endpoint
-- [x] Category endpoints (create/list/patch)
+- [x] Category endpoints (create/list/patch/delete)
+- [x] Task endpoints:
+  - [x] `GET /projects/{project_id}/tasks`
+  - [x] `POST /projects/{project_id}/tasks`
+  - [x] `GET /projects/{project_id}/tasks/{task_id}`
+  - [x] `DELETE /projects/{project_id}/tasks/{task_id}` (reference-guarded)
 - [x] Asset endpoints:
   - [x] create/list
   - [x] multipart upload
   - [x] content stream
   - [x] delete single asset
 - [x] Annotation endpoints (upsert/list)
-- [x] Export metadata endpoints (create/list)
+- [x] Legacy export metadata endpoints retained for compatibility (`/projects/{id}/exports*` -> `410 exports_legacy_gone`)
 - [x] Export zip build (`manifest.json`, `coco_instances.json`, `assets/`)
 - [x] Export download endpoint
 - [x] Experiment export split preservation:
@@ -46,7 +51,7 @@ Status reflects current repository behavior.
 - [x] Experiment runtime/log observability endpoints:
   - [x] `GET /projects/{project_id}/experiments/{experiment_id}/runtime`
   - [x] `GET /projects/{project_id}/experiments/{experiment_id}/logs?from_byte=&max_bytes=`
-  - [x] stable `runtime_not_found` / `training_log_not_found` error codes on missing artifacts
+  - [x] stable `runtime_not_found` / `logs_not_found` error codes on missing artifacts
 - [x] Experiment analytics payload now includes optional runtime summary (`device_selected`) for list-view badges
 - [x] ONNX artifact serving for experiments:
   - [x] `GET /projects/{project_id}/experiments/{experiment_id}/onnx` (metadata + artifact URLs)
@@ -69,14 +74,18 @@ Status reflects current repository behavior.
 - [x] Project shell UI:
   - [x] project selector dropdown
   - [x] create-project modal
-  - [x] section tabs (`Datasets`, `Models`, `Experiments`, `Deploy`)
+  - [x] section tabs (`Labeling`, `Dataset`, `Models`, `Experiments`, `Deploy`)
   - [x] project status summary bar
+- [x] Task-scoped workspace controls:
+  - [x] task selector in labeling workspace header
+  - [x] create-task modal (`classification` / `bbox` / `segmentation`, classification `label_mode`)
+  - [x] task-aware label/annotation/dataset data loading (`task_id` contracts)
 - [x] Datasets workspace extracted to `ProjectAssetsWorkspace`
 - [x] Unsaved-draft guard on project/tab/build-model navigation
 - [x] Build Model CTA creates a project-scoped model draft and opens model detail
 - [x] Models pages support list/create/detail + editable Model Builder draft/save workflow
 - [x] AJV validation layer for web JSON Schema checks (`ajv` + `ajv-formats`) wired for ModelConfig draft validation
-- [x] Experiments placeholder pages/skeletons
+- [x] Experiments pages (list/create/detail) with analytics dashboard + live runtime/log panels
 - [x] Fixed project switch activation/navigation bug in shell
 - [x] Responsive styling + viewer letterbox rendering
 - [x] Bounded responsive viewport height (stable with large datasets)
@@ -99,7 +108,7 @@ Status reflects current repository behavior.
 - [x] Label panel features:
   - [x] add label
   - [x] manage labels (rename/reorder/activate/deactivate)
-  - [x] project-scoped multi-label toggle (managed in label manage mode)
+  - [x] task-owned multi-label mode surfaced in panel (`Task Multi-label`)
   - [x] add-label input visible only in manage mode
   - [x] clear selected labels action (classification mode)
   - [x] assigned-label summary visibility (`Assigned: ...`) for current image

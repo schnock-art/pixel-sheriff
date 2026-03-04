@@ -15,7 +15,7 @@ Primary workflow:
 2. Import a local folder into a project/folder destination.
 3. API persists image bytes to local storage and records asset metadata in Postgres.
 4. Annotate in classification, bounding-box, or polygon-segmentation mode.
-   - active mode is locked per project by `project.task_type`
+   - active mode is locked by selected task kind (`tasks.kind`) in the workspace task selector
 5. Submit staged edits (or submit single-image edits directly).
 6. Generate and download a deterministic dataset export zip (manifest v1.2 + COCO companion).
 7. Create experiments from project models, tune training params, and run worker-executed training with live SSE metrics + checkpoints.
@@ -60,8 +60,10 @@ Network behavior:
 
 Defined in `apps/api/src/sheriff_api/db/models.py`:
 
-- Core: `Project`, `Category`, `Asset`, `Annotation` (plus legacy SQL `DatasetVersion` model retained but not used as source-of-truth)
+- Core: `Project`, `Task`, `Category`, `Asset`, `Annotation` (plus legacy SQL `DatasetVersion` model retained but not used as source-of-truth)
 - Initial MAL domain: `Model`, `Suggestion`
+- Project creation now auto-creates a default task (`tasks` table) and stores `projects.default_task_id`
+- Categories, annotations, dataset versions, models, experiments, and deployments are task-scoped
 - Dataset versions are file-backed and immutable:
   - `datasets/{project_id}/datasets.json`
   - implementation: `apps/api/src/sheriff_api/services/dataset_store.py`
@@ -88,9 +90,10 @@ Defined in `apps/api/src/sheriff_api/db/models.py`:
 
 Key invariants:
 
-- One annotation row per asset (`annotations.asset_id` unique)
+- One annotation row per `(asset_id, task_id)` (`uq_annotation_asset_task`)
+- A project always has at least one task; deleting a task is blocked when references exist
 - Category IDs are stable identities; label edits mutate name/order/active only
-- Project task mode governs accepted annotation payload shape:
+- Task kind (`tasks.kind`) governs accepted annotation payload shape:
   - `classification` / `classification_single`: no geometry objects
   - `bbox`: bbox objects only
   - `segmentation`: polygon objects only
@@ -287,8 +290,17 @@ Project `task_type` values supported by API:
 Categories:
 
 - `POST /api/v1/projects/{project_id}/categories`
-- `GET /api/v1/projects/{project_id}/categories`
+- `GET /api/v1/projects/{project_id}/categories?task_id=...`
 - `PATCH /api/v1/categories/{category_id}`
+- `DELETE /api/v1/categories/{category_id}`
+
+Tasks:
+
+- `POST /api/v1/projects/{project_id}/tasks`
+- `GET /api/v1/projects/{project_id}/tasks`
+- `GET /api/v1/projects/{project_id}/tasks/{task_id}`
+- `DELETE /api/v1/projects/{project_id}/tasks/{task_id}`
+- delete is guarded by `task_not_empty` / `project_must_have_task` checks
 
 Assets:
 
@@ -300,14 +312,14 @@ Assets:
 
 Annotations:
 
-- `POST /api/v1/projects/{project_id}/annotations` (upsert)
-- `GET /api/v1/projects/{project_id}/annotations`
+- `POST /api/v1/projects/{project_id}/annotations` (upsert; payload includes `task_id`)
+- `GET /api/v1/projects/{project_id}/annotations?task_id=...`
 
 Dataset versions (file-backed source of truth):
 
-- `GET /api/v1/projects/{project_id}/datasets/versions`
-- `POST /api/v1/projects/{project_id}/datasets/versions/preview`
-- `POST /api/v1/projects/{project_id}/datasets/versions`
+- `GET /api/v1/projects/{project_id}/datasets/versions` (optional `task_id` filter)
+- `POST /api/v1/projects/{project_id}/datasets/versions/preview` (requires `task_id` in body)
+- `POST /api/v1/projects/{project_id}/datasets/versions` (requires `task_id` in body)
 - `PATCH /api/v1/projects/{project_id}/datasets/active`
 - `GET /api/v1/projects/{project_id}/datasets/versions/{dataset_version_id}`
 - `GET /api/v1/projects/{project_id}/datasets/versions/{dataset_version_id}/assets`
@@ -412,22 +424,24 @@ UI structure:
 
 - Left: hierarchical file tree
 - Center: viewer canvas + adaptive pagination + skip/nav controls
-- Right: label panel (label selection + manage mode + edit/submit)
+- Right: label panel (label selection + manage mode + edit/submit + MAL suggestions)
+- Header: active task selector + `+ New Task` action
 
 ### Frontend Data/State
 
 Custom hooks:
 
 - `useProject`: project listing
-- `useAssets`: assets + annotations for active project
-- `useLabels`: categories for active project
+- `useTasks`: task list/create for active project
+- `useAssets`: assets + annotations for active project + task
+- `useLabels`: categories for active project + task
 - `useImportWorkflow`: import dialog, import progress, validation state, and remembered defaults/folder-option loading
 - `useDeleteWorkflow`: single/bulk/folder/project delete flows
 - `useAnnotationWorkflow`: staged vs direct submit, selection state, and submit gating
 
 Local persisted setting:
 
-- project multi-label map in `localStorage` (`pixel-sheriff:project-multilabel:v1`)
+- per-project active task selection in `localStorage` (`pixel-sheriff:project-active-task:v1:{projectId}`)
 
 Schema validation:
 
@@ -496,7 +510,7 @@ Workspace container components (`apps/web/src/components/workspace/*`):
   - staged/dirty indicators for pages with pending edits
 - Label panel behavior:
   - manage mode for create/rename/reorder/activate/deactivate
-  - project multi-label toggle only editable in manage mode
+  - classification label mode is task-owned (`single_label` / `multi_label`) and surfaced as `Task Multi-label`
   - classification mode includes explicit `Clear Selected Labels`
   - classification mode surfaces assigned-label summary for current image
   - edit mode stages multi-asset changes
@@ -504,7 +518,7 @@ Workspace container components (`apps/web/src/components/workspace/*`):
   - submit commits staged changes in batch
   - number-key shortcuts (`1..9`, top row and numpad) map to active label order
   - mode tabs switch between `labels`, `bbox`, and `segmentation`
-  - mode tabs/actions are locked by project task mode
+  - mode tabs/actions are locked by selected task kind
   - in bbox/seg modes, class buttons assign the selected geometry object category
   - selected geometry object can be deleted from panel or keyboard (`Delete`)
 - Geometry authoring behavior:
@@ -577,7 +591,7 @@ Annotation payload is normalized to a backward-compatible v2 shape:
 - optional `image_basis` (`width`/`height`) for deterministic geometry bounds
 - `coco` compatibility block with `image_id` / `category_id`
 
-Annotation payload normalization enforces project task mode compatibility before persistence and returns stable structured error codes on mismatch.
+Annotation payload normalization enforces selected-task compatibility before persistence and returns stable structured error codes on mismatch.
 
 Supported statuses:
 

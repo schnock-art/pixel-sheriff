@@ -8,10 +8,10 @@ labeling -> training -> deployment.
 ## Current Snapshot
 
 - `M0` foundation: done
-- `M1` project/category management: mostly done
+- `M1` project/category/task management: done
 - `M2` image ingestion/storage: done for local workflow
-- `M3` labeling workstation: in progress (core loop implemented; stale-submit mitigation and regressions added, monitoring continues)
-- `M4+` review/export hardening/video/MAL: pending
+- `M3` labeling workstation + model/experiment/deploy flows: done for core classification path
+- `M4+` review/export hardening/video/advanced MAL: in progress
 
 ## Guiding Principles
 
@@ -29,12 +29,13 @@ labeling -> training -> deployment.
 - Docker Compose stack
 - Basic scaffolds/tests
 
-### M1 - Project + Category Management (Mostly done)
+### M1 - Project + Category + Task Management (Done)
 
 Implemented:
 - project create/list/get
 - project delete (with related asset/annotation cleanup)
-- category create/list/patch
+- task create/list/get/delete (with reference guards)
+- category create/list/patch/delete
 - label management UI:
   - add
   - rename
@@ -42,7 +43,7 @@ Implemented:
   - activate/deactivate
 
 Remaining:
-- richer validation UX around label management actions
+- richer validation UX around destructive task/category actions
 
 ### M2 - Asset Ingestion (Done for image upload)
 
@@ -64,15 +65,20 @@ Implemented:
 Remaining:
 - optional dedup strategy
 
-### M3 - Labeling Workstation (In progress)
+### M3 - Labeling Workstation (Core done, polish ongoing)
 
 Implemented:
 - project-scoped workspace navigation:
   - `/projects` entry flow (last/first project resolution or create-project empty state)
-  - `/projects/{project_id}/datasets|models|experiments` routing
+  - `/projects/{project_id}/datasets|dataset|models|experiments|deploy` routing
   - model/experiment detail routes
-  - top project selector + section tabs (`Datasets`, `Models`, `Experiments`, disabled `Deploy`)
+  - top project selector + section tabs (`Labeling`, `Dataset`, `Models`, `Experiments`, `Deploy`)
   - project status line (`images labeled`, `classes`, `models`, `experiments`)
+- task-scoped labeling:
+  - task selector + create-task modal in labeling workspace
+  - task kind controls annotation mode and payload contract
+  - task label mode (`single_label`/`multi_label`) is task-owned
+  - task label schema lock once dataset versions exist
 - viewer navigation (buttons + arrow keys)
 - skip controls (`-10`, `-5`, `<`, `>`, `+5`, `+10`)
 - numeric keyboard label shortcuts (`1..9`, top row + numpad)
@@ -94,7 +100,7 @@ Implemented:
 - bounding-box annotation workflow (draw/select/move/resize/delete + class assign)
 - polygon segmentation workflow (draw/close/select/delete + class assign; close by near-start, double-click, or `Enter`)
 - geometry-aware staged/pending submit workflow
-- project task mode enforcement (`classification_single`, `bbox`, `segmentation`) across API + UI
+- task-kind enforcement (`classification`, `bbox`, `segmentation`) across API + UI
 - deterministic class-based color mapping for labels and geometry overlays
 - toast-style operation summaries including delete counts
 - inline geometry draft warnings in the viewer
@@ -102,14 +108,17 @@ Implemented:
 - project-scoped model scaffold flow:
   - datasets `Build Model` creates model draft and opens detail
   - models page supports `+ New Model`, empty state, and summary table
-  - model detail shows stepper, read-only summary, and back navigation
+  - model detail supports editable builder + save validation + train navigation
+- experiments/deploy:
+  - experiments list/create/detail are wired with runtime/log/evaluation dashboards
+  - deploy page supports deploy-from-experiment, active deployment selection, device preference, and warmup
+  - labeling panel integrates MAL single-asset suggestions (`Suggest`, top-k, `Apply top-1`)
 
 Remaining:
 - continue monitoring intermittent annotation submit `404` during stale project/asset submit contexts after staged-entry pruning + regression hardening
 - geometry edit tooling polish (polygon vertex editing and advanced transforms)
 - stronger submission feedback/summary UX
-- integrate editable model-builder controls and training execution
-- integrate real project-scoped data flows for Experiments/Deploy (current pages are placeholders)
+- improve shell status counters for models/experiments (currently placeholder values in top bar)
 
 ### M4 - Review + QA (Planned)
 
@@ -120,7 +129,7 @@ Remaining:
 ### M5 - Export v1.2 (Mostly implemented)
 
 Implemented:
-- export metadata record creation/list
+- dataset-version scoped export create/download (`/datasets/versions/{id}/export*`)
 - manifest hash generation
 - zip artifact creation (`assets/`, `coco_instances.json`, `manifest.json`)
 - manifest schema v1.2 contract with explicit:
@@ -167,7 +176,9 @@ Remaining:
 ### P4 - Model-assisted labeling (MAL)
 
 - model registry: core endpoints implemented
-- suggestion generation: queue + persistence contracts implemented; inference pipeline still pending
+- suggestion generation:
+  - single-asset inference path is implemented via active deployment + `/predict`
+  - queue-based batch/curation inference remains pending
 - accept/reject assist workflow: API contract implemented
 
 ### P5 - Reference-mode asset ingestion (after MAL)

@@ -7,8 +7,9 @@ Local-first computer vision annotation and training platform.
 Pixel Sheriff helps you go from raw images to trained models in one workspace:
 
 - Import images into projects and folder trees
+- Create/select project tasks (`classification`, `bbox`, `segmentation`) and keep labels scoped per task
 - Annotate for classification, bounding boxes, or segmentation
-- Build versioned datasets with saved split membership (`train`/`val`/`test`)
+- Build task-scoped versioned datasets with saved split membership (`train`/`val`/`test`)
 - Train experiments and monitor live metrics/logs
 - Export datasets and model artifacts
 - Run deployment + suggestion workflows
@@ -50,12 +51,13 @@ make up
 ## How to Use
 
 1. Create or select a project.
-2. Import images (existing/new project target).
-3. Label assets in `Labeling`.
-4. Create a dataset version in `Dataset`.
-5. Create/update a model in `Models`.
-6. Start training in `Experiments` and monitor metrics/logs.
-7. Export dataset zip or model artifacts as needed.
+2. Select or create a task in `Labeling` (`Task` selector at top-right).
+3. Import images (existing/new project target).
+4. Label assets in `Labeling`.
+5. Create a dataset version in `Dataset`.
+6. Create/update a model in `Models`.
+7. Start training in `Experiments` and monitor metrics/logs.
+8. Export dataset zip or model artifacts as needed.
 
 ## Useful Make Commands
 

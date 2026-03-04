@@ -66,7 +66,11 @@ make help
 - API error responses now use a structured shape (`error.code`, `error.message`, `error.details`) for better UI diagnostics.
 - Bounding box and polygon segmentation annotation tools are now wired end-to-end (draw/select/delete/submit/export).
 - COCO export now includes geometry records (`bbox`, `segmentation`, `area`) for object annotations.
-- Project-level task mode is now enforced (`classification_single`, `bbox`, `segmentation`) and selected during new-project import.
+- Task mode is enforced (`classification`, `bbox`, `segmentation`) and selected via project tasks in workspace.
+- Task-scoped workspace flow was wired end-to-end:
+  - projects now include a default task and support creating additional tasks
+  - categories/annotations/dataset versions/models/experiments/deployments are task-scoped
+  - labeling workspace now supports task selection via `taskId` query and a `+ New Task` flow
 - Labels and geometry overlays now use deterministic class-based colors.
 - Bounding-box interaction now supports move + resize (corner and edge-midpoint handles), plus inline draft warnings.
 - Polygon closing is now more forgiving (`near-start`, double-click, or `Enter`) with draft-status guidance.
@@ -156,11 +160,18 @@ make help
     - `/projects/{project_id}/experiments/{experiment_id}`
     - `/projects/{project_id}/deploy`
   - top shell project selector + tabs (`Labeling`, `Dataset`, `Models`, `Experiments`, `Deploy`)
-  - workspace status line (`images labeled`, `classes`, `models`, `experiments`)
+  - workspace status line (live labeled/class counts; model/experiment counts currently placeholder values in shell)
+- Task management in labeling workspace:
+  - projects auto-create a default task
+  - task selector in workspace header (`taskId` query state)
+  - `+ New Task` modal supports kind (`classification`/`bbox`/`segmentation`) and classification `label_mode`
+  - task kind locks authoring mode tabs and submit payload shape
+  - labels are task-scoped and lock once dataset versions exist for that task (`task_locked_by_dataset`)
 - Dataset workspace (DatasetVersion v2):
-  - immutable file-backed dataset versions (`datasets/{project_id}/datasets.json`)
+  - immutable task-scoped file-backed dataset versions (`datasets/{project_id}/datasets.json`)
   - version preview + create flow with filter snapshot and seeded split config
   - active dataset-version pointer with per-version export endpoint
+  - list endpoint supports optional `task_id` filtering
   - preview/list endpoints support pagination/filter/search without dumping full membership
   - experiment start export uses stored version split map (membership is not recomputed from live annotation state)
 - Category/class identity contract uses UUID strings across API/web/trainer/deploy metadata.
@@ -264,7 +275,7 @@ make help
 - Labels:
   - create labels
   - manage labels (rename/reorder/activate/deactivate)
-  - project-scoped multi-label toggle (editable only in Manage Labels mode)
+  - classification label mode is task-owned (`single_label` / `multi_label`) and reflected in the panel
   - deterministic class-based colors for label rows/chips
   - clear selected labels action in classification mode
   - assigned-label summary (`Assigned: ...`) for immediate visual confirmation
@@ -279,7 +290,7 @@ make help
 - Geometry tools:
   - Bounding box mode: draw by drag, select existing boxes, move by drag, resize via 8 handles (corners + edge midpoints), delete selected (`Delete`), cancel draft (`Esc`)
   - Segmentation mode (polygon v1): click to add vertices, close polygon near start-point, by double-click, or with `Enter`; delete selected and cancel draft (`Esc`)
-  - project task mode locks available annotation tabs/actions
+  - selected task kind locks available annotation tabs/actions
   - Geometry class assignment uses the same project label set
   - Geometry edits participate in the same pending/edit-mode submit workflow as classification edits
   - Inline draft warnings clarify when geometry is not committed yet
@@ -424,17 +435,23 @@ Also, trainer Dockerfiles now share a named BuildKit pip cache (`id=pixel-sherif
 - `GET/POST /api/v1/projects`
 - `GET /api/v1/projects/{project_id}`
 - `DELETE /api/v1/projects/{project_id}`
-- `GET/POST /api/v1/projects/{project_id}/categories`
+- `GET/POST /api/v1/projects/{project_id}/tasks`
+- `GET /api/v1/projects/{project_id}/tasks/{task_id}`
+- `DELETE /api/v1/projects/{project_id}/tasks/{task_id}`
+- `GET /api/v1/projects/{project_id}/categories?task_id=...`
+- `POST /api/v1/projects/{project_id}/categories`
 - `PATCH /api/v1/categories/{category_id}`
+- `DELETE /api/v1/categories/{category_id}`
 - `GET/POST /api/v1/projects/{project_id}/assets`
 - `POST /api/v1/projects/{project_id}/assets/upload`
 - `DELETE /api/v1/projects/{project_id}/assets/{asset_id}`
 - `GET /api/v1/assets/{asset_id}/content`
-- `GET/POST /api/v1/projects/{project_id}/annotations`
+- `GET /api/v1/projects/{project_id}/annotations?task_id=...`
+- `POST /api/v1/projects/{project_id}/annotations` (body includes `task_id`)
 - Dataset versions:
-  - `GET /api/v1/projects/{project_id}/datasets/versions`
-  - `POST /api/v1/projects/{project_id}/datasets/versions/preview`
-  - `POST /api/v1/projects/{project_id}/datasets/versions`
+  - `GET /api/v1/projects/{project_id}/datasets/versions` (optional `task_id`)
+  - `POST /api/v1/projects/{project_id}/datasets/versions/preview` (requires `task_id`)
+  - `POST /api/v1/projects/{project_id}/datasets/versions` (requires `task_id`)
   - `PATCH /api/v1/projects/{project_id}/datasets/active`
   - `GET /api/v1/projects/{project_id}/datasets/versions/{dataset_version_id}`
   - `GET /api/v1/projects/{project_id}/datasets/versions/{dataset_version_id}/assets`
@@ -480,7 +497,7 @@ Also, trainer Dockerfiles now share a named BuildKit pip cache (`id=pixel-sherif
 - Geometry tooling polish (no polygon vertex dragging/edit yet)
 - Deploy UX is functional for classification ONNX but still early-stage (limited controls and error guidance)
 - Detection/segmentation trainer implementations are not yet available (classification only for now)
-- MAL inference/generation quality pipeline is still minimal (queue + persistence contracts implemented; model inference integration pending)
+- MAL batch/curation pipeline is still minimal (single-asset deploy inference is implemented; batch queue scoring is still pending)
 - Shared-asset reference mode (upload-once/link-many)
 
 ## Active Known Issue

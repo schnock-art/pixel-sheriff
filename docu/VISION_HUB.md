@@ -315,3 +315,29 @@ Implicit defaults
 It should be rejected.
 
 Clarity over cleverness.
+
+11. Current Implementation Snapshot (March 2026)
+
+Implemented now:
+
+Local-first full stack (web + API + trainer + Postgres + Redis)
+
+Task-scoped labeling (`classification`, `bbox`, `segmentation`) with per-task label schemas
+
+Immutable dataset versions with deterministic export bundles (`manifest.json`, `coco_instances.json`, `assets/`)
+
+Project-scoped model builder + schema-validated config editing
+
+Experiment lifecycle with queued training, SSE metrics/events, runtime/log endpoints, and ONNX artifacts
+
+Deploy flow for classification ONNX with active deployment selection, warmup, and single-asset prediction
+
+Model-assisted labeling suggestions in the labeling panel (`Suggest`, top-k, `Apply top-1`)
+
+Known gaps:
+
+Detection/segmentation training execution is not implemented yet
+
+Batch MAL scoring/curation workflows are still pending
+
+Review/QA moderation workflows are still pending
