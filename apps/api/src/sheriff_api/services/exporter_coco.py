@@ -189,6 +189,7 @@ def build_export_result(
     assets: list[dict[str, Any]],
     annotations: list[dict[str, Any]],
     load_asset_bytes: Callable[[dict[str, Any]], bytes | None],
+    split_by_asset_id: dict[str, str] | None = None,
     tool_version: str = "0.1.0",
 ) -> tuple[dict[str, Any], dict[str, Any], str, bytes]:
     categories = sorted(categories, key=lambda item: (item.get("display_order", 0), item["id"]))
@@ -505,8 +506,32 @@ def build_export_result(
                 )
 
     tasks, model_task = _task_contract(task_type)
-    split_asset_ids = [asset["asset_id"] for asset in asset_records]
-    split_asset_id_set = set(split_asset_ids)
+    split_asset_ids_by_name: dict[str, list[str]] = {"train": [], "val": [], "test": []}
+    allowed_splits = set(split_asset_ids_by_name.keys())
+    provided_split_by_asset_id = split_by_asset_id or {}
+
+    if provided_split_by_asset_id:
+        normalized_split_by_asset_id: dict[str, str] = {}
+        for raw_asset_id, raw_split in provided_split_by_asset_id.items():
+            asset_id = str(raw_asset_id)
+            split_name = str(raw_split).strip().lower()
+            if split_name not in allowed_splits:
+                if asset_id in manifest_asset_ids:
+                    raise _err(
+                        "export_split_invalid",
+                        "Split map contains invalid split name for exported asset",
+                        {"asset_id": asset_id, "split": raw_split},
+                    )
+                continue
+            normalized_split_by_asset_id[asset_id] = split_name
+
+        for asset_id in [asset["asset_id"] for asset in asset_records]:
+            split_name = normalized_split_by_asset_id.get(asset_id, "train")
+            split_asset_ids_by_name[split_name].append(asset_id)
+    else:
+        split_asset_ids_by_name["train"] = [asset["asset_id"] for asset in asset_records]
+
+    split_asset_id_set = set().union(*split_asset_ids_by_name.values())
     if split_asset_id_set - manifest_asset_ids:
         raise _err("export_split_invalid", "All split asset_ids must exist in assets")
 
@@ -522,9 +547,9 @@ def build_export_result(
             "rules": {"names_normalized": "lowercase_slug", "id_stable": True, "order_stable": True},
         },
         "splits": {
-            "train": {"asset_ids": split_asset_ids},
-            "val": {"asset_ids": []},
-            "test": {"asset_ids": []},
+            "train": {"asset_ids": split_asset_ids_by_name["train"]},
+            "val": {"asset_ids": split_asset_ids_by_name["val"]},
+            "test": {"asset_ids": split_asset_ids_by_name["test"]},
             "generation": {
                 "method": "manual",
                 "seed": selection_criteria.get("seed") if isinstance(selection_criteria.get("seed"), int) else None,

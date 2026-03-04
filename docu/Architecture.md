@@ -366,6 +366,7 @@ Project-scoped experiments:
 - `GET /api/v1/projects/{project_id}/experiments/{experiment_id}/onnx/download?file=model|metadata`
 - create flow derives default `TrainingConfig v0` from model + latest `DatasetVersion` and persists in `draft`
 - start flow pins dataset export, creates run attempt metadata, enqueues Redis job, and transitions to `queued`
+- experiment export split membership comes from stored dataset-version `splits.items` (saved version map), not live split recomputation
 - SSE events stream by tailing run-attempt `events.jsonl` with optional resume cursor (`from_line`) and run selection (`attempt`)
 - router implementation is decomposed by concern under `apps/api/src/sheriff_api/routers/experiments/`:
   - `crud.py`

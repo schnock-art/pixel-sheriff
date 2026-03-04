@@ -346,6 +346,16 @@ async def ensure_dataset_export_zip(
     selection_criteria = dataset_version.get("selection", {}).get("filters", {})
     if not isinstance(selection_criteria, dict):
         selection_criteria = {}
+    split_items = dataset_version.get("splits", {}).get("items")
+    split_by_asset_id: dict[str, str] = {}
+    if isinstance(split_items, list):
+        for row in split_items:
+            if not isinstance(row, dict):
+                continue
+            asset_id = row.get("asset_id")
+            split_name = row.get("split")
+            if isinstance(asset_id, str) and isinstance(split_name, str):
+                split_by_asset_id[asset_id] = split_name
 
     try:
         _manifest, _coco, content_hash, zip_bytes = build_export_result(
@@ -393,6 +403,7 @@ async def ensure_dataset_export_zip(
                 for annotation in selected_annotations
             ],
             load_asset_bytes=lambda asset: _load_asset_bytes(storage, asset),
+            split_by_asset_id=split_by_asset_id,
         )
     except ExportValidationError as exc:
         raise api_error(status_code=422, code=exc.code, message=exc.message, details=exc.details) from exc

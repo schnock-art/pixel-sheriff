@@ -5,6 +5,9 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- Dataset/experiment split consistency regression coverage:
+  - added API regression `test_experiment_export_preserves_saved_dataset_split_membership`
+  - validates that experiment export `manifest.json` keeps saved dataset-version `train`/`val`/`test` membership
 - Experiment runtime/metrics UX and contract upgrades:
   - experiment detail advanced settings now expose runtime tuning controls:
     - `num_workers`, `pin_memory`, `persistent_workers`
@@ -224,6 +227,10 @@ All notable changes to this project will be documented in this file.
   - web helper tests for analytics shaping, confusion normalization, and prediction drill-down filtering
 
 ### Changed
+- Experiment dataset export now preserves saved dataset-version split membership:
+  - experiments start flow passes stored `splits.items` into export build
+  - export manifest no longer collapses all selected assets into `train`
+  - val/test evaluation support now reflects saved dataset-version membership
 - `apps/web/src/components/workspace/ProjectAssetsWorkspace.tsx` was reduced to orchestration/composition wiring while preserving behavior and existing CSS/UX contracts.
 - Docs refreshed to align with current implementation:
   - `README.md`

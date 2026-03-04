@@ -26,6 +26,9 @@ Status reflects current repository behavior.
 - [x] Export metadata endpoints (create/list)
 - [x] Export zip build (`manifest.json`, `coco_instances.json`, `assets/`)
 - [x] Export download endpoint
+- [x] Experiment export split preservation:
+  - [x] preserve saved dataset-version split membership (`splits.items`) in export `manifest.splits`
+  - [x] add regression test to prevent val/test split collapse into train on experiment start
 - [x] MAL v1 deployment + prediction endpoints:
   - [x] `POST /projects/{project_id}/deployments`
   - [x] `GET /projects/{project_id}/deployments`

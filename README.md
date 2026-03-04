@@ -96,6 +96,7 @@ make help
   - run-attempt isolation under `runs/{attempt}` to avoid metric/event/checkpoint mixing across restarts
   - live SSE stream consumed by web chart UI
   - chart includes axes, legend, toggles, and hover value tooltip
+  - experiment dataset export now preserves saved dataset-version split membership (`train`/`val`/`test`) from stored `splits.items`
 - Classification experiment analytics + deep dashboard:
   - trainer now writes attempt-scoped classification evaluation artifacts:
     - `experiments/{project_id}/{experiment_id}/runs/{attempt}/evaluation.json`
@@ -159,6 +160,7 @@ make help
   - version preview + create flow with filter snapshot and seeded split config
   - active dataset-version pointer with per-version export endpoint
   - preview/list endpoints support pagination/filter/search without dumping full membership
+  - experiment start export uses stored version split map (membership is not recomputed from live annotation state)
 - Category/class identity contract uses UUID strings across API/web/trainer/deploy metadata.
 - Models pages support project-scoped create/list/detail plus editable model config drafting/saving
 - Model export contract:
