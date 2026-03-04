@@ -3,13 +3,13 @@ import { useCallback, useEffect, useState } from "react";
 import { listCategories, type Category } from "../api";
 import { toHookError, type HookError } from "./hookError";
 
-export function useLabels(projectId: string | null) {
+export function useLabels(projectId: string | null, taskId: string | null) {
   const [data, setData] = useState<Category[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<HookError | null>(null);
 
   const refetch = useCallback(async () => {
-    if (!projectId) {
+    if (!projectId || !taskId) {
       setData([]);
       setError(null);
       setIsLoading(false);
@@ -19,7 +19,7 @@ export function useLabels(projectId: string | null) {
     try {
       setIsLoading(true);
       setError(null);
-      const categories = await listCategories(projectId);
+      const categories = await listCategories(projectId, taskId);
       setData(categories);
     } catch (err) {
       setError(toHookError(err, "Failed to load labels"));
@@ -27,13 +27,13 @@ export function useLabels(projectId: string | null) {
     } finally {
       setIsLoading(false);
     }
-  }, [projectId]);
+  }, [projectId, taskId]);
 
   useEffect(() => {
     let isActive = true;
 
     async function load() {
-      if (!projectId) {
+      if (!projectId || !taskId) {
         setData([]);
         setError(null);
         setIsLoading(false);
@@ -43,7 +43,7 @@ export function useLabels(projectId: string | null) {
       try {
         setIsLoading(true);
         setError(null);
-        const categories = await listCategories(projectId);
+        const categories = await listCategories(projectId, taskId);
         if (isActive) setData(categories);
       } catch (err) {
         if (isActive) {
@@ -60,7 +60,7 @@ export function useLabels(projectId: string | null) {
     return () => {
       isActive = false;
     };
-  }, [projectId]);
+  }, [projectId, taskId]);
 
   return { data, isLoading, error, refetch };
 }

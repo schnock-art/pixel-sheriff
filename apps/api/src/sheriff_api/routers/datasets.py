@@ -15,7 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sheriff_api.config import get_settings
-from sheriff_api.db.models import Annotation, AnnotationStatus, Asset, Category, Project, TaskType
+from sheriff_api.db.models import Annotation, AnnotationStatus, Asset, Category, Project, Task, TaskKind, TaskLabelMode, TaskType
 from sheriff_api.db.session import get_db
 from sheriff_api.errors import api_error
 from sheriff_api.schemas.datasets import (
@@ -50,17 +50,6 @@ class AssetRow:
     has_objects: bool
     relative_path: str
     filename: str
-
-
-def _normalize_task(raw_task: str) -> str:
-    task = (raw_task or "").strip().lower()
-    if task in {"classification", "classification_single"}:
-        return "classification"
-    if task == "bbox":
-        return "bbox"
-    if task == "segmentation":
-        return "segmentation"
-    return "classification"
 
 
 def _slug(value: str) -> str:
@@ -299,9 +288,11 @@ def _build_splits(
     return split_by_asset, warnings
 
 
-async def _load_asset_rows(db: AsyncSession, project_id: str) -> list[AssetRow]:
+async def _load_asset_rows(db: AsyncSession, project_id: str, task_id: str) -> list[AssetRow]:
     assets = list((await db.execute(select(Asset).where(Asset.project_id == project_id))).scalars().all())
-    annotations = list((await db.execute(select(Annotation).where(Annotation.project_id == project_id))).scalars().all())
+    annotations = list(
+        (await db.execute(select(Annotation).where(Annotation.project_id == project_id, Annotation.task_id == task_id))).scalars().all()
+    )
     annotation_by_asset = {annotation.asset_id: annotation for annotation in annotations}
 
     rows: list[AssetRow] = []
@@ -361,7 +352,8 @@ async def _resolve_preview(
     *,
     db: AsyncSession,
     project_id: str,
-    task: str,
+    task_id: str,
+    task_kind: str,
     mode: str,
     filters: dict[str, Any],
     explicit_asset_ids: list[str],
@@ -370,11 +362,11 @@ async def _resolve_preview(
     stratify_enabled: bool,
     strict_stratify: bool,
 ) -> tuple[list[AssetRow], dict[str, str], list[str]]:
-    rows = await _load_asset_rows(db, project_id)
-    selected = _apply_filters(rows, mode=mode, explicit_asset_ids=explicit_asset_ids, filters=filters, task=task)
+    rows = await _load_asset_rows(db, project_id, task_id)
+    selected = _apply_filters(rows, mode=mode, explicit_asset_ids=explicit_asset_ids, filters=filters, task=task_kind)
     split_by_asset, warnings = _build_splits(
         selected,
-        task=task,
+        task=task_kind,
         seed=seed,
         ratios=ratios,
         stratify_enabled=stratify_enabled,
@@ -388,6 +380,28 @@ async def _require_project(db: AsyncSession, project_id: str) -> Project:
     if project is None:
         raise api_error(status_code=404, code="project_not_found", message="Project not found")
     return project
+
+
+async def _require_task(db: AsyncSession, project_id: str, task_id: str) -> Task:
+    task = await db.get(Task, task_id)
+    if task is None or task.project_id != project_id:
+        raise api_error(
+            status_code=404,
+            code="task_not_found",
+            message="Task not found in project",
+            details={"project_id": project_id, "task_id": task_id},
+        )
+    return task
+
+
+def _task_type_for_task(task: Task) -> TaskType:
+    if task.kind == TaskKind.classification:
+        if task.label_mode == TaskLabelMode.multi_label:
+            return TaskType.classification
+        return TaskType.classification_single
+    if task.kind == TaskKind.bbox:
+        return TaskType.bbox
+    return TaskType.segmentation
 
 
 def _map_uuid_payload_to_coco_int(payload_json: dict[str, Any], class_to_coco: dict[str, int]) -> dict[str, Any]:
@@ -433,6 +447,7 @@ async def _build_dataset_export(
     *,
     db: AsyncSession,
     project: Project,
+    task: Task,
     dataset_version: dict[str, Any],
 ) -> tuple[str, str]:
     class_order = dataset_version.get("labels", {}).get("label_schema", {}).get("class_order")
@@ -475,7 +490,9 @@ async def _build_dataset_export(
     selected_asset_ids = {str(asset_id) for asset_id in asset_ids}
 
     assets = list((await db.execute(select(Asset).where(Asset.project_id == project.id))).scalars().all())
-    annotations = list((await db.execute(select(Annotation).where(Annotation.project_id == project.id))).scalars().all())
+    annotations = list(
+        (await db.execute(select(Annotation).where(Annotation.project_id == project.id, Annotation.task_id == task.id))).scalars().all()
+    )
     selected_assets = [asset for asset in assets if asset.id in selected_asset_ids]
     selected_annotations = [annotation for annotation in annotations if annotation.asset_id in selected_asset_ids]
 
@@ -483,7 +500,7 @@ async def _build_dataset_export(
         manifest, _coco, content_hash, zip_bytes = build_export_result(
             project_id=project.id,
             project_name=project.name,
-            task_type=project.task_type,
+            task_type=_task_type_for_task(task),
             selection_criteria=dataset_version.get("selection", {}).get("filters", {}),
             categories=categories_for_export,
             assets=[
@@ -550,8 +567,8 @@ def _load_asset_bytes(local_storage: LocalStorage, asset: dict[str, Any]) -> byt
 
 
 @router.get("/projects/{project_id}/datasets/versions", response_model=DatasetVersionListResponse)
-async def list_dataset_versions(project_id: str) -> DatasetVersionListResponse:
-    listed = dataset_store.list_versions(project_id)
+async def list_dataset_versions(project_id: str, task_id: str | None = None) -> DatasetVersionListResponse:
+    listed = dataset_store.list_versions(project_id, task_id=task_id)
     return DatasetVersionListResponse(
         active_dataset_version_id=listed["active_dataset_version_id"],
         items=[DatasetVersionEnvelope(**item) for item in listed["items"]],
@@ -565,6 +582,7 @@ async def preview_dataset_version(
     db: AsyncSession = Depends(get_db),
 ) -> DatasetPreviewResponse:
     await _require_project(db, project_id)
+    task = await _require_task(db, project_id, payload.task_id)
     try:
         ratios = _validate_split_ratios(payload.split.ratios.model_dump())
     except ValueError as exc:
@@ -574,7 +592,8 @@ async def preview_dataset_version(
         selected, split_by_asset, warnings = await _resolve_preview(
             db=db,
             project_id=project_id,
-            task=payload.task,
+            task_id=payload.task_id,
+            task_kind=task.kind.value,
             mode=payload.selection.mode,
             filters=payload.selection.filters.model_dump(),
             explicit_asset_ids=payload.selection.explicit_asset_ids,
@@ -620,6 +639,7 @@ async def create_dataset_version(
     db: AsyncSession = Depends(get_db),
 ) -> DatasetVersionEnvelope:
     project = await _require_project(db, project_id)
+    task = await _require_task(db, project_id, payload.task_id)
     try:
         ratios = _validate_split_ratios(payload.split.ratios.model_dump())
     except ValueError as exc:
@@ -629,7 +649,8 @@ async def create_dataset_version(
         selected, split_by_asset, warnings = await _resolve_preview(
             db=db,
             project_id=project_id,
-            task=payload.task,
+            task_id=payload.task_id,
+            task_kind=task.kind.value,
             mode=payload.selection.mode,
             filters=payload.selection.filters.model_dump(),
             explicit_asset_ids=payload.selection.explicit_asset_ids,
@@ -647,7 +668,9 @@ async def create_dataset_version(
             ) from exc
         raise
 
-    categories = list((await db.execute(select(Category).where(Category.project_id == project_id))).scalars().all())
+    categories = list(
+        (await db.execute(select(Category).where(Category.project_id == project_id, Category.task_id == payload.task_id))).scalars().all()
+    )
     categories.sort(key=lambda category: (category.display_order, category.id))
     class_order = [category.id for category in categories]
     classes = [
@@ -668,8 +691,9 @@ async def create_dataset_version(
         "schema_version": "2.0",
         "dataset_version_id": str(uuid.uuid4()),
         "project_id": project_id,
+        "task_id": payload.task_id,
         "name": payload.name,
-        "task": payload.task,
+        "task": task.kind.value,
         "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "source": {"source_type": "project_assets_snapshot"},
         "assets": {
@@ -683,7 +707,6 @@ async def create_dataset_version(
                 "classes": classes,
                 "rules": {"names_normalized": "lowercase_slug"},
             },
-            "label_mode": "single_label",
         },
         "selection": _to_selection_payload(
             payload.selection.mode,
@@ -711,6 +734,8 @@ async def create_dataset_version(
         dataset_version_payload["description"] = payload.description
     if isinstance(payload.created_by, str) and payload.created_by.strip():
         dataset_version_payload["created_by"] = payload.created_by
+    if task.kind == TaskKind.classification and task.label_mode is not None:
+        dataset_version_payload["labels"]["label_mode"] = task.label_mode.value
     try:
         created = dataset_store.create_version(project_id, dataset_version_payload)
     except DatasetStoreValidationError as exc:
@@ -777,6 +802,14 @@ async def list_dataset_version_assets(
             details={"project_id": project_id, "dataset_version_id": dataset_version_id},
         )
     version = loaded["version"]
+    task_id = str(version.get("task_id") or "")
+    if not task_id:
+        raise api_error(
+            status_code=422,
+            code="dataset_version_invalid",
+            message="Dataset version is missing task_id",
+            details={"project_id": project_id, "dataset_version_id": dataset_version_id},
+        )
     version_asset_ids = version.get("assets", {}).get("asset_ids")
     split_items = version.get("splits", {}).get("items")
     if not isinstance(version_asset_ids, list):
@@ -791,7 +824,7 @@ async def list_dataset_version_assets(
             if isinstance(asset_id, str) and isinstance(split_value, str):
                 split_by_asset[asset_id] = split_value
 
-    rows = await _load_asset_rows(db, project_id)
+    rows = await _load_asset_rows(db, project_id, task_id)
     version_asset_id_set = {str(asset_id) for asset_id in version_asset_ids}
     # For saved dataset versions, membership comes only from stored version assets/splits.
     # Live DB rows are used only to enrich display fields such as status/labels/path.
@@ -865,10 +898,22 @@ async def export_dataset_version(
                     export_uri=str(existing_artifact.get("export_uri")),
                 )
 
+    version = loaded["version"]
+    task_id = str(version.get("task_id") or "")
+    if not task_id:
+        raise api_error(
+            status_code=422,
+            code="dataset_version_invalid",
+            message="Dataset version is missing task_id",
+            details={"project_id": project_id, "dataset_version_id": dataset_version_id},
+        )
+    task = await _require_task(db, project_id, task_id)
+
     content_hash, export_uri = await _build_dataset_export(
         db=db,
         project=project,
-        dataset_version=loaded["version"],
+        task=task,
+        dataset_version=version,
     )
     dataset_store.set_export_artifact(
         project_id,

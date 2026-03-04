@@ -28,7 +28,6 @@ interface UseDeleteWorkflowParams {
   setPendingAnnotations: Dispatch<SetStateAction<Record<string, PendingAnnotation>>>;
   setAssetIndex: Dispatch<SetStateAction<number>>;
   setCollapsedFolders: Dispatch<SetStateAction<Record<string, boolean>>>;
-  setProjectMultiLabelSettings: Dispatch<SetStateAction<Record<string, boolean>>>;
   setImportExistingProjectId: Dispatch<SetStateAction<string>>;
   setSelectedImportExistingFolder: Dispatch<SetStateAction<string>>;
   setImportFolderOptionsByProject: Dispatch<SetStateAction<Record<string, string[]>>>;
@@ -56,7 +55,6 @@ export function useDeleteWorkflow({
   setPendingAnnotations,
   setAssetIndex,
   setCollapsedFolders,
-  setProjectMultiLabelSettings,
   setImportExistingProjectId,
   setSelectedImportExistingFolder,
   setImportFolderOptionsByProject,
@@ -265,11 +263,6 @@ export function useDeleteWorkflow({
       setImportExistingProjectId("");
       setSelectedImportExistingFolder("");
       setImportFolderOptionsByProject((previous) => {
-        const next = { ...previous };
-        delete next[projectId];
-        return next;
-      });
-      setProjectMultiLabelSettings((previous) => {
         const next = { ...previous };
         delete next[projectId];
         return next;

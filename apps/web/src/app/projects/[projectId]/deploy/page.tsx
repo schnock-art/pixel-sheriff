@@ -196,7 +196,10 @@ export default function DeployPage({ params }: DeployPageProps) {
                   <li key={experiment.id} className="label-manage-item">
                     <div>
                       <strong>{experiment.name}</strong>
-                      <div>{experiment.status}</div>
+                      <div>
+                        {experiment.status}
+                        {experiment.task_id ? ` | task=${experiment.task_id.slice(0, 8)}` : ""}
+                      </div>
                     </div>
                     <input
                       className="label-manage-input"
@@ -227,7 +230,7 @@ export default function DeployPage({ params }: DeployPageProps) {
                     <div>
                       <strong>{item.name}</strong>
                       <div>
-                        {item.status} | device={item.device_preference} | model_key={item.model_key.slice(0, 12)}
+                        {item.status} | task={item.task} | device={item.device_preference} | model_key={item.model_key.slice(0, 12)}
                       </div>
                     </div>
                     <button

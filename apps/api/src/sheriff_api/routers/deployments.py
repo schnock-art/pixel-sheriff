@@ -11,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sheriff_api.config import get_settings
-from sheriff_api.db.models import Asset, Category, TaskType
+from sheriff_api.db.models import Asset, Category
 from sheriff_api.db.session import get_db
 from sheriff_api.errors import api_error
 from sheriff_api.schemas.deployments import (
@@ -43,13 +43,31 @@ def _relpath(path: Path) -> str:
     return str(path.relative_to(storage.root.resolve())).replace("\\", "/")
 
 
-def _require_classification_task(task_type: TaskType) -> None:
-    if task_type in {TaskType.classification, TaskType.classification_single}:
+def _require_classification_deployment(deployment: dict[str, Any]) -> str:
+    task = str(deployment.get("task") or "classification").strip().lower()
+    if task == "classification":
+        task_id = str(deployment.get("task_id") or "").strip()
+        if task_id:
+            return task_id
+        raise api_error(
+            status_code=409,
+            code="deployment_invalid",
+            message="Deployment is missing task_id",
+        )
+    raise api_error(
+        status_code=409,
+        code="task_not_supported_for_inference",
+        message="Inference is currently supported only for classification tasks",
+    )
+
+
+def _require_classification_task_name(task_name: str) -> None:
+    if task_name.strip().lower() == "classification":
         return
     raise api_error(
         status_code=409,
-        code="deployment_task_mismatch",
-        message="Deployments are supported only for classification projects",
+        code="task_not_supported_for_inference",
+        message="Inference is currently supported only for classification tasks",
     )
 
 
@@ -88,12 +106,26 @@ async def create_deployment(
     payload: DeploymentCreate,
     db: AsyncSession = Depends(get_db),
 ) -> DeploymentCreateResponse:
-    project = await require_project(db, project_id)
-    _require_classification_task(project.task_type)
+    await require_project(db, project_id)
 
     experiment = experiment_store.get(project_id, payload.source.experiment_id, metrics_limit=1, attempt=payload.source.attempt)
     if experiment is None:
         raise api_error(status_code=404, code="experiment_not_found", message="Experiment not found in project")
+    experiment_task = "classification"
+    config_json = experiment.get("config_json")
+    if isinstance(config_json, dict) and isinstance(config_json.get("task"), str):
+        experiment_task = str(config_json.get("task"))
+    _require_classification_task_name(experiment_task)
+    task_id = str(experiment.get("task_id") or "")
+    if not task_id and isinstance(config_json, dict):
+        task_id = str(config_json.get("task_id") or "")
+    if not task_id:
+        raise api_error(
+            status_code=409,
+            code="deployment_invalid",
+            message="Experiment is missing task_id",
+            details={"project_id": project_id, "experiment_id": payload.source.experiment_id},
+        )
 
     onnx_path = experiment_store.get_onnx_path(project_id, payload.source.experiment_id, payload.source.attempt, file_name="model.onnx")
     metadata_path = experiment_store.get_onnx_path(
@@ -113,7 +145,8 @@ async def create_deployment(
     item = deployment_store.create(
         project_id=project_id,
         name=payload.name.strip(),
-        task=payload.task,
+        task_id=task_id,
+        task="classification",
         device_preference=payload.device_preference,
         source=source,
         model_key=model_key,
@@ -156,9 +189,9 @@ async def predict_classification(
     payload: PredictRequest,
     db: AsyncSession = Depends(get_db),
 ) -> PredictResponse:
-    project = await require_project(db, project_id)
-    _require_classification_task(project.task_type)
+    await require_project(db, project_id)
     deployment = _resolve_deployment_for_predict(project_id, payload.deployment_id)
+    task_id = _require_classification_deployment(deployment)
 
     asset = await db.get(Asset, payload.asset_id)
     if asset is None or asset.project_id != project_id:
@@ -198,7 +231,7 @@ async def predict_classification(
         )
 
     categories = (
-        await db.execute(select(Category.id, Category.name).where(Category.project_id == project_id))
+        await db.execute(select(Category.id, Category.name).where(Category.project_id == project_id, Category.task_id == task_id))
     ).all()
     category_name_by_id = {str(row[0]): str(row[1]) for row in categories}
     if any(class_id not in category_name_by_id for class_id in class_ids):
@@ -276,9 +309,9 @@ async def predict_classification(
 
 @router.post("/projects/{project_id}/deployments/{deployment_id}/warmup")
 async def warmup_deployment(project_id: str, deployment_id: str, db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
-    project = await require_project(db, project_id)
-    _require_classification_task(project.task_type)
+    await require_project(db, project_id)
     deployment = _resolve_deployment_for_predict(project_id, deployment_id)
+    _require_classification_deployment(deployment)
     source = deployment.get("source")
     if not isinstance(source, dict):
         raise api_error(status_code=409, code="deployment_invalid", message="Deployment source is invalid")

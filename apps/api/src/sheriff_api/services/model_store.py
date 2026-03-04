@@ -18,7 +18,7 @@ class ProjectModelStore(Protocol):
     def get(self, project_id: str, model_id: str) -> dict[str, Any] | None:
         ...
 
-    def create(self, *, project_id: str, name: str, config_json: dict[str, Any]) -> dict[str, Any]:
+    def create(self, *, project_id: str, name: str, config_json: dict[str, Any], task_id: str | None = None) -> dict[str, Any]:
         ...
 
     def update_config(self, *, project_id: str, model_id: str, config_json: dict[str, Any]) -> dict[str, Any] | None:
@@ -65,12 +65,13 @@ class FileProjectModelStore:
                 return record
         return None
 
-    def create(self, *, project_id: str, name: str, config_json: dict[str, Any]) -> dict[str, Any]:
+    def create(self, *, project_id: str, name: str, config_json: dict[str, Any], task_id: str | None = None) -> dict[str, Any]:
         records = self._read_records(project_id)
         timestamp = _utc_now_iso()
         record = {
             "id": str(uuid.uuid4()),
             "project_id": project_id,
+            "task_id": task_id,
             "name": name,
             "config_json": config_json,
             "created_at": timestamp,

@@ -7,7 +7,6 @@ from pydantic import BaseModel, Field
 from sheriff_api.db.models import AnnotationStatus
 
 
-DatasetTask = Literal["classification", "bbox", "segmentation"]
 SplitName = Literal["train", "val", "test"]
 
 
@@ -47,7 +46,7 @@ class DatasetSplitRequest(BaseModel):
 
 
 class DatasetPreviewRequest(BaseModel):
-    task: DatasetTask
+    task_id: str
     selection: DatasetSelectionRequest = Field(default_factory=DatasetSelectionRequest)
     split: DatasetSplitRequest = Field(default_factory=DatasetSplitRequest)
     strict_preview_cap: bool = False
@@ -64,7 +63,7 @@ class DatasetPreviewResponse(BaseModel):
 class DatasetVersionCreateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     description: str | None = Field(default=None, max_length=4000)
-    task: DatasetTask
+    task_id: str
     created_by: str | None = Field(default=None, max_length=200)
     selection: DatasetSelectionRequest = Field(default_factory=DatasetSelectionRequest)
     split: DatasetSplitRequest = Field(default_factory=DatasetSplitRequest)

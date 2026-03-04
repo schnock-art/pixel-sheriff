@@ -1,22 +1,26 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 
 import { LabelPanel } from "../LabelPanel";
 import { Viewer } from "../Viewer";
 import {
   ApiError,
   listDeployments,
+  listDatasetVersions,
   predict,
   createProjectModel,
   createCategory,
+  deleteCategory,
+  createTask,
   createProject,
   listAssets,
   patchCategory,
   resolveAssetUri,
   uploadAsset,
   type Annotation,
+  type TaskKind,
   type ProjectTaskType,
 } from "../../lib/api";
 import { useAnnotationWorkflow } from "../../lib/hooks/useAnnotationWorkflow";
@@ -24,8 +28,8 @@ import { useAssets } from "../../lib/hooks/useAssets";
 import { useDeleteWorkflow } from "../../lib/hooks/useDeleteWorkflow";
 import { buildTargetRelativePath, isImageCandidate, useImportWorkflow } from "../../lib/hooks/useImportWorkflow";
 import { useLabels } from "../../lib/hooks/useLabels";
-import { useProjectMultiLabelSettings } from "../../lib/hooks/useProjectMultiLabelSettings";
 import { useProject } from "../../lib/hooks/useProject";
+import { useTasks } from "../../lib/hooks/useTasks";
 import { useWorkspaceHotkeys } from "../../lib/hooks/useWorkspaceHotkeys";
 import {
   buildAssetReviewStateById,
@@ -42,8 +46,8 @@ import { ProjectAssetsStatusOverlay } from "./project-assets/ProjectAssetsStatus
 import { ProjectAssetsTreeSidebar } from "./project-assets/ProjectAssetsTreeSidebar";
 import { useProjectNavigationGuard } from "./ProjectNavigationContext";
 
-const PROJECT_MULTILABEL_STORAGE_KEY = "pixel-sheriff:project-multilabel:v1";
 const PROJECT_STATUS_REFRESH_EVENT = "pixel-sheriff:project-status-refresh";
+const PROJECT_ACTIVE_TASK_STORAGE_KEY_PREFIX = "pixel-sheriff:project-active-task:v1:";
 
 type FolderReviewStatus = "all_labeled" | "has_unlabeled" | "empty";
 type WorkspaceAnnotationMode = "labels" | "bbox" | "segmentation";
@@ -61,8 +65,15 @@ function annotationModeToNewProjectTaskType(mode: WorkspaceAnnotationMode): NewP
   return "classification_single";
 }
 
+function taskKindToAnnotationMode(taskKind: TaskKind | null | undefined): WorkspaceAnnotationMode {
+  if (taskKind === "bbox") return "bbox";
+  if (taskKind === "segmentation") return "segmentation";
+  return "labels";
+}
+
 export default function ProjectAssetsWorkspace() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const params = useParams<{ projectId: string }>();
   const routeProjectId = decodeURIComponent(params?.projectId ?? "");
   const { guardedNavigate, setHasUnsavedDrafts } = useProjectNavigationGuard();
@@ -71,12 +82,19 @@ export default function ProjectAssetsWorkspace() {
   const [assetIndex, setAssetIndex] = useState(0);
   const [isCreatingLabel, setIsCreatingLabel] = useState(false);
   const [isSavingLabelChanges, setIsSavingLabelChanges] = useState(false);
+  const [deletingLabelId, setDeletingLabelId] = useState<string | null>(null);
+  const [isTaskLabelsLocked, setIsTaskLabelsLocked] = useState(false);
   const [isCreatingModel, setIsCreatingModel] = useState(false);
+  const [isCreatingTask, setIsCreatingTask] = useState(false);
   const [editMode, setEditMode] = useState(false);
-  const { projectMultiLabelSettings, setProjectMultiLabelSettings } = useProjectMultiLabelSettings(PROJECT_MULTILABEL_STORAGE_KEY);
   const [message, setMessage] = useState<string | null>(null);
   const [annotationMode, setAnnotationMode] = useState<WorkspaceAnnotationMode>("labels");
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [importNewProjectTaskType, setImportNewProjectTaskType] = useState<NewProjectTaskType>("classification_single");
+  const [isTaskModalOpen, setIsTaskModalOpen] = useState(false);
+  const [newTaskName, setNewTaskName] = useState("");
+  const [newTaskKind, setNewTaskKind] = useState<TaskKind>("classification");
+  const [newTaskLabelMode, setNewTaskLabelMode] = useState<"single_label" | "multi_label">("single_label");
   const [geometryCategoryId, setGeometryCategoryId] = useState<string | null>(null);
   const [hoveredGeometryObjectId, setHoveredGeometryObjectId] = useState<string | null>(null);
   const [selectedTreeFolderPath, setSelectedTreeFolderPath] = useState<string | null>(null);
@@ -86,18 +104,83 @@ export default function ProjectAssetsWorkspace() {
     () => projects.find((project) => project.id === selectedProjectId) ?? null,
     [projects, selectedProjectId],
   );
-  const projectAnnotationMode = useMemo(
-    () => projectTaskTypeToAnnotationMode(selectedProject?.task_type),
-    [selectedProject?.task_type],
-  );
+  const { data: tasks, refetch: refetchTasks } = useTasks(selectedProjectId);
+  const selectedTask = useMemo(() => tasks.find((task) => task.id === selectedTaskId) ?? null, [tasks, selectedTaskId]);
+  const projectAnnotationMode = useMemo(() => taskKindToAnnotationMode(selectedTask?.kind), [selectedTask?.kind]);
+  const requestedTaskId = searchParams.get("taskId");
+  useEffect(() => {
+    if (!selectedProjectId) {
+      setSelectedTaskId(null);
+      return;
+    }
+    if (tasks.length === 0) {
+      setSelectedTaskId(null);
+      return;
+    }
+    const validIds = new Set(tasks.map((task) => task.id));
+    const storageKey = `${PROJECT_ACTIVE_TASK_STORAGE_KEY_PREFIX}${selectedProjectId}`;
+    const storedTaskId =
+      typeof window !== "undefined" ? window.localStorage.getItem(storageKey) : null;
+    const defaultTaskId = selectedProject?.default_task_id ?? tasks.find((task) => task.is_default)?.id ?? null;
+    const nextTaskId =
+      [requestedTaskId, storedTaskId, defaultTaskId, tasks[0]?.id].find(
+        (value): value is string => Boolean(value && validIds.has(value)),
+      ) ?? null;
+    if (!nextTaskId) return;
+    setSelectedTaskId((previous) => (previous === nextTaskId ? previous : nextTaskId));
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(storageKey, nextTaskId);
+    }
+    if (requestedTaskId !== nextTaskId) {
+      const nextParams = new URLSearchParams(searchParams.toString());
+      nextParams.set("taskId", nextTaskId);
+      router.replace(`/projects/${encodeURIComponent(routeProjectId)}/datasets?${nextParams.toString()}`);
+    }
+  }, [
+    requestedTaskId,
+    routeProjectId,
+    router,
+    searchParams,
+    selectedProject?.default_task_id,
+    selectedProjectId,
+    tasks,
+  ]);
+
   useEffect(() => {
     if (annotationMode === projectAnnotationMode) return;
     setAnnotationMode(projectAnnotationMode);
   }, [annotationMode, projectAnnotationMode]);
-  const multiLabelEnabled = selectedProjectId ? Boolean(projectMultiLabelSettings[selectedProjectId]) : false;
+  const multiLabelEnabled = selectedTask?.label_mode === "multi_label";
 
-  const { data: assets, annotations, setAnnotations, refetch: refetchAssets, isLoading: isAssetsLoading } = useAssets(selectedProjectId);
-  const { data: labels, refetch: refetchLabels } = useLabels(selectedProjectId);
+  useEffect(() => {
+    let active = true;
+    async function loadTaskLockState() {
+      if (!selectedProjectId || !selectedTaskId) {
+        if (!active) return;
+        setIsTaskLabelsLocked(false);
+        return;
+      }
+      try {
+        const listed = await listDatasetVersions(selectedProjectId, selectedTaskId);
+        if (!active) return;
+        const items = Array.isArray(listed.items) ? listed.items : [];
+        setIsTaskLabelsLocked(items.length > 0);
+      } catch {
+        if (!active) return;
+        setIsTaskLabelsLocked(false);
+      }
+    }
+    void loadTaskLockState();
+    return () => {
+      active = false;
+    };
+  }, [selectedProjectId, selectedTaskId]);
+
+  const { data: assets, annotations, setAnnotations, refetch: refetchAssets, isLoading: isAssetsLoading } = useAssets(
+    selectedProjectId,
+    selectedTaskId,
+  );
+  const { data: labels, refetch: refetchLabels } = useLabels(selectedProjectId, selectedTaskId);
   const [deploymentsState, setDeploymentsState] = useState<{
     active_deployment_id: string | null;
     items: Array<{ deployment_id: string; name: string; device_preference: string; status: string }>;
@@ -203,6 +286,7 @@ export default function ProjectAssetsWorkspace() {
   }, [annotations]);
   const annotationWorkflow = useAnnotationWorkflow({
     selectedProjectId,
+    selectedTaskId,
     currentAsset,
     availableAssetIds,
     annotationByAssetId,
@@ -258,7 +342,6 @@ export default function ProjectAssetsWorkspace() {
     setPendingAnnotations: annotationWorkflow.setPendingAnnotations,
     setAssetIndex,
     setCollapsedFolders,
-    setProjectMultiLabelSettings,
     setImportExistingProjectId,
     setSelectedImportExistingFolder,
     setImportFolderOptionsByProject,
@@ -399,7 +482,7 @@ export default function ProjectAssetsWorkspace() {
   }, [currentAsset?.id, annotationMode]);
 
   useEffect(() => {
-    setAnnotationMode(projectTaskTypeToAnnotationMode(selectedProject?.task_type));
+    setAnnotationMode(taskKindToAnnotationMode(selectedTask?.kind));
     setGeometryCategoryId(null);
     setHoveredGeometryObjectId(null);
     setSelectedTreeFolderPath(null);
@@ -409,7 +492,7 @@ export default function ProjectAssetsWorkspace() {
     resetAnnotationWorkflow();
     setEditMode(false);
     setMessage(null);
-  }, [routeProjectId, selectedProject?.task_type]);
+  }, [routeProjectId, selectedTask?.kind]);
 
   function handlePrevAsset() {
     setAssetIndex((previous) => (previous <= 0 ? 0 : previous - 1));
@@ -438,18 +521,66 @@ export default function ProjectAssetsWorkspace() {
     },
   });
 
-  function handleToggleProjectMultiLabel() {
-    if (!selectedProjectId) return;
-    if (projectAnnotationMode !== "labels") return;
-    setProjectMultiLabelSettings((previous) => ({
-      ...previous,
-      [selectedProjectId]: !Boolean(previous[selectedProjectId]),
-    }));
-  }
-
   function handleChangeAnnotationMode(nextMode: WorkspaceAnnotationMode) {
     if (nextMode !== projectAnnotationMode) return;
     setAnnotationMode(nextMode);
+  }
+
+  function updateTaskInUrl(taskId: string) {
+    const nextParams = new URLSearchParams(searchParams.toString());
+    nextParams.set("taskId", taskId);
+    router.replace(`/projects/${encodeURIComponent(routeProjectId)}/datasets?${nextParams.toString()}`);
+  }
+
+  function handleSelectTask(nextTaskId: string) {
+    if (!selectedProjectId || !nextTaskId) return;
+    if (!tasks.some((task) => task.id === nextTaskId)) return;
+    setSelectedTaskId(nextTaskId);
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(`${PROJECT_ACTIVE_TASK_STORAGE_KEY_PREFIX}${selectedProjectId}`, nextTaskId);
+    }
+    updateTaskInUrl(nextTaskId);
+  }
+
+  function handleOpenCreateTaskModal() {
+    if (!selectedProjectId) {
+      setMessage("Select a project before creating tasks.");
+      return;
+    }
+    setNewTaskName("");
+    setNewTaskKind("classification");
+    setNewTaskLabelMode("single_label");
+    setIsTaskModalOpen(true);
+  }
+
+  async function handleCreateTask() {
+    if (!selectedProjectId) {
+      setMessage("Select a project before creating tasks.");
+      return;
+    }
+    const taskName = newTaskName.trim();
+    if (!taskName) {
+      setMessage("Task name is required.");
+      return;
+    }
+    const taskKind = newTaskKind;
+    const labelMode = taskKind === "classification" ? newTaskLabelMode : undefined;
+    try {
+      setIsCreatingTask(true);
+      const created = await createTask(selectedProjectId, {
+        name: taskName,
+        kind: taskKind,
+        label_mode: labelMode,
+      });
+      await refetchTasks();
+      handleSelectTask(created.id);
+      setIsTaskModalOpen(false);
+      setMessage(`Created task "${created.name}".`);
+    } catch (error) {
+      setMessage(error instanceof Error ? `Failed to create task: ${error.message}` : "Failed to create task.");
+    } finally {
+      setIsCreatingTask(false);
+    }
   }
 
   const defaultGeometryCategoryId = geometryCategoryId ?? activeLabelRows[0]?.id ?? null;
@@ -478,15 +609,19 @@ export default function ProjectAssetsWorkspace() {
   }
 
   async function handleCreateLabel(name: string) {
-    if (!selectedProjectId) {
+    if (!selectedProjectId || !selectedTaskId) {
       setMessage("Select a project before creating labels.");
+      return;
+    }
+    if (isTaskLabelsLocked) {
+      setMessage("This task is locked because dataset versions already exist. Create a new task to change labels.");
       return;
     }
 
     try {
       setIsCreatingLabel(true);
       setMessage(null);
-      const created = await createCategory(selectedProjectId, { name, display_order: allLabelRows.length });
+      const created = await createCategory(selectedProjectId, { task_id: selectedTaskId, name, display_order: allLabelRows.length });
       await refetchLabels();
       if (annotationMode !== "labels") setGeometryCategoryId(created.id);
       setSelectedLabelIds([created.id]);
@@ -501,6 +636,10 @@ export default function ProjectAssetsWorkspace() {
   async function handleSaveLabelChanges(
     changes: Array<{ id: string; name: string; isActive: boolean; displayOrder: number }>,
   ) {
+    if (isTaskLabelsLocked) {
+      setMessage("This task is locked because dataset versions already exist. Create a new task to change labels.");
+      return;
+    }
     try {
       setIsSavingLabelChanges(true);
       setMessage(null);
@@ -517,6 +656,28 @@ export default function ProjectAssetsWorkspace() {
       setMessage(error instanceof Error ? `Failed to save labels: ${error.message}` : "Failed to save labels.");
     } finally {
       setIsSavingLabelChanges(false);
+    }
+  }
+
+  async function handleDeleteLabel(labelId: string, labelName: string) {
+    if (isTaskLabelsLocked) {
+      setMessage("This task is locked because dataset versions already exist. Create a new task to change labels.");
+      return;
+    }
+    if (!window.confirm(`Delete label "${labelName}"? This cannot be undone.`)) return;
+    try {
+      setDeletingLabelId(labelId);
+      await deleteCategory(labelId);
+      await refetchLabels();
+      setSelectedLabelIds((previous) => previous.filter((id) => id !== labelId));
+      if (geometryCategoryId === labelId) {
+        setGeometryCategoryId(null);
+      }
+      setMessage(`Deleted label "${labelName}".`);
+    } catch (error) {
+      setMessage(error instanceof Error ? `Failed to delete label: ${error.message}` : "Failed to delete label.");
+    } finally {
+      setDeletingLabelId(null);
     }
   }
 
@@ -796,10 +957,32 @@ export default function ProjectAssetsWorkspace() {
           <div className="workspace-header-cell">Project Assets</div>
           <div className="workspace-header-cell workspace-header-title">{headerTitle}</div>
           <div className="workspace-header-cell workspace-header-actions" aria-label="Toolbar">
-            <span />
-            <span />
-            <span />
-            <span />
+            <label htmlFor="task-selector" className="sr-only">
+              Task
+            </label>
+            <select
+              id="task-selector"
+              value={selectedTaskId ?? ""}
+              onChange={(event) => handleSelectTask(event.target.value)}
+              disabled={!selectedProjectId || tasks.length === 0}
+              className="workspace-task-select"
+              title={selectedTask?.kind ? `${selectedTask.kind}${selectedTask.label_mode ? ` (${selectedTask.label_mode})` : ""}` : "Task"}
+            >
+              {tasks.length === 0 ? <option value="">No tasks</option> : null}
+              {tasks.map((task) => (
+                <option key={task.id} value={task.id}>
+                  {task.name} [{task.kind}]
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              className="primary-button workspace-task-create-button"
+              onClick={handleOpenCreateTaskModal}
+              disabled={!selectedProjectId}
+            >
+              + New Task
+            </button>
           </div>
         </header>
 
@@ -867,9 +1050,12 @@ export default function ProjectAssetsWorkspace() {
             pendingCount={pendingCount}
             onSaveLabelChanges={handleSaveLabelChanges}
             isSavingLabelChanges={isSavingLabelChanges}
+            onDeleteLabel={handleDeleteLabel}
+            deletingLabelId={deletingLabelId}
+            labelsLocked={isTaskLabelsLocked}
             canSubmit={canSubmit}
             multiLabelEnabled={multiLabelEnabled}
-            onToggleMultiLabel={handleToggleProjectMultiLabel}
+            onToggleMultiLabel={() => setMessage("Classification label mode is controlled by the selected task.")}
             annotationMode={annotationMode}
             projectMode={projectAnnotationMode}
             onChangeAnnotationMode={handleChangeAnnotationMode}
@@ -917,6 +1103,50 @@ export default function ProjectAssetsWorkspace() {
         importFailures={importFailures}
         onDismissMessage={() => setMessage(null)}
       />
+      {isTaskModalOpen ? (
+        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Create Task">
+          <section className="placeholder-card" style={{ maxWidth: 520, margin: "10vh auto 0", display: "grid", gap: 12 }}>
+            <h3 style={{ margin: 0 }}>Create Task</h3>
+            <label className="project-field">
+              <span>Name</span>
+              <input value={newTaskName} onChange={(event) => setNewTaskName(event.target.value)} maxLength={120} />
+            </label>
+            <label className="project-field">
+              <span>Kind</span>
+              <select value={newTaskKind} onChange={(event) => setNewTaskKind(event.target.value as TaskKind)}>
+                <option value="classification">Classification</option>
+                <option value="bbox">Bounding boxes</option>
+                <option value="segmentation">Segmentation</option>
+              </select>
+            </label>
+            {newTaskKind === "classification" ? (
+              <label className="project-field">
+                <span>Label mode</span>
+                <select
+                  value={newTaskLabelMode}
+                  onChange={(event) => setNewTaskLabelMode(event.target.value as "single_label" | "multi_label")}
+                >
+                  <option value="single_label">Single label</option>
+                  <option value="multi_label">Multi label</option>
+                </select>
+              </label>
+            ) : null}
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+              <button type="button" className="ghost-button" onClick={() => setIsTaskModalOpen(false)} disabled={isCreatingTask}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="primary-button"
+                onClick={() => void handleCreateTask()}
+                disabled={isCreatingTask || !newTaskName.trim()}
+              >
+                {isCreatingTask ? "Creating..." : "Create Task"}
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
       <ProjectAssetsImportModal
         open={importDialog.open}
         filesCount={importDialog.files.length}

@@ -99,11 +99,13 @@ class DatasetStore:
             issues.append({"path": path, "message": error.message})
         raise DatasetStoreValidationError(issues)
 
-    def list_versions(self, project_id: str) -> dict[str, Any]:
+    def list_versions(self, project_id: str, task_id: str | None = None) -> dict[str, Any]:
         doc = self._read_doc(project_id)
         archived_ids = set(doc["meta"]["archived_ids"])
         active_id = doc.get("active_dataset_version_id")
         items = sorted(doc["items"], key=lambda item: str(item.get("created_at", "")), reverse=True)
+        if isinstance(task_id, str) and task_id.strip():
+            items = [item for item in items if str(item.get("task_id") or "") == task_id.strip()]
         return {
             "active_dataset_version_id": active_id,
             "items": [

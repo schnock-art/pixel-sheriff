@@ -93,6 +93,7 @@ class TrainingConfigV0(BaseModel):
     schema_version: Literal["0.1"] = "0.1"
     model_id: str
     dataset_version_id: str
+    task_id: str | None = None
     task: TrainingTask
     optimizer: TrainingOptimizer = Field(default_factory=TrainingOptimizer)
     scheduler: TrainingScheduler = Field(default_factory=TrainingScheduler)
@@ -147,6 +148,7 @@ class ExperimentCheckpoint(BaseModel):
 class ProjectExperimentSummary(BaseModel):
     id: str
     project_id: str
+    task_id: str | None = None
     model_id: str
     name: str
     created_at: datetime
@@ -198,6 +200,8 @@ class ExperimentAnalyticsBest(BaseModel):
 
 class ExperimentAnalyticsItem(BaseModel):
     experiment_id: str
+    task_id: str | None = None
+    task: str | None = None
     name: str
     model_id: str
     model_name: str

@@ -42,8 +42,9 @@ function ProjectRouteLayout({ children }: ProjectRouteLayoutProps) {
     [projectId, projects],
   );
 
-  const { annotations } = useAssets(selectedProject?.id ?? null);
-  const { data: labels } = useLabels(selectedProject?.id ?? null);
+  const defaultTaskId = selectedProject?.default_task_id ?? null;
+  const { annotations } = useAssets(selectedProject?.id ?? null, defaultTaskId);
+  const { data: labels } = useLabels(selectedProject?.id ?? null, defaultTaskId);
 
   const [isProjectMenuOpen, setIsProjectMenuOpen] = useState(false);
   const [isCreateProjectOpen, setIsCreateProjectOpen] = useState(false);

@@ -89,6 +89,23 @@ async def start_project_experiment(
             details={"project_id": project_id, "dataset_version_id": dataset_version_id},
         )
 
+    dataset_task_id = str(dataset_version.get("task_id") or "")
+    config_task_id = str(config_json.get("task_id") or "")
+    if not dataset_task_id:
+        raise api_error(
+            status_code=422,
+            code="dataset_version_invalid",
+            message="Dataset version is missing task_id",
+            details={"project_id": project_id, "dataset_version_id": dataset_version_id},
+        )
+    if config_task_id and config_task_id != dataset_task_id:
+        raise api_error(
+            status_code=409,
+            code="task_mismatch",
+            message="Experiment config task does not match dataset task",
+            details={"project_id": project_id, "dataset_task_id": dataset_task_id, "config_task_id": config_task_id},
+        )
+
     dataset_export = await ensure_dataset_export_zip(db=db, project=project, dataset_version=dataset_version)
     model_config = model_record.get("config_json")
     if not isinstance(model_config, dict):
@@ -101,6 +118,14 @@ async def start_project_experiment(
 
     model_family = shared_architecture_family(model_config)
     task = str(config_json.get("task") or "classification")
+    model_task_id = str(model_record.get("task_id") or "")
+    if model_task_id and model_task_id != dataset_task_id:
+        raise api_error(
+            status_code=409,
+            code="task_mismatch",
+            message="Experiment model and dataset tasks are incompatible",
+            details={"project_id": project_id, "model_task_id": model_task_id, "dataset_task_id": dataset_task_id},
+        )
     job_id = str(uuid.uuid4())
 
     initialized = experiment_store.init_run_attempt(
@@ -143,6 +168,7 @@ async def start_project_experiment(
         "experiment_id": experiment_id,
         "model_id": model_id,
         "task": task,
+        "task_id": dataset_task_id,
         "model_config": model_config,
         "training_config": config_json,
         "dataset_export": dataset_export,

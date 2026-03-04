@@ -52,6 +52,7 @@ class AnnotationPayloadV2(BaseModel):
 
 
 class AnnotationUpsert(BaseModel):
+    task_id: str
     asset_id: str
     status: AnnotationStatus = AnnotationStatus.labeled
     payload_json: LegacyClassificationPayload | AnnotationPayloadV2
@@ -62,6 +63,7 @@ class AnnotationRead(BaseModel):
     id: str
     asset_id: str
     project_id: str
+    task_id: str
     status: AnnotationStatus
     payload_json: dict
     annotated_by: str | None

@@ -43,7 +43,9 @@
       "required": ["manifest_id", "task", "num_classes", "class_order"],
       "properties": {
         "manifest_id": { "type": "string", "minLength": 1 },
+        "task_id": { "type": "string", "minLength": 1 },
         "task": { "$ref": "#/definitions/Task" },
+        "label_mode": { "type": "string", "enum": ["single_label", "multi_label"] },
         "num_classes": { "type": "integer", "minimum": 1 },
         "class_order": {
           "type": "array",

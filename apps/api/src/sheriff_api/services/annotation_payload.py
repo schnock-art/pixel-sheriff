@@ -6,7 +6,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from sheriff_api.db.models import TaskType
+from sheriff_api.db.models import TaskKind, TaskLabelMode
 
 @dataclass
 class PayloadValidationError(Exception):
@@ -227,7 +227,8 @@ def _normalize_geometry_objects(
 def normalize_annotation_payload(
     payload_json: Any,
     *,
-    task_type: TaskType,
+    task_kind: TaskKind,
+    label_mode: TaskLabelMode | None,
     allowed_category_ids: set[str],
     asset_width: int | None,
     asset_height: int | None,
@@ -287,23 +288,29 @@ def normalize_annotation_payload(
     if primary_category_id is not None:
         _validate_category(primary_category_id, allowed_category_ids)
 
-    if task_type in {TaskType.classification, TaskType.classification_single} and objects:
+    if task_kind == TaskKind.classification and objects:
         raise PayloadValidationError(
             code="annotation_task_mode_mismatch",
-            message="Project task mode does not allow geometry objects",
-            details={"task_type": task_type.value},
+            message="Task mode does not allow geometry objects",
+            details={"task_kind": task_kind.value},
         )
-    if task_type == TaskType.bbox and any(object_value.get("kind") != "bbox" for object_value in objects):
+    if task_kind == TaskKind.bbox and any(object_value.get("kind") != "bbox" for object_value in objects):
         raise PayloadValidationError(
             code="annotation_task_mode_mismatch",
-            message="Project task mode only allows bounding box objects",
-            details={"task_type": task_type.value},
+            message="Task mode only allows bounding box objects",
+            details={"task_kind": task_kind.value},
         )
-    if task_type == TaskType.segmentation and any(object_value.get("kind") != "polygon" for object_value in objects):
+    if task_kind == TaskKind.segmentation and any(object_value.get("kind") != "polygon" for object_value in objects):
         raise PayloadValidationError(
             code="annotation_task_mode_mismatch",
-            message="Project task mode only allows segmentation polygon objects",
-            details={"task_type": task_type.value},
+            message="Task mode only allows segmentation polygon objects",
+            details={"task_kind": task_kind.value},
+        )
+    if task_kind == TaskKind.classification and label_mode == TaskLabelMode.single_label and len(category_ids) > 1:
+        raise PayloadValidationError(
+            code="validation_error",
+            message="Single-label task accepts at most one category",
+            details={"task_kind": task_kind.value, "label_mode": label_mode.value},
         )
     source = payload.get("source")
 

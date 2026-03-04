@@ -10,7 +10,7 @@ from sheriff_api.config import get_settings
 from sheriff_api.db.models import Base, TaskType
 from sheriff_api.db.session import engine
 from sheriff_api.errors import http_exception_handler, request_validation_exception_handler
-from sheriff_api.routers import annotations, assets, categories, datasets, deployments, experiments, exports, health, models, projects
+from sheriff_api.routers import annotations, assets, categories, datasets, deployments, experiments, exports, health, models, projects, tasks
 from sheriff_api.services.migrations import run_startup_migrations
 
 settings = get_settings()
@@ -46,6 +46,7 @@ app.add_middleware(
 
 app.include_router(health.router, prefix="/api/v1")
 app.include_router(projects.router, prefix="/api/v1")
+app.include_router(tasks.router, prefix="/api/v1")
 app.include_router(categories.router, prefix="/api/v1")
 app.include_router(assets.router, prefix="/api/v1")
 app.include_router(annotations.router, prefix="/api/v1")

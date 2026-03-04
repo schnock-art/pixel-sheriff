@@ -12,6 +12,7 @@ class ProjectRead(BaseModel):
     id: str
     name: str
     task_type: TaskType
+    default_task_id: str | None = None
     schema_version: str
 
     class Config:

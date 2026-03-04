@@ -6,7 +6,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 
-DeploymentTask = Literal["classification"]
+DeploymentTask = Literal["classification", "bbox", "segmentation"]
 DeploymentProvider = Literal["onnxruntime"]
 DevicePreference = Literal["auto", "cuda", "cpu"]
 DeploymentStatus = Literal["available", "archived"]
@@ -37,6 +37,7 @@ class DeploymentSourceRead(BaseModel):
 
 class DeploymentItem(BaseModel):
     deployment_id: str
+    task_id: str | None = None
     name: str
     task: DeploymentTask
     provider: DeploymentProvider

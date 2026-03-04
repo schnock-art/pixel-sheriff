@@ -557,6 +557,7 @@ export default function ExperimentsPage({ params }: ExperimentsPageProps) {
                 <tr>
                   <th>Name</th>
                   <th>Model</th>
+                  <th>Task</th>
                   <th>Status</th>
                   <th>Best Metric</th>
                   <th>Updated</th>
@@ -581,6 +582,7 @@ export default function ExperimentsPage({ params }: ExperimentsPageProps) {
                         </Link>
                       </td>
                       <td>{experiment.model_name}</td>
+                      <td>{experiment.task ?? "-"}</td>
                       <td>
                         <span className={`status-pill status-${experiment.status}`}>{experiment.status}</span>
                         {runtimeBadge ? <span className="runtime-pill">{runtimeBadge}</span> : null}

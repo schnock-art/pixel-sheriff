@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sheriff_api.config import get_settings
-from sheriff_api.db.models import Annotation, Asset, Project
+from sheriff_api.db.models import Annotation, Asset, Project, Task, TaskKind, TaskLabelMode, TaskType
 from sheriff_api.errors import api_error
 from sheriff_api.schemas.experiments import ExperimentSampleItem, ProjectExperimentRecord, ProjectExperimentSummary, TrainingConfigV0
 from sheriff_api.services.dataset_store import DatasetStore
@@ -58,11 +58,12 @@ def normalize_task(raw_task: str) -> str:
     return "classification"
 
 
-def default_training_config(*, model_id: str, dataset_version_id: str, task: str) -> dict[str, Any]:
+def default_training_config(*, model_id: str, dataset_version_id: str, task_id: str | None, task: str) -> dict[str, Any]:
     normalized_task = normalize_task(task)
     return TrainingConfigV0(
         model_id=model_id,
         dataset_version_id=dataset_version_id,
+        task_id=task_id,
         task=normalized_task,
     ).model_dump(mode="json")
 
@@ -172,6 +173,16 @@ def metric_objective_direction(metric_name: str | None) -> str:
     if isinstance(metric_name, str) and metric_name.endswith("loss"):
         return "min"
     return "max"
+
+
+def _task_type_for_task(task: Task) -> TaskType:
+    if task.kind == TaskKind.classification:
+        if task.label_mode == TaskLabelMode.multi_label:
+            return TaskType.classification
+        return TaskType.classification_single
+    if task.kind == TaskKind.bbox:
+        return TaskType.bbox
+    return TaskType.segmentation
 
 
 def filter_predictions(
@@ -298,6 +309,23 @@ async def ensure_dataset_export_zip(
                 "dataset_version_id": dataset_version_id,
             }
 
+    task_id = str(dataset_version.get("task_id") or "")
+    if not task_id:
+        raise api_error(
+            status_code=422,
+            code="dataset_version_invalid",
+            message="Dataset version payload is missing task_id",
+            details={"project_id": project.id, "dataset_version_id": dataset_version_id},
+        )
+    task = await db.get(Task, task_id)
+    if task is None or task.project_id != project.id:
+        raise api_error(
+            status_code=422,
+            code="task_not_found",
+            message="Dataset task not found in project",
+            details={"project_id": project.id, "dataset_version_id": dataset_version_id, "task_id": task_id},
+        )
+
     class_order = dataset_version.get("labels", {}).get("label_schema", {}).get("class_order")
     classes = dataset_version.get("labels", {}).get("label_schema", {}).get("classes")
     if not isinstance(class_order, list) or not isinstance(classes, list):
@@ -339,7 +367,9 @@ async def ensure_dataset_export_zip(
     selected_asset_id_set = {str(item) for item in selected_asset_ids}
 
     assets = list((await db.execute(select(Asset).where(Asset.project_id == project.id))).scalars().all())
-    annotations = list((await db.execute(select(Annotation).where(Annotation.project_id == project.id))).scalars().all())
+    annotations = list(
+        (await db.execute(select(Annotation).where(Annotation.project_id == project.id, Annotation.task_id == task_id))).scalars().all()
+    )
     selected_assets = [asset for asset in assets if asset.id in selected_asset_id_set]
     selected_annotations = [annotation for annotation in annotations if annotation.asset_id in selected_asset_id_set]
 
@@ -361,7 +391,7 @@ async def ensure_dataset_export_zip(
         _manifest, _coco, content_hash, zip_bytes = build_export_result(
             project_id=project.id,
             project_name=project.name,
-            task_type=project.task_type,
+            task_type=_task_type_for_task(task),
             selection_criteria=selection_criteria,
             categories=categories_for_export,
             assets=[

@@ -95,11 +95,14 @@ export async function apiPostForm<T>(path: string, formData: FormData): Promise<
 
 export type AnnotationStatus = "unlabeled" | "labeled" | "skipped" | "needs_review" | "approved";
 export type ProjectTaskType = "classification" | "classification_single" | "bbox" | "segmentation";
+export type TaskKind = "classification" | "bbox" | "segmentation";
+export type TaskLabelMode = "single_label" | "multi_label";
 
 export interface Project {
   id: string;
   name: string;
   task_type: ProjectTaskType;
+  default_task_id: string | null;
   schema_version: string;
 }
 
@@ -111,12 +114,14 @@ export interface ProjectCreatePayload {
 export interface Category {
   id: string;
   project_id: string;
+  task_id: string;
   name: string;
   display_order: number;
   is_active: boolean;
 }
 
 export interface CategoryCreatePayload {
+  task_id: string;
   name: string;
   display_order?: number;
 }
@@ -153,16 +158,35 @@ export interface Annotation {
   id: string;
   asset_id: string;
   project_id: string;
+  task_id: string;
   status: AnnotationStatus;
   payload_json: Record<string, unknown>;
   annotated_by: string | null;
 }
 
 export interface AnnotationUpsert {
+  task_id: string;
   asset_id: string;
   status: AnnotationStatus;
   payload_json: Record<string, unknown>;
   annotated_by?: string;
+}
+
+export interface Task {
+  id: string;
+  project_id: string;
+  name: string;
+  kind: TaskKind;
+  label_mode: TaskLabelMode | null;
+  created_at: string | null;
+  updated_at: string | null;
+  is_default: boolean;
+}
+
+export interface TaskCreatePayload {
+  name: string;
+  kind: TaskKind;
+  label_mode?: TaskLabelMode;
 }
 
 export interface ExportCreatePayload {
@@ -243,6 +267,7 @@ export interface DatasetVersionExportPayload {
 
 export interface ProjectModelSummary {
   id: string;
+  task_id: string | null;
   name: string;
   created_at: string;
   updated_at: string;
@@ -264,6 +289,7 @@ export interface ProjectModelCreateResponse {
 export interface ProjectModelRecord {
   id: string;
   project_id: string;
+  task_id: string | null;
   name: string;
   config_json: Record<string, unknown>;
   created_at: string;
@@ -315,6 +341,7 @@ export interface ExperimentMetricPoint {
 export interface ProjectExperimentSummary {
   id: string;
   project_id: string;
+  task_id: string | null;
   model_id: string;
   name: string;
   created_at: string;
@@ -376,6 +403,8 @@ export interface ExperimentAnalyticsItem {
   name: string;
   model_id: string;
   model_name: string;
+  task_id?: string | null;
+  task?: string | null;
   status: ExperimentStatus;
   updated_at: string;
   config: ExperimentAnalyticsConfig;
@@ -498,7 +527,8 @@ export interface DeploymentSource {
 export interface DeploymentItem {
   deployment_id: string;
   name: string;
-  task: "classification";
+  task_id: string | null;
+  task: TaskKind;
   provider: "onnxruntime";
   device_preference: DeploymentDevicePreference;
   model_key: string;
@@ -515,7 +545,7 @@ export interface DeploymentListResponse {
 
 export interface CreateDeploymentPayload {
   name: string;
-  task?: "classification";
+  task?: TaskKind;
   device_preference?: DeploymentDevicePreference;
   source: {
     experiment_id: string;
@@ -604,8 +634,25 @@ export function listProjects(): Promise<Project[]> {
   return apiGet<Project[]>("/projects");
 }
 
-export function listCategories(projectId: string): Promise<Category[]> {
-  return apiGet<Category[]>(`/projects/${projectId}/categories`);
+export function listTasks(projectId: string): Promise<Task[]> {
+  return apiGet<Task[]>(`/projects/${projectId}/tasks`);
+}
+
+export function createTask(projectId: string, payload: TaskCreatePayload): Promise<Task> {
+  return apiPost<Task, TaskCreatePayload>(`/projects/${projectId}/tasks`, payload);
+}
+
+export function getTask(projectId: string, taskId: string): Promise<Task> {
+  return apiGet<Task>(`/projects/${projectId}/tasks/${taskId}`);
+}
+
+export function deleteTask(projectId: string, taskId: string): Promise<{ ok: boolean; task_id: string }> {
+  return requestJson<{ ok: boolean; task_id: string }>(`/projects/${projectId}/tasks/${taskId}`, { method: "DELETE" });
+}
+
+export function listCategories(projectId: string, taskId: string): Promise<Category[]> {
+  const params = new URLSearchParams({ task_id: taskId });
+  return apiGet<Category[]>(`/projects/${projectId}/categories?${params.toString()}`);
 }
 
 export function createCategory(projectId: string, payload: CategoryCreatePayload): Promise<Category> {
@@ -618,6 +665,10 @@ export function patchCategory(categoryId: string, payload: CategoryUpdatePayload
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
+}
+
+export function deleteCategory(categoryId: string): Promise<{ ok: boolean; category_id: string }> {
+  return requestJson<{ ok: boolean; category_id: string }>(`/categories/${categoryId}`, { method: "DELETE" });
 }
 
 export function createProject(payload: ProjectCreatePayload): Promise<Project> {
@@ -640,8 +691,9 @@ export function deleteAsset(projectId: string, assetId: string): Promise<void> {
   return requestNoContent(`/projects/${projectId}/assets/${assetId}`, { method: "DELETE" });
 }
 
-export function listAnnotations(projectId: string): Promise<Annotation[]> {
-  return apiGet<Annotation[]>(`/projects/${projectId}/annotations`);
+export function listAnnotations(projectId: string, taskId: string): Promise<Annotation[]> {
+  const params = new URLSearchParams({ task_id: taskId });
+  return apiGet<Annotation[]>(`/projects/${projectId}/annotations?${params.toString()}`);
 }
 
 export function upsertAnnotation(projectId: string, payload: AnnotationUpsert): Promise<Annotation> {
@@ -656,14 +708,19 @@ export function listExports(projectId: string): Promise<ExportVersion[]> {
   return apiGet<ExportVersion[]>(`/projects/${projectId}/exports`);
 }
 
-export function listDatasetVersions(projectId: string): Promise<DatasetVersionListPayload> {
-  return apiGet<DatasetVersionListPayload>(`/projects/${projectId}/datasets/versions`);
+export function listDatasetVersions(projectId: string, taskId?: string): Promise<DatasetVersionListPayload> {
+  const params = new URLSearchParams();
+  if (taskId) {
+    params.set("task_id", taskId);
+  }
+  const query = params.toString();
+  return apiGet<DatasetVersionListPayload>(`/projects/${projectId}/datasets/versions${query ? `?${query}` : ""}`);
 }
 
 export function previewDatasetVersion(
   projectId: string,
   payload: {
-    task: "classification" | "bbox" | "segmentation";
+    task_id: string;
     selection: { mode: "filter_snapshot" | "explicit_asset_ids"; filters?: DatasetSelectionFilters; explicit_asset_ids?: string[] };
     split?: DatasetSplitConfig;
     strict_preview_cap?: boolean;
@@ -678,7 +735,7 @@ export function createDatasetVersion(
   payload: {
     name: string;
     description?: string;
-    task: "classification" | "bbox" | "segmentation";
+    task_id: string;
     created_by?: string;
     selection: { mode: "filter_snapshot" | "explicit_asset_ids"; filters?: DatasetSelectionFilters; explicit_asset_ids?: string[] };
     split?: DatasetSplitConfig;

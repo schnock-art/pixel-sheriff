@@ -143,6 +143,8 @@ async def project_experiments_analytics(
         items.append(
             ExperimentAnalyticsItem(
                 experiment_id=experiment_id,
+                task_id=str(row.get("task_id")) if row.get("task_id") is not None else None,
+                task=str(config_json.get("task")) if isinstance(config_json.get("task"), str) else None,
                 name=str(row.get("name") or experiment_id),
                 model_id=model_id,
                 model_name=model_name,

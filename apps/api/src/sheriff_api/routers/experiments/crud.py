@@ -45,7 +45,7 @@ async def create_project_experiment(
     payload: ProjectExperimentCreate,
     db: AsyncSession = Depends(get_db),
 ) -> ProjectExperimentRecord:
-    project = await require_project(db, project_id)
+    await require_project(db, project_id)
     model_record = model_store.get(project_id, payload.model_id)
     if model_record is None:
         raise api_error(
@@ -68,8 +68,30 @@ async def create_project_experiment(
             details={"project_id": project_id},
         )
 
+    dataset_task_id = str(selected_dataset.get("task_id") or "")
+    if not dataset_task_id:
+        raise api_error(
+            status_code=422,
+            code="dataset_version_invalid",
+            message="Dataset version is missing task_id",
+            details={"project_id": project_id, "dataset_version_id": selected_dataset.get("dataset_version_id")},
+        )
+
     model_config = model_record.get("config_json")
-    task = project.task_type.value
+    model_task_id = str(model_record.get("task_id") or "")
+    if not model_task_id and isinstance(model_config, dict):
+        source_dataset = model_config.get("source_dataset")
+        if isinstance(source_dataset, dict):
+            model_task_id = str(source_dataset.get("task_id") or "")
+    if model_task_id and model_task_id != dataset_task_id:
+        raise api_error(
+            status_code=409,
+            code="task_mismatch",
+            message="Model and dataset tasks are incompatible",
+            details={"project_id": project_id, "model_task_id": model_task_id, "dataset_task_id": dataset_task_id},
+        )
+
+    task = str(selected_dataset.get("task") or "classification")
     if isinstance(model_config, dict):
         source_dataset = model_config.get("source_dataset")
         if isinstance(source_dataset, dict) and isinstance(source_dataset.get("task"), str):
@@ -78,10 +100,12 @@ async def create_project_experiment(
     default_config = default_training_config(
         model_id=payload.model_id,
         dataset_version_id=str(selected_dataset.get("dataset_version_id")),
+        task_id=dataset_task_id,
         task=task,
     )
     overrides = payload.config_overrides if isinstance(payload.config_overrides, dict) else {}
     config_json = deep_merge(default_config, overrides)
+    config_json["task_id"] = dataset_task_id
 
     issues = collect_config_issues(config_json)
     if issues:
@@ -97,6 +121,7 @@ async def create_project_experiment(
     created = experiment_store.create(
         project_id=project_id,
         model_id=payload.model_id,
+        task_id=dataset_task_id,
         name=name,
         config_json=config_json,
         status="draft",

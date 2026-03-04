@@ -55,6 +55,7 @@ interface LabelRow {
 
 interface UseAnnotationWorkflowParams {
   selectedProjectId: string | null;
+  selectedTaskId: string | null;
   currentAsset: { id: string; width: number | null; height: number | null } | null;
   availableAssetIds: string[];
   annotationByAssetId: Map<string, Annotation>;
@@ -79,6 +80,7 @@ function normalizeGeometryObjectInput(objects: GeometryObject[] | undefined): Ge
 
 export function useAnnotationWorkflow({
   selectedProjectId,
+  selectedTaskId,
   currentAsset,
   availableAssetIds,
   annotationByAssetId,
@@ -289,7 +291,7 @@ export function useAnnotationWorkflow({
   }
 
   async function submitSingleAnnotation() {
-    if (!selectedProjectId || !currentAsset) {
+    if (!selectedProjectId || !selectedTaskId || !currentAsset) {
       setMessage("Select a dataset and asset before submitting.");
       return;
     }
@@ -308,6 +310,7 @@ export function useAnnotationWorkflow({
     }
 
     const annotation = await upsertAnnotation(selectedProjectId, {
+      task_id: selectedTaskId,
       asset_id: currentAsset.id,
       status: upsertInput.status,
       payload_json: upsertInput.payload_json,
@@ -327,7 +330,7 @@ export function useAnnotationWorkflow({
   }
 
   async function submitPendingAnnotations() {
-    if (!selectedProjectId) {
+    if (!selectedProjectId || !selectedTaskId) {
       setMessage("Select a dataset before submitting.");
       return;
     }
@@ -363,6 +366,7 @@ export function useAnnotationWorkflow({
       if (!upsertInput) continue;
 
       const annotation = await upsertAnnotation(selectedProjectId, {
+        task_id: selectedTaskId,
         asset_id: assetId,
         status: upsertInput.status,
         payload_json: upsertInput.payload_json,

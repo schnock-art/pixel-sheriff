@@ -73,6 +73,7 @@ class DeploymentStore:
         *,
         project_id: str,
         name: str,
+        task_id: str | None,
         task: str,
         device_preference: str,
         source: dict[str, Any],
@@ -83,6 +84,7 @@ class DeploymentStore:
         timestamp = _utc_now_iso()
         item = {
             "deployment_id": str(uuid.uuid4()),
+            "task_id": task_id,
             "name": name,
             "task": task,
             "provider": "onnxruntime",

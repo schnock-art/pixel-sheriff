@@ -10,7 +10,7 @@
     "project_id",
     "created_at",
     "name",
-    "task",
+    "task_id",
     "assets",
     "labels",
     "splits",
@@ -25,6 +25,8 @@
 
     "name": { "type": "string", "minLength": 1, "maxLength": 120 },
     "description": { "type": "string", "maxLength": 4000 },
+
+    "task_id": { "type": "string", "format": "uuid" },
 
     "task": {
       "type": "string",

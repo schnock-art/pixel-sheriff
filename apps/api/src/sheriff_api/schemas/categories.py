@@ -2,6 +2,7 @@ from pydantic import BaseModel
 
 
 class CategoryCreate(BaseModel):
+    task_id: str
     name: str
     display_order: int = 0
 
@@ -15,6 +16,7 @@ class CategoryUpdate(BaseModel):
 class CategoryRead(BaseModel):
     id: str
     project_id: str
+    task_id: str
     name: str
     display_order: int
     is_active: bool

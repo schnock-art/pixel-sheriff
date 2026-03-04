@@ -281,6 +281,7 @@ class ExperimentStore:
         *,
         project_id: str,
         model_id: str,
+        task_id: str | None,
         name: str,
         config_json: dict[str, Any],
         status: str = "draft",
@@ -291,6 +292,7 @@ class ExperimentStore:
         record = {
             "id": experiment_id,
             "project_id": project_id,
+            "task_id": task_id,
             "model_id": model_id,
             "name": name,
             "created_at": timestamp,

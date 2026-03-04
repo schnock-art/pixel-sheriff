@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sheriff_api.config import get_settings
-from sheriff_api.db.models import Asset, Model, Project, Suggestion
+from sheriff_api.db.models import Asset, Model, Project, Suggestion, Task, TaskKind
 from sheriff_api.db.session import get_db
 from sheriff_api.errors import api_error
 from sheriff_api.schemas.models import (
@@ -108,8 +108,16 @@ def _model_summary_from_record(record: dict[str, Any]) -> ProjectModelSummary:
     if not isinstance(backbone, dict):
         backbone = {}
 
+    task_id = record.get("task_id")
+    if not isinstance(task_id, str):
+        task_id = None
+    if task_id is None:
+        if isinstance(source.get("task_id"), str):
+            task_id = str(source.get("task_id"))
+
     return ProjectModelSummary(
         id=str(record.get("id", "")),
+        task_id=task_id,
         name=str(record.get("name", "")),
         created_at=record.get("created_at"),
         updated_at=record.get("updated_at"),
@@ -215,6 +223,23 @@ async def create_project_model(
             details={"project_id": project_id},
         )
 
+    dataset_task_id = str(active_dataset_version.get("task_id") or "")
+    if not dataset_task_id:
+        raise api_error(
+            status_code=400,
+            code="dataset_version_invalid",
+            message="Dataset version is missing task_id",
+            details={"project_id": project_id, "dataset_version_id": active_dataset_version.get("dataset_version_id")},
+        )
+    dataset_task = await db.get(Task, dataset_task_id)
+    if dataset_task is None or dataset_task.project_id != project_id:
+        raise api_error(
+            status_code=400,
+            code="task_not_found",
+            message="Dataset task not found in project",
+            details={"project_id": project_id, "task_id": dataset_task_id},
+        )
+
     manifest = _manifest_from_dataset_version(active_dataset_version)
     if not isinstance(manifest, dict):
         raise api_error(
@@ -228,13 +253,23 @@ async def create_project_model(
         )
 
     existing = model_store.list_by_project(project_id)
-    task = manifest.get("tasks", {}).get("primary") if isinstance(manifest.get("tasks"), dict) else "classification"
-    model_name = _resolve_model_name(requested_name=payload.name, model_count=len(existing), task=str(task))
+    manifest_task = manifest.get("tasks", {}).get("primary") if isinstance(manifest.get("tasks"), dict) else "classification"
+    model_name = _resolve_model_name(requested_name=payload.name, model_count=len(existing), task=str(manifest_task))
+    dataset_label_mode: str | None = None
+    labels_block = active_dataset_version.get("labels")
+    if isinstance(labels_block, dict):
+        raw_label_mode = labels_block.get("label_mode")
+        if isinstance(raw_label_mode, str) and raw_label_mode in {"single_label", "multi_label"}:
+            dataset_label_mode = raw_label_mode
+    if dataset_task.kind == TaskKind.classification and dataset_label_mode is None and dataset_task.label_mode is not None:
+        dataset_label_mode = dataset_task.label_mode.value
 
     try:
         config = build_default_model_config(
             model_name=model_name,
             dataset_manifest_id=str(active_dataset_version.get("dataset_version_id")),
+            dataset_task_id=dataset_task_id,
+            dataset_label_mode=dataset_label_mode,
             manifest=manifest,
         )
         validate_model_config(config)
@@ -256,7 +291,7 @@ async def create_project_model(
             details={"reason": str(exc), "project_id": project_id},
         ) from exc
 
-    created = model_store.create(project_id=project_id, name=model_name, config_json=config)
+    created = model_store.create(project_id=project_id, name=model_name, config_json=config, task_id=dataset_task_id)
     return ProjectModelCreateResponse(id=created["id"], name=created["name"], config=created["config_json"])
 
 

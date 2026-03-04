@@ -34,6 +34,7 @@ class ProjectModelCreateResponse(BaseModel):
 
 class ProjectModelSummary(BaseModel):
     id: str
+    task_id: str | None = None
     name: str
     created_at: datetime
     updated_at: datetime
@@ -45,6 +46,7 @@ class ProjectModelSummary(BaseModel):
 class ProjectModelRecord(BaseModel):
     id: str
     project_id: str
+    task_id: str | None = None
     name: str
     config_json: dict[str, Any]
     created_at: datetime

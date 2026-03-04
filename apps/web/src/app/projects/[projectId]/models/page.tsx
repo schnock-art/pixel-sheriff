@@ -18,6 +18,12 @@ function formatDate(value: string): string {
   return parsed.toLocaleDateString();
 }
 
+function formatTaskLabel(task: string, taskId: string | null | undefined): string {
+  const normalized = (task || "classification").trim() || "classification";
+  const shortId = typeof taskId === "string" && taskId.trim() ? taskId.slice(0, 8) : "";
+  return shortId ? `${normalized} • ${shortId}` : normalized;
+}
+
 export default function ModelsPage({ params }: ModelsPageProps) {
   const router = useRouter();
   const projectId = useMemo(() => decodeURIComponent(params.projectId), [params.projectId]);
@@ -116,7 +122,7 @@ export default function ModelsPage({ params }: ModelsPageProps) {
                         {model.name}
                       </Link>
                     </td>
-                    <td>{model.task}</td>
+                    <td>{formatTaskLabel(model.task, model.task_id)}</td>
                     <td>{model.backbone_name}</td>
                     <td>{model.num_classes}</td>
                     <td>{formatDate(model.created_at)}</td>
@@ -130,4 +136,3 @@ export default function ModelsPage({ params }: ModelsPageProps) {
     </main>
   );
 }
-

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 
 import {
   ApiError,
@@ -10,12 +11,14 @@ import {
   listCategories,
   listDatasetVersionAssets,
   listDatasetVersions,
+  listTasks,
   previewDatasetVersion,
   resolveAssetUri,
   setActiveDatasetVersion,
   type AnnotationStatus,
   type DatasetVersionAssetsPayload,
   type DatasetVersionSummaryEnvelope,
+  type Task,
 } from "../../../../lib/api";
 import { useDatasetBrowserState } from "../../../../lib/hooks/useDatasetBrowserState";
 import { useDatasetDraftState } from "../../../../lib/hooks/useDatasetDraftState";
@@ -91,7 +94,13 @@ function summaryFromVersion(versionEnvelope: DatasetVersionSummaryEnvelope | nul
     if (typeof value === "number" && Number.isFinite(value)) classCounts[key] = value;
   }
 
-  const total = typeof stats.asset_count === "number" ? stats.asset_count : Object.values(splitCounts).reduce((sum, value) => sum + (typeof value === "number" ? value : 0), 0);
+  const total =
+    typeof stats.asset_count === "number"
+      ? stats.asset_count
+      : Object.values(splitCounts).reduce<number>(
+          (sum, value) => sum + (typeof value === "number" ? value : 0),
+          0,
+        );
   return {
     total,
     class_counts: classCounts,
@@ -313,10 +322,13 @@ function StatusMultiSelectDropdown({
 
 export default function DatasetPage({ params }: DatasetPageProps) {
   const projectId = useMemo(() => decodeURIComponent(params.projectId), [params.projectId]);
+  const searchParams = useSearchParams();
   const browser = useDatasetBrowserState();
   const draft = useDatasetDraftState();
 
   const [mode, setMode] = useState<DatasetMode>("browse");
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [versions, setVersions] = useState<DatasetVersionSummaryEnvelope[]>([]);
   const [activeDatasetVersionId, setActiveDatasetVersionIdState] = useState<string | null>(null);
   const [assetsPayload, setAssetsPayload] = useState<DatasetVersionAssetsPayload | null>(null);
@@ -329,11 +341,13 @@ export default function DatasetPage({ params }: DatasetPageProps) {
   const [categoryNameById, setCategoryNameById] = useState<Record<string, string>>({});
   const [folderPaths, setFolderPaths] = useState<string[]>([]);
   const [classFilter, setClassFilter] = useState<string>("all");
+  const requestedTaskId = searchParams.get("taskId");
 
   const selectedVersion = useMemo(
     () => versions.find((item) => versionIdOf(item) === browser.selectedDatasetVersionId) ?? null,
     [browser.selectedDatasetVersionId, versions],
   );
+  const selectedTask = useMemo(() => tasks.find((task) => task.id === selectedTaskId) ?? null, [tasks, selectedTaskId]);
 
   const savedSummary = useMemo(() => summaryFromVersion(selectedVersion), [selectedVersion]);
   const summarySource = mode === "draft" ? "draft" : "saved";
@@ -352,10 +366,57 @@ export default function DatasetPage({ params }: DatasetPageProps) {
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [categoryNameById, savedSummary]);
 
+  useEffect(() => {
+    let isMounted = true;
+    async function loadTasks() {
+      try {
+        const rows = await listTasks(projectId);
+        if (!isMounted) return;
+        setTasks(rows);
+      } catch {
+        if (!isMounted) return;
+        setTasks([]);
+      }
+    }
+    void loadTasks();
+    return () => {
+      isMounted = false;
+    };
+  }, [projectId]);
+
+  useEffect(() => {
+    if (tasks.length === 0) {
+      setSelectedTaskId(null);
+      return;
+    }
+    const validIds = new Set(tasks.map((task) => task.id));
+    const storageKey = `pixel-sheriff:project-active-task:v1:${projectId}`;
+    const storedTaskId = typeof window !== "undefined" ? window.localStorage.getItem(storageKey) : null;
+    const defaultTaskId = tasks.find((task) => task.is_default)?.id ?? tasks[0]?.id ?? null;
+    const nextTaskId =
+      [requestedTaskId, storedTaskId, defaultTaskId].find(
+        (value): value is string => Boolean(value && validIds.has(value)),
+      ) ?? null;
+    setSelectedTaskId((previous) => (previous === nextTaskId ? previous : nextTaskId));
+    if (nextTaskId && typeof window !== "undefined") {
+      window.localStorage.setItem(storageKey, nextTaskId);
+    }
+  }, [projectId, requestedTaskId, tasks]);
+
+  useEffect(() => {
+    if (!selectedTaskId || typeof window === "undefined") return;
+    const storageKey = `pixel-sheriff:project-active-task:v1:${projectId}`;
+    window.localStorage.setItem(storageKey, selectedTaskId);
+    const url = new URL(window.location.href);
+    if (url.searchParams.get("taskId") === selectedTaskId) return;
+    url.searchParams.set("taskId", selectedTaskId);
+    window.history.replaceState({}, "", url.toString());
+  }, [projectId, selectedTaskId]);
+
   async function loadVersions() {
     setIsLoadingVersions(true);
     try {
-      const payload = await listDatasetVersions(projectId);
+      const payload = await listDatasetVersions(projectId, selectedTaskId ?? undefined);
       const nextVersions = payload.items ?? [];
       setVersions(nextVersions);
       setActiveDatasetVersionIdState(payload.active_dataset_version_id ?? null);
@@ -374,13 +435,18 @@ export default function DatasetPage({ params }: DatasetPageProps) {
 
   useEffect(() => {
     void loadVersions();
-  }, [projectId]);
+  }, [projectId, selectedTaskId]);
 
   useEffect(() => {
     let isMounted = true;
     async function loadCategoryNames() {
+      if (!selectedTaskId) {
+        if (!isMounted) return;
+        setCategoryNameById({});
+        return;
+      }
       try {
-        const categories = await listCategories(projectId);
+        const categories = await listCategories(projectId, selectedTaskId);
         if (!isMounted) return;
         const mapping: Record<string, string> = {};
         for (const category of categories) {
@@ -398,7 +464,7 @@ export default function DatasetPage({ params }: DatasetPageProps) {
     return () => {
       isMounted = false;
     };
-  }, [projectId]);
+  }, [projectId, selectedTaskId]);
 
   useEffect(() => {
     let isMounted = true;
@@ -489,10 +555,14 @@ export default function DatasetPage({ params }: DatasetPageProps) {
   }
 
   async function handlePreview() {
+    if (!selectedTaskId) {
+      setErrorMessage("Select a task before previewing a dataset version.");
+      return;
+    }
     setIsPreviewing(true);
     try {
       const payload = await previewDatasetVersion(projectId, {
-        task: "classification",
+        task_id: selectedTaskId,
         selection: selectionPayload(),
         split: splitPayload(),
       });
@@ -513,11 +583,15 @@ export default function DatasetPage({ params }: DatasetPageProps) {
   }
 
   async function handleCreate() {
+    if (!selectedTaskId) {
+      setErrorMessage("Select a task before creating a dataset version.");
+      return;
+    }
     setIsCreating(true);
     try {
       const created = await createDatasetVersion(projectId, {
         name: draft.draftName.trim() || "Dataset version",
-        task: "classification",
+        task_id: selectedTaskId,
         selection: selectionPayload(),
         split: splitPayload(),
         set_active: true,
@@ -603,6 +677,23 @@ export default function DatasetPage({ params }: DatasetPageProps) {
       <section className="workspace-frame project-content-frame placeholder-page">
         <header className="project-section-header">
           <h2>Dataset</h2>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <label htmlFor="dataset-task-select">Task</label>
+            <select
+              id="dataset-task-select"
+              value={selectedTaskId ?? ""}
+              onChange={(event) => setSelectedTaskId(event.target.value || null)}
+              disabled={tasks.length === 0}
+            >
+              {tasks.length === 0 ? <option value="">No tasks</option> : null}
+              {tasks.map((task) => (
+                <option key={task.id} value={task.id}>
+                  {task.name} [{task.kind}]
+                </option>
+              ))}
+            </select>
+            {selectedTask ? <span style={{ fontSize: 12, opacity: 0.8 }}>{selectedTask.kind}</span> : null}
+          </div>
         </header>
 
         {errorMessage ? <p className="project-field-error">{errorMessage}</p> : null}
@@ -618,6 +709,9 @@ export default function DatasetPage({ params }: DatasetPageProps) {
                 const isActive = activeDatasetVersionId === id;
                 const isSelected = browser.selectedDatasetVersionId === id;
                 const name = typeof item.version?.name === "string" ? item.version.name : id;
+                const versionTaskId = typeof item.version?.task_id === "string" ? item.version.task_id : "";
+                const versionTaskName = tasks.find((task) => task.id === versionTaskId)?.name;
+                const versionTaskKind = typeof item.version?.task === "string" ? item.version.task : "";
                 return (
                   <button
                     key={id}
@@ -629,7 +723,10 @@ export default function DatasetPage({ params }: DatasetPageProps) {
                     }}
                     style={{ justifyContent: "space-between", display: "flex", alignItems: "center" }}
                   >
-                    <span>{name}</span>
+                    <span>
+                      {name}
+                      {versionTaskKind ? ` [${versionTaskName ?? versionTaskKind}]` : ""}
+                    </span>
                     <span>{isActive ? "active" : item.is_archived ? "archived" : ""}</span>
                   </button>
                 );

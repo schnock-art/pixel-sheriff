@@ -7,7 +7,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from sheriff_api.db.models import Annotation, Asset, Category, Project
+from sheriff_api.db.models import Annotation, Asset, Category, Project, TaskType
 from sheriff_api.services.exporter_coco import build_export_result
 from sheriff_api.services.storage import LocalStorage
 
@@ -63,6 +63,7 @@ async def prepare_export_inputs(
 def build_export_bundle(
     *,
     project: Project,
+    task_type: TaskType,
     selection_criteria: dict[str, Any],
     inputs: ExportInputs,
     storage: LocalStorage,
@@ -71,7 +72,7 @@ def build_export_bundle(
     manifest, _coco, content_hash, zip_bytes = build_export_result(
         project_id=project.id,
         project_name=project.name,
-        task_type=project.task_type,
+        task_type=task_type,
         selection_criteria=selection_criteria,
         categories=[
             {"id": category.id, "name": category.name, "display_order": category.display_order, "is_active": category.is_active}

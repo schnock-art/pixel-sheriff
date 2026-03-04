@@ -166,8 +166,17 @@ def _normalize_input(manifest: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _defaults_for_task(task: str, num_classes: int) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], str]:
+def _defaults_for_task(
+    task: str,
+    num_classes: int,
+    *,
+    classification_label_mode: str | None = None,
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], str]:
     if task == "classification":
+        if classification_label_mode == "multi_label":
+            loss = {"type": "classification_bce_with_logits"}
+        else:
+            loss = {"type": "classification_cross_entropy"}
         return (
             {
                 "family": "resnet_classifier",
@@ -177,7 +186,7 @@ def _defaults_for_task(task: str, num_classes: int) -> tuple[dict[str, Any], dic
                 "neck": {"type": "none"},
                 "head": {"type": "linear", "num_classes": num_classes},
             },
-            {"type": "classification_cross_entropy"},
+            loss,
             {
                 "name": "classification_logits",
                 "type": "task_output",
@@ -231,6 +240,8 @@ def build_default_model_config(
     *,
     model_name: str,
     dataset_manifest_id: str,
+    dataset_task_id: str | None,
+    dataset_label_mode: str | None,
     manifest: dict[str, Any],
 ) -> dict[str, Any]:
     tasks = manifest.get("tasks")
@@ -244,19 +255,32 @@ def build_default_model_config(
         raise ManifestConfigError("At least one class is required to build a model config")
 
     input_spec = _normalize_input(manifest)
-    architecture, loss, primary_output, primary_output_name = _defaults_for_task(task, num_classes)
+    classification_label_mode = None
+    if task == "classification" and dataset_label_mode in {"single_label", "multi_label"}:
+        classification_label_mode = dataset_label_mode
+    architecture, loss, primary_output, primary_output_name = _defaults_for_task(
+        task,
+        num_classes,
+        classification_label_mode=classification_label_mode,
+    )
+
+    source_dataset: dict[str, Any] = {
+        "manifest_id": dataset_manifest_id,
+        "task": task,
+        "num_classes": num_classes,
+        "class_order": class_order,
+        "class_names": class_names,
+    }
+    if isinstance(dataset_task_id, str) and dataset_task_id.strip():
+        source_dataset["task_id"] = dataset_task_id.strip()
+    if classification_label_mode is not None:
+        source_dataset["label_mode"] = classification_label_mode
 
     return {
         "schema_version": "1.0",
         "name": model_name,
         "created_at": _utc_now_iso(),
-        "source_dataset": {
-            "manifest_id": dataset_manifest_id,
-            "task": task,
-            "num_classes": num_classes,
-            "class_order": class_order,
-            "class_names": class_names,
-        },
+        "source_dataset": source_dataset,
         "input": input_spec,
         "architecture": architecture,
         "loss": loss,

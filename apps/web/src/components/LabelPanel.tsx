@@ -41,6 +41,9 @@ interface LabelPanelProps {
   pendingCount: number;
   onSaveLabelChanges: (changes: ManageLabelItem[]) => Promise<void>;
   isSavingLabelChanges: boolean;
+  onDeleteLabel: (labelId: string, labelName: string) => Promise<void>;
+  deletingLabelId: string | null;
+  labelsLocked: boolean;
   canSubmit: boolean;
   multiLabelEnabled: boolean;
   onToggleMultiLabel: () => void;
@@ -79,6 +82,9 @@ export function LabelPanel({
   pendingCount,
   onSaveLabelChanges,
   isSavingLabelChanges,
+  onDeleteLabel,
+  deletingLabelId,
+  labelsLocked,
   canSubmit,
   multiLabelEnabled,
   onToggleMultiLabel,
@@ -113,6 +119,11 @@ export function LabelPanel({
         .map((label) => ({ ...label })),
     );
   }, [allLabels, manageMode]);
+
+  useEffect(() => {
+    if (!labelsLocked) return;
+    setManageMode(false);
+  }, [labelsLocked]);
 
   async function handleCreateLabelSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -188,16 +199,21 @@ export function LabelPanel({
       </div>
 
       <div className="label-manage-toolbar">
-        <button type="button" className="ghost-button" onClick={() => setManageMode((value) => !value)}>
+        <button
+          type="button"
+          className="ghost-button"
+          onClick={() => setManageMode((value) => !value)}
+          disabled={labelsLocked}
+        >
           {manageMode ? "Close Manage" : "Manage Labels"}
         </button>
         <button
           type="button"
           className={multiLabelEnabled ? "ghost-button active-toggle" : "ghost-button"}
           onClick={onToggleMultiLabel}
-          disabled={!manageMode || taskModeLocked}
+          disabled={!manageMode || taskModeLocked || labelsLocked}
         >
-          Project Multi-label: {multiLabelEnabled ? "On" : "Off"}
+          Task Multi-label: {multiLabelEnabled ? "On" : "Off"}
         </button>
         {annotationMode !== "labels" ? (
           <button
@@ -211,11 +227,21 @@ export function LabelPanel({
           </button>
         ) : null}
         {manageMode ? (
-          <button type="button" className="primary-button" onClick={handleSaveLabelChanges} disabled={isSavingLabelChanges}>
+          <button
+            type="button"
+            className="primary-button"
+            onClick={handleSaveLabelChanges}
+            disabled={isSavingLabelChanges || labelsLocked}
+          >
             {isSavingLabelChanges ? "Saving..." : "Save Labels"}
           </button>
         ) : null}
       </div>
+      {labelsLocked ? (
+        <p className="label-lock-notice">
+          Labels are locked for this task because dataset versions already exist. Create a new task to evolve classes safely.
+        </p>
+      ) : null}
       {annotationMode === "labels" ? (
         <button
           type="button"
@@ -325,8 +351,9 @@ export function LabelPanel({
             maxLength={48}
             value={newLabelName}
             onChange={(event) => setNewLabelName(event.target.value)}
+            disabled={labelsLocked}
           />
-          <button type="submit" className="ghost-button" disabled={isCreatingLabel}>
+          <button type="submit" className="ghost-button" disabled={isCreatingLabel || labelsLocked}>
             {isCreatingLabel ? "Adding..." : "Add"}
           </button>
         </form>
@@ -340,23 +367,33 @@ export function LabelPanel({
                 className="label-manage-input"
                 value={label.name}
                 onChange={(event) => updateDraft(label.id, { name: event.target.value })}
+                disabled={labelsLocked}
               />
               <label className="label-manage-active">
                 <input
                   type="checkbox"
                   checked={label.isActive}
                   onChange={(event) => updateDraft(label.id, { isActive: event.target.checked })}
+                  disabled={labelsLocked}
                 />
                 Active
               </label>
               <div className="label-manage-order">
-                <button type="button" className="ghost-icon-button" onClick={() => moveDraft(index, -1)}>
+                <button type="button" className="ghost-icon-button" onClick={() => moveDraft(index, -1)} disabled={labelsLocked}>
                   ^
                 </button>
-                <button type="button" className="ghost-icon-button" onClick={() => moveDraft(index, 1)}>
+                <button type="button" className="ghost-icon-button" onClick={() => moveDraft(index, 1)} disabled={labelsLocked}>
                   v
                 </button>
               </div>
+              <button
+                type="button"
+                className="ghost-button danger-button"
+                onClick={() => void onDeleteLabel(label.id, label.name)}
+                disabled={labelsLocked || deletingLabelId === label.id}
+              >
+                {deletingLabelId === label.id ? "Deleting..." : "Delete"}
+              </button>
             </li>
           ))}
         </ul>
