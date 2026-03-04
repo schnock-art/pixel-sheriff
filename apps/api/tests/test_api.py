@@ -2222,7 +2222,7 @@ async def test_dataset_preview_filters_respect_exclude_statuses_and_exclude_fold
     preview = await client.post(
         f"/api/v1/projects/{project_id}/datasets/versions/preview",
         json={
-            "task": "classification",
+            "task_id": project["default_task_id"],
             "selection": {
                 "mode": "filter_snapshot",
                 "filters": {
@@ -2267,7 +2267,7 @@ async def test_dataset_preview_include_folder_empty_means_no_restriction(client:
     preview = await client.post(
         f"/api/v1/projects/{project_id}/datasets/versions/preview",
         json={
-            "task": "classification",
+            "task_id": project["default_task_id"],
             "selection": {
                 "mode": "filter_snapshot",
                 "filters": {
@@ -2302,7 +2302,7 @@ async def test_dataset_saved_split_membership_comes_from_stored_split_map(client
         f"/api/v1/projects/{project_id}/datasets/versions",
         json={
             "name": "v1",
-            "task": "classification",
+            "task_id": project["default_task_id"],
             "selection": {"mode": "filter_snapshot", "filters": {"include_labeled_only": False}},
             "split": {
                 "seed": 1337,
@@ -2320,7 +2320,7 @@ async def test_dataset_saved_split_membership_comes_from_stored_split_map(client
     for asset in uploaded_assets[:4]:
         response = await client.post(
             f"/api/v1/projects/{project_id}/annotations",
-            json={"asset_id": asset["id"], "status": "approved", "payload_json": {}},
+            json={"asset_id": asset["id"], "task_id": project["default_task_id"], "status": "approved", "payload_json": {}},
         )
         assert response.status_code == 200
 

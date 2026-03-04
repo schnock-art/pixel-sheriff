@@ -1,12 +1,23 @@
 SHELL := /bin/bash
-TEST_DATABASE_URL := postgresql+asyncpg://postgres:postgres@localhost:5433/pixel_sheriff_test
+-include .env
+export
+
+POSTGRES_PORT   ?= 5432
+REDIS_PORT      ?= 6379
+
+TEST_DATABASE_URL := postgresql+asyncpg://postgres:postgres@localhost:$(POSTGRES_PORT)/pixel_sheriff_test
 TEST_STORAGE_ROOT := /tmp/pixel_sheriff_test_data
+
+LOCAL_DB_NAME   := pixel_sheriff_local
+LOCAL_STORAGE   := ./data_local
+PYTHON          := apps/api/.venv/Scripts/python
 
 .PHONY: help up down logs ps \
 	build-web-api up-web-api \
 	build-trainer-base build-trainer build-trainer-bootstrap up-trainer \
 	build-all up-all \
-	test-web test-api-focused test-api-safe
+	test-web test-api-focused test-api-safe \
+	infra create-local-db dev-api dev-web
 
 help:
 	@echo "Common shortcuts:"
@@ -25,6 +36,12 @@ help:
 	@echo "  make test-web            # run web tests"
 	@echo "  make test-api-focused    # run focused API dataset tests"
 	@echo "  make test-api-safe       # same tests + explicit DB safety guard"
+	@echo ""
+	@echo "Local dev (no Docker for app services):"
+	@echo "  make infra               # start only db + redis"
+	@echo "  make create-local-db     # one-time: create isolated local dev DB"
+	@echo "  make dev-api             # run API with hot reload (uses pixel_sheriff_local)"
+	@echo "  make dev-web             # run web with hot reload"
 
 up:
 	docker compose up -d
@@ -67,7 +84,7 @@ test-web:
 	cd apps/web && npm test -- tests/datasetPage.test.js
 
 test-api-focused:
-	cd apps/api && DATABASE_URL=$(TEST_DATABASE_URL) STORAGE_ROOT=$(TEST_STORAGE_ROOT) python3 -m pytest -s tests/test_api.py -k "dataset_preview_filters_respect_exclude_statuses_and_exclude_folder_precedence or dataset_preview_include_folder_empty_means_no_restriction or dataset_saved_split_membership_comes_from_stored_split_map"
+	DATABASE_URL=$(TEST_DATABASE_URL) STORAGE_ROOT=$(TEST_STORAGE_ROOT) $(PYTHON) -m pytest -s apps/api/tests/test_api.py -k "dataset_preview_filters_respect_exclude_statuses_and_exclude_folder_precedence or dataset_preview_include_folder_empty_means_no_restriction or dataset_saved_split_membership_comes_from_stored_split_map"
 
 test-api-safe:
 	@echo "DATABASE_URL=$(TEST_DATABASE_URL)"
@@ -76,4 +93,22 @@ test-api-safe:
 		echo "Refusing to run tests against main database URL: $(TEST_DATABASE_URL)"; \
 		exit 1; \
 	fi
-	cd apps/api && DATABASE_URL=$(TEST_DATABASE_URL) STORAGE_ROOT=$(TEST_STORAGE_ROOT) python3 -m pytest -s tests/test_api.py -k "dataset_preview_filters_respect_exclude_statuses_and_exclude_folder_precedence or dataset_preview_include_folder_empty_means_no_restriction or dataset_saved_split_membership_comes_from_stored_split_map"
+	DATABASE_URL=$(TEST_DATABASE_URL) STORAGE_ROOT=$(TEST_STORAGE_ROOT) $(PYTHON) -m pytest -s apps/api/tests/test_api.py -k "dataset_preview_filters_respect_exclude_statuses_and_exclude_folder_precedence or dataset_preview_include_folder_empty_means_no_restriction or dataset_saved_split_membership_comes_from_stored_split_map"
+
+infra:
+	docker compose up -d db redis
+
+create-local-db:
+	docker compose exec db psql -U postgres -c "CREATE DATABASE $(LOCAL_DB_NAME)" || true
+
+dev-api:
+	DB_HOST=localhost DB_PORT=$(POSTGRES_PORT) DB_NAME=$(LOCAL_DB_NAME) \
+	STORAGE_ROOT=$(LOCAL_STORAGE) \
+	REDIS_URL=redis://localhost:$(REDIS_PORT)/0 \
+	$(PYTHON) -m uvicorn sheriff_api.main:app --reload --port 8000
+
+dev-web:
+	cd apps/web && \
+	NEXT_PUBLIC_API_BASE_URL=http://localhost:8000 \
+	INTERNAL_API_BASE_URL=http://localhost:8000 \
+	npm run dev
