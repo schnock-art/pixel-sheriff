@@ -151,15 +151,19 @@ function FolderTreeRow({
   return (
     <div>
       <div style={{ display: "flex", alignItems: "center", gap: 6, paddingLeft: depth * 12 }}>
-        <button
-          type="button"
-          className="ghost-button"
-          style={{ width: 22, height: 22, padding: 0 }}
-          onClick={() => onToggleCollapsed(node.path)}
-          aria-label={isCollapsed ? "Expand folder" : "Collapse folder"}
-        >
-          {isCollapsed ? ">" : "v"}
-        </button>
+        {node.children.length > 0 ? (
+          <button
+            type="button"
+            className="ghost-button"
+            style={{ width: 22, height: 22, padding: 0 }}
+            onClick={() => onToggleCollapsed(node.path)}
+            aria-label={isCollapsed ? "Expand folder" : "Collapse folder"}
+          >
+            {isCollapsed ? ">" : "v"}
+          </button>
+        ) : (
+          <span style={{ width: 22, display: "inline-block", flexShrink: 0 }} />
+        )}
         <input
           ref={checkboxRef}
           type="checkbox"
@@ -203,8 +207,20 @@ function FolderMultiSelectDropdown({
 }) {
   const [open, setOpen] = useState(false);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  const containerRef = useRef<HTMLDivElement>(null);
   const tree = useMemo(() => buildFolderTree(folderPaths), [folderPaths]);
   const descendantsByPath = useMemo(() => buildDescendantsByPath(folderPaths), [folderPaths]);
+
+  useEffect(() => {
+    if (!open) return;
+    function handleClickOutside(event: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [open]);
 
   function toggleChecked(path: string, checked: boolean) {
     const next = toggleFolderPathSelection({
@@ -219,7 +235,7 @@ function FolderMultiSelectDropdown({
   }
 
   return (
-    <div style={{ position: "relative" }}>
+    <div ref={containerRef} style={{ position: "relative" }}>
       <button type="button" className="ghost-button" onClick={() => setOpen((value) => !value)}>
         {label}: {selectedPaths.length} selected
       </button>
@@ -273,8 +289,21 @@ function StatusMultiSelectDropdown({
   onOtherSelectedChange: (value: AnnotationStatus[]) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function handleClickOutside(event: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [open]);
+
   return (
-    <div style={{ position: "relative" }}>
+    <div ref={containerRef} style={{ position: "relative" }}>
       <button type="button" className="ghost-button" onClick={() => setOpen((value) => !value)}>
         {label}: {selected.length === 0 ? "none" : selected.join(", ")}
       </button>
