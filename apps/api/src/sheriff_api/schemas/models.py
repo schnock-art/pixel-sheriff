@@ -20,6 +20,7 @@ class ModelRead(BaseModel):
 
 class ProjectModelCreate(BaseModel):
     name: str | None = None
+    dataset_version_id: str | None = None
 
 
 class ProjectModelUpdate(BaseModel):

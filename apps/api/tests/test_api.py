@@ -2343,3 +2343,108 @@ async def test_dataset_saved_split_membership_comes_from_stored_split_map(client
     assert train_assets.json()["total"] == split_counts["train"]
     assert val_assets.json()["total"] == split_counts["val"]
     assert test_assets.json()["total"] == split_counts["test"]
+
+
+async def _create_detection_project_with_dataset_version(
+    client: AsyncClient, *, project_name: str
+) -> tuple[str, str, str]:
+    """Return (project_id, task_id, dataset_version_id) for a bbox project with one annotated asset."""
+    project = (await client.post("/api/v1/projects", json={"name": project_name, "task_type": "bbox"})).json()
+    project_id = project["id"]
+    task_id = project["default_task_id"]
+
+    cat_resp = await client.post(
+        f"/api/v1/projects/{project_id}/categories",
+        json={"name": "boat", "task_id": task_id},
+    )
+    assert cat_resp.status_code == 200
+    category = cat_resp.json()
+
+    upload = await client.post(
+        f"/api/v1/projects/{project_id}/assets/upload",
+        files={"file": ("sample.jpg", b"fake-image-bytes", "image/jpeg")},
+    )
+    assert upload.status_code == 200
+    asset = upload.json()
+
+    annotation = await client.post(
+        f"/api/v1/projects/{project_id}/annotations",
+        json={
+            "asset_id": asset["id"],
+            "task_id": task_id,
+            "status": "approved",
+            "payload_json": {
+                "version": "2.0",
+                "classification": {"category_ids": [category["id"]], "primary_category_id": category["id"]},
+                "image_basis": {"width": 100, "height": 80},
+                "objects": [
+                    {"id": "bbox-1", "kind": "bbox", "category_id": category["id"], "bbox": [10, 10, 20, 15]},
+                ],
+            },
+        },
+    )
+    assert annotation.status_code == 200
+
+    version_resp = await client.post(
+        f"/api/v1/projects/{project_id}/datasets/versions",
+        json={
+            "name": "v1",
+            "task_id": task_id,
+            "selection": {"mode": "filter_snapshot", "filters": {}},
+            "split": {
+                "seed": 42,
+                "ratios": {"train": 1.0, "val": 0.0, "test": 0.0},
+                "stratify": {"enabled": False, "by": "label_primary"},
+            },
+        },
+    )
+    assert version_resp.status_code == 200
+    dataset_version_id = version_resp.json()["version"]["dataset_version_id"]
+
+    return project_id, task_id, dataset_version_id
+
+
+@pytest.mark.asyncio
+async def test_model_create_with_explicit_dataset_version_id(client: AsyncClient) -> None:
+    project_id, _task_id, dataset_version_id = await _create_detection_project_with_dataset_version(
+        client, project_name="model-dvid-explicit"
+    )
+
+    resp = await client.post(
+        f"/api/v1/projects/{project_id}/models",
+        json={"dataset_version_id": dataset_version_id},
+    )
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["id"]
+    # The config's source_dataset.manifest_id must reference the dataset version we passed in.
+    assert payload["config"]["source_dataset"]["manifest_id"] == dataset_version_id
+    assert payload["config"]["source_dataset"]["task"] == "detection"
+
+
+@pytest.mark.asyncio
+async def test_model_create_without_dataset_version_id_uses_active_version(client: AsyncClient) -> None:
+    project_id, _task_id, dataset_version_id = await _create_detection_project_with_dataset_version(
+        client, project_name="model-dvid-backwards-compat"
+    )
+
+    # No dataset_version_id provided — should fall back to the active/latest version.
+    resp = await client.post(f"/api/v1/projects/{project_id}/models", json={})
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["id"]
+    assert payload["config"]["source_dataset"]["manifest_id"] == dataset_version_id
+
+
+@pytest.mark.asyncio
+async def test_model_create_with_unknown_dataset_version_id_returns_404(client: AsyncClient) -> None:
+    project_id, _task_id, _dataset_version_id = await _create_detection_project_with_dataset_version(
+        client, project_name="model-dvid-not-found"
+    )
+
+    resp = await client.post(
+        f"/api/v1/projects/{project_id}/models",
+        json={"dataset_version_id": str(uuid.uuid4())},
+    )
+    assert resp.status_code == 404
+    assert resp.json()["error"]["code"] == "dataset_version_not_found"

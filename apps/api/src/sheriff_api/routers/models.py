@@ -214,7 +214,19 @@ async def create_project_model(
 ) -> ProjectModelCreateResponse:
     await _require_project(db, project_id)
 
-    active_dataset_version = _active_or_latest_dataset_version(project_id)
+    if payload.dataset_version_id is not None:
+        loaded = dataset_store.get_version(project_id, payload.dataset_version_id)
+        if loaded is None:
+            raise api_error(
+                status_code=404,
+                code="dataset_version_not_found",
+                message="Dataset version not found in project",
+                details={"project_id": project_id, "dataset_version_id": payload.dataset_version_id},
+            )
+        active_dataset_version = loaded["version"]
+    else:
+        active_dataset_version = _active_or_latest_dataset_version(project_id)
+
     if active_dataset_version is None:
         raise api_error(
             status_code=400,
