@@ -126,6 +126,7 @@ test("setArchitectureFamily regenerates architecture, head, loss, and outputs fo
   assert.deepEqual(next.outputs, [{ kind: "detection" }]);
   assert.equal(next.architecture.head.score_threshold, 0.3);
   assert.equal(next.architecture.head.nms_threshold, 0.4);
+  assert.equal(next.architecture.family, "retinanet");
 });
 
 test("setArchitectureFamily keeps existing backbone when it is in allowed_backbones", () => {
@@ -134,6 +135,7 @@ test("setArchitectureFamily keeps existing backbone when it is in allowed_backbo
   };
   const next = setArchitectureFamily(config, "retinanet", FAMILIES_METADATA);
   assert.equal(next.architecture.backbone.name, "resnet101");
+  assert.equal(next.architecture.family, "retinanet");
 });
 
 test("setArchitectureFamily resets backbone to first allowed when current backbone is not in allowed_backbones", () => {
@@ -142,6 +144,7 @@ test("setArchitectureFamily resets backbone to first allowed when current backbo
   };
   const next = setArchitectureFamily(config, "retinanet", FAMILIES_METADATA);
   assert.equal(next.architecture.backbone.name, "resnet50");
+  assert.equal(next.architecture.family, "retinanet");
 });
 
 test("setArchitectureFamily does not mutate the input config", () => {

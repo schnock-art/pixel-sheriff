@@ -164,12 +164,14 @@ function setArchitectureFamily(config, familyName, familiesMetadata) {
   if (defaults) {
     const defaultArch = stableClone(defaults.architecture);
     defaultArch.backbone = { name: newBackboneName };
+    defaultArch.family = familyName;
     nextConfig.architecture = defaultArch;
     nextConfig.loss = stableClone(defaults.loss);
     nextConfig.outputs = stableClone(defaults.outputs);
   } else {
     const architecture = isPlainObject(nextConfig.architecture) ? nextConfig.architecture : {};
     architecture.backbone = { name: newBackboneName };
+    architecture.family = familyName;
     nextConfig.architecture = architecture;
   }
 
