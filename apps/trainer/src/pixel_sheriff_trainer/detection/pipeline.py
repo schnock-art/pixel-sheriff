@@ -20,7 +20,7 @@ from pixel_sheriff_trainer.utils.time import utc_now_iso
 
 
 class DetectionPipeline(TaskPipeline):
-    task_kind = "bbox"
+    task_kind = "detection"
 
     def build_loaders(self, job: Any, workdir: Path) -> TaskLoaders:
         from pixel_sheriff_trainer.io.storage import ExperimentStorage
@@ -128,7 +128,7 @@ class DetectionPipeline(TaskPipeline):
         evaluation: DetectionEvaluation = eval_result.raw
         payload = {
             "schema_version": "1",
-            "task": "bbox",
+            "task": "detection",
             "computed_at": utc_now_iso(),
             "split": "val",
             "classes": {
@@ -213,8 +213,8 @@ class DetectionPipeline(TaskPipeline):
             preprocess=preprocess,
             class_order=loaders.class_order,
             class_names=loaders.class_names,
-            extra_metadata={"task": "bbox"},
+            extra_metadata={"task": "detection"},
         )
 
 
-PIPELINE_REGISTRY["bbox"] = DetectionPipeline()
+PIPELINE_REGISTRY["detection"] = DetectionPipeline()
