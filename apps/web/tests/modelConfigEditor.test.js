@@ -8,7 +8,31 @@ const {
   setEmbeddingAuxEnabled,
   setEmbeddingProjection,
   setSquareInputSize,
+  setSourceDataset,
+  setArchitectureFamily,
+  setBackbone,
 } = require("../src/lib/workspace/modelConfigEditor.js");
+
+const FAMILIES_METADATA = {
+  schema_version: "1",
+  families: [
+    {
+      name: "deeplabv3",
+      task: "segmentation",
+      allowed_backbones: ["resnet50", "resnet101"],
+    },
+    {
+      name: "resnet_classifier",
+      task: "classification",
+      allowed_backbones: ["resnet18", "resnet34", "resnet50", "resnet101", "mobilenet_v3_large", "mobilenet_v3_small"],
+    },
+    {
+      name: "retinanet",
+      task: "detection",
+      allowed_backbones: ["resnet50", "resnet101"],
+    },
+  ],
+};
 
 test("isModelConfigDirty compares deeply with stable object key ordering", () => {
   const saved = {
@@ -47,6 +71,109 @@ test("setEmbeddingProjection updates embedding output dimension and normalizatio
   const next = setEmbeddingProjection(base, 512, "none");
   assert.equal(next.outputs.aux[0].projection.out_dim, 512);
   assert.equal(next.outputs.aux[0].projection.normalize, "none");
+});
+
+// --- setSourceDataset ---
+
+test("setSourceDataset patches manifest_id, num_classes, class_order, class_names, and head.num_classes", () => {
+  const config = {
+    source_dataset: { manifest_id: "old-id", num_classes: 1 },
+    architecture: { backbone: { name: "resnet50" }, head: { num_classes: 1, dropout: 0.5 } },
+  };
+  const summary = {
+    id: "ds-123",
+    manifest_id: "manifest-456",
+    num_classes: 5,
+    class_order: ["cat", "dog", "bird", "fish", "rabbit"],
+    class_names: { cat: "Cat", dog: "Dog", bird: "Bird", fish: "Fish", rabbit: "Rabbit" },
+  };
+  const next = setSourceDataset(config, summary);
+  assert.equal(next.source_dataset.manifest_id, "manifest-456");
+  assert.equal(next.source_dataset.num_classes, 5);
+  assert.deepEqual(next.source_dataset.class_order, summary.class_order);
+  assert.deepEqual(next.source_dataset.class_names, summary.class_names);
+  assert.equal(next.architecture.head.num_classes, 5);
+});
+
+test("setSourceDataset falls back to id when manifest_id is absent", () => {
+  const config = { source_dataset: {}, architecture: { head: { num_classes: 1 } } };
+  const summary = { id: "ds-999", num_classes: 3, class_order: [], class_names: {} };
+  const next = setSourceDataset(config, summary);
+  assert.equal(next.source_dataset.manifest_id, "ds-999");
+});
+
+test("setSourceDataset does not mutate the input config", () => {
+  const config = {
+    source_dataset: { manifest_id: "orig", num_classes: 2 },
+    architecture: { head: { num_classes: 2 } },
+  };
+  const frozen = JSON.parse(JSON.stringify(config));
+  setSourceDataset(config, { id: "new", num_classes: 10, class_order: [], class_names: {} });
+  assert.deepEqual(config, frozen);
+});
+
+// --- setArchitectureFamily ---
+
+test("setArchitectureFamily regenerates architecture, head, loss, and outputs for the new family", () => {
+  const config = {
+    source_dataset: { manifest_id: "ds-1", num_classes: 3 },
+    architecture: { backbone: { name: "resnet50" }, head: { num_classes: 3 } },
+    loss: { name: "old_loss" },
+    outputs: [{ kind: "old" }],
+  };
+  const next = setArchitectureFamily(config, "retinanet", FAMILIES_METADATA);
+  assert.equal(next.loss.name, "focal_loss");
+  assert.deepEqual(next.outputs, [{ kind: "detection" }]);
+  assert.equal(next.architecture.head.score_threshold, 0.3);
+  assert.equal(next.architecture.head.nms_threshold, 0.4);
+});
+
+test("setArchitectureFamily keeps existing backbone when it is in allowed_backbones", () => {
+  const config = {
+    architecture: { backbone: { name: "resnet101" }, head: { num_classes: 2 } },
+  };
+  const next = setArchitectureFamily(config, "retinanet", FAMILIES_METADATA);
+  assert.equal(next.architecture.backbone.name, "resnet101");
+});
+
+test("setArchitectureFamily resets backbone to first allowed when current backbone is not in allowed_backbones", () => {
+  const config = {
+    architecture: { backbone: { name: "mobilenet_v3_large" }, head: { num_classes: 2 } },
+  };
+  const next = setArchitectureFamily(config, "retinanet", FAMILIES_METADATA);
+  assert.equal(next.architecture.backbone.name, "resnet50");
+});
+
+test("setArchitectureFamily does not mutate the input config", () => {
+  const config = {
+    architecture: { backbone: { name: "resnet50" }, head: { num_classes: 2 } },
+    loss: { name: "cross_entropy" },
+    outputs: [{ kind: "classification" }],
+  };
+  const frozen = JSON.parse(JSON.stringify(config));
+  setArchitectureFamily(config, "retinanet", FAMILIES_METADATA);
+  assert.deepEqual(config, frozen);
+});
+
+// --- setBackbone ---
+
+test("setBackbone patches backbone.name and preserves other backbone fields", () => {
+  const config = {
+    architecture: { backbone: { name: "resnet50", pretrained: true }, head: { num_classes: 5 } },
+  };
+  const next = setBackbone(config, "resnet101");
+  assert.equal(next.architecture.backbone.name, "resnet101");
+  assert.equal(next.architecture.backbone.pretrained, true);
+  assert.equal(next.architecture.head.num_classes, 5);
+});
+
+test("setBackbone does not mutate the input config", () => {
+  const config = {
+    architecture: { backbone: { name: "resnet50" }, head: { num_classes: 2 } },
+  };
+  const frozen = JSON.parse(JSON.stringify(config));
+  setBackbone(config, "resnet18");
+  assert.deepEqual(config, frozen);
 });
 
 test("setDynamicShapeFlags derives dynamic_shapes.enabled from batch/height_width", () => {

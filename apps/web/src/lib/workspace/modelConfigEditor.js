@@ -104,6 +104,86 @@ function setSquareInputSize(config, size) {
   return nextConfig;
 }
 
+const _FAMILY_DEFAULTS = {
+  resnet_classifier: {
+    architecture: {
+      backbone: { name: "resnet50" },
+      head: { num_classes: 2, dropout: 0.5 },
+    },
+    loss: { name: "cross_entropy" },
+    outputs: [{ kind: "classification", top_k: [1, 5] }],
+  },
+  retinanet: {
+    architecture: {
+      backbone: { name: "resnet50" },
+      head: { num_classes: 2, score_threshold: 0.3, nms_threshold: 0.4 },
+    },
+    loss: { name: "focal_loss" },
+    outputs: [{ kind: "detection" }],
+  },
+  deeplabv3: {
+    architecture: {
+      backbone: { name: "resnet50" },
+      head: { num_classes: 2 },
+    },
+    loss: { name: "cross_entropy" },
+    outputs: [{ kind: "segmentation" }],
+  },
+};
+
+function setSourceDataset(config, datasetVersionSummary) {
+  const nextConfig = cloneModelConfig(config);
+  const sourceDataset = isPlainObject(nextConfig.source_dataset) ? nextConfig.source_dataset : {};
+  const manifestId = datasetVersionSummary.manifest_id || datasetVersionSummary.id;
+  sourceDataset.manifest_id = manifestId;
+  sourceDataset.num_classes = datasetVersionSummary.num_classes;
+  sourceDataset.class_order = Array.isArray(datasetVersionSummary.class_order) ? datasetVersionSummary.class_order.slice() : [];
+  sourceDataset.class_names = isPlainObject(datasetVersionSummary.class_names) ? { ...datasetVersionSummary.class_names } : {};
+  nextConfig.source_dataset = sourceDataset;
+  const architecture = isPlainObject(nextConfig.architecture) ? nextConfig.architecture : {};
+  const head = isPlainObject(architecture.head) ? architecture.head : {};
+  head.num_classes = datasetVersionSummary.num_classes;
+  architecture.head = head;
+  nextConfig.architecture = architecture;
+  return nextConfig;
+}
+
+function setArchitectureFamily(config, familyName, familiesMetadata) {
+  const families = Array.isArray(familiesMetadata?.families) ? familiesMetadata.families : [];
+  const family = families.find((f) => f.name === familyName);
+  const allowedBackbones = Array.isArray(family?.allowed_backbones) ? family.allowed_backbones : [];
+
+  const currentBackboneName = config?.architecture?.backbone?.name;
+  const newBackboneName = allowedBackbones.includes(currentBackboneName)
+    ? currentBackboneName
+    : allowedBackbones[0] || "resnet50";
+
+  const defaults = _FAMILY_DEFAULTS[familyName];
+  const nextConfig = cloneModelConfig(config);
+
+  if (defaults) {
+    const defaultArch = stableClone(defaults.architecture);
+    defaultArch.backbone = { name: newBackboneName };
+    nextConfig.architecture = defaultArch;
+    nextConfig.loss = stableClone(defaults.loss);
+    nextConfig.outputs = stableClone(defaults.outputs);
+  } else {
+    const architecture = isPlainObject(nextConfig.architecture) ? nextConfig.architecture : {};
+    architecture.backbone = { name: newBackboneName };
+    nextConfig.architecture = architecture;
+  }
+
+  return nextConfig;
+}
+
+function setBackbone(config, backboneName) {
+  const nextConfig = cloneModelConfig(config);
+  const architecture = isPlainObject(nextConfig.architecture) ? nextConfig.architecture : {};
+  architecture.backbone = isPlainObject(architecture.backbone) ? { ...architecture.backbone, name: backboneName } : { name: backboneName };
+  nextConfig.architecture = architecture;
+  return nextConfig;
+}
+
 function setDynamicShapeFlags(config, batch, heightWidth) {
   const nextConfig = cloneModelConfig(config);
   const exportSpec = isPlainObject(nextConfig.export) ? nextConfig.export : {};
@@ -127,4 +207,7 @@ module.exports = {
   setEmbeddingProjection,
   setSquareInputSize,
   setDynamicShapeFlags,
+  setSourceDataset,
+  setArchitectureFamily,
+  setBackbone,
 };
