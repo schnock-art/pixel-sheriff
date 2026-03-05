@@ -52,14 +52,11 @@ export default function NewModelPage({ params }: NewModelPageProps) {
         }).filter((item) => item.id);
         setDatasetVersionOptions(rows);
 
-        // Derive initial task from first version
-        const firstTask = rows[0]?.task ?? "";
-        setSelectedTask(firstTask);
-
-        // Set initial selected version (active or first matching task)
+        // Set initial selected version (active or first available)
         const activeId = data.active_dataset_version_id ?? "";
         const activeVersion = rows.find((r) => r.id === activeId);
-        const defaultVersion = activeVersion ?? rows.find((r) => r.task === firstTask) ?? rows[0];
+        const defaultVersion = activeVersion ?? rows[0];
+        setSelectedTask(defaultVersion?.task ?? "");
         setSelectedVersionId(defaultVersion?.id ?? "");
       } catch (error) {
         if (!isMounted) return;
