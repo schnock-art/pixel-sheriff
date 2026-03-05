@@ -9,17 +9,22 @@ import {
   ApiError,
   createExperiment,
   getProjectModel,
+  listDatasetVersions,
   listExperiments,
   updateProjectModel,
   type ProjectExperimentSummary,
 } from "../../../../../lib/api";
+import familiesMetadata from "../../../../../lib/metadata/families.v1.json";
 import { validateModelConfigDraft } from "../../../../../lib/schema/validator";
 import {
   cloneModelConfig,
   isModelConfigDirty,
+  setArchitectureFamily,
+  setBackbone,
   setDynamicShapeFlags,
   setEmbeddingAuxEnabled,
   setEmbeddingProjection,
+  setSourceDataset,
   setSquareInputSize,
 } from "../../../../../lib/workspace/modelConfigEditor";
 
@@ -32,8 +37,20 @@ interface ModelDetailPageProps {
 
 type ModelConfig = Record<string, unknown>;
 
+interface DatasetVersionRecord {
+  dataset_version_id: string;
+  task_id: string;
+  task: string;
+  name: string;
+  labels?: {
+    label_schema?: {
+      class_order?: string[];
+      classes?: Array<{ id: string; name: string }>;
+    };
+  };
+}
+
 const INPUT_SIZE_PRESETS = [224, 320, 384, 512, 640] as const;
-const BACKBONE_OPTIONS = ["resnet18", "resnet34", "resnet50", "resnet101", "mobilenet_v3_large", "mobilenet_v3_small"] as const;
 const RESIZE_POLICY_OPTIONS = ["letterbox", "stretch", "longest_side_pad"] as const;
 const NORMALIZATION_OPTIONS = ["imagenet", "none", "custom"] as const;
 const EMBEDDING_DIM_OPTIONS = [128, 256, 512] as const;
@@ -78,6 +95,7 @@ export default function ModelDetailPage({ params }: ModelDetailPageProps) {
   const [isLaunchingTrain, setIsLaunchingTrain] = useState(false);
   const [showTrainChoiceModal, setShowTrainChoiceModal] = useState(false);
   const [latestExperiment, setLatestExperiment] = useState<ProjectExperimentSummary | null>(null);
+  const [allDatasetVersions, setAllDatasetVersions] = useState<DatasetVersionRecord[]>([]);
 
   const validation = useMemo(() => validateModelConfigDraft(draftConfig ?? {}), [draftConfig]);
   const isValid = validation.isValid;
@@ -123,6 +141,27 @@ export default function ModelDetailPage({ params }: ModelDetailPageProps) {
     };
   }, [modelId, projectId]);
 
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadDatasetVersions() {
+      try {
+        const listed = await listDatasetVersions(projectId);
+        if (!isMounted) return;
+        const versions = listed.items.map((envelope) => envelope.version as unknown as DatasetVersionRecord);
+        setAllDatasetVersions(versions);
+      } catch {
+        // non-fatal — selectors will just be empty
+      }
+    }
+
+    void loadDatasetVersions();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [projectId]);
+
   const input = asRecord(draftConfig?.input);
   const inputSize = Array.isArray(input.input_size) ? input.input_size : [];
   const inputSizeWidth = typeof inputSize[0] === "number" ? Math.floor(inputSize[0]) : 0;
@@ -142,6 +181,26 @@ export default function ModelDetailPage({ params }: ModelDetailPageProps) {
   const backbone = asRecord(architecture.backbone);
   const backboneName = typeof backbone.name === "string" ? backbone.name : "resnet18";
   const pretrained = Boolean(backbone.pretrained);
+
+  // Step 1 derived values
+  const currentFamilyName = typeof architecture.family === "string" ? architecture.family : null;
+  const currentManifestId =
+    typeof asRecord(draftConfig?.source_dataset).manifest_id === "string"
+      ? (asRecord(draftConfig?.source_dataset).manifest_id as string)
+      : null;
+  const currentVersionFromManifest = allDatasetVersions.find((v) => v.dataset_version_id === currentManifestId) ?? null;
+  const currentFamilyFromMeta = familiesMetadata.families.find((f) => f.name === currentFamilyName) ?? null;
+  const currentTask =
+    currentVersionFromManifest?.task ?? currentFamilyFromMeta?.task ?? null;
+
+  const uniqueTasks = Array.from(new Set(allDatasetVersions.map((v) => v.task))).filter(Boolean);
+  const familiesForTask = currentTask
+    ? familiesMetadata.families.filter((f) => f.task === currentTask)
+    : familiesMetadata.families;
+  const versionsForTask = currentTask
+    ? allDatasetVersions.filter((v) => v.task === currentTask)
+    : allDatasetVersions;
+  const allowedBackbones = currentFamilyFromMeta?.allowed_backbones ?? [];
 
   const outputs = asRecord(draftConfig?.outputs);
   const auxOutputs = Array.isArray(outputs.aux) ? outputs.aux : [];
@@ -244,6 +303,114 @@ export default function ModelDetailPage({ params }: ModelDetailPageProps) {
   const editorContent = (
     <div className="model-builder-form-grid">
       <section className="model-builder-step">
+        <h4>Step 1: Source</h4>
+        <label className="project-field">
+          <span>Task</span>
+          <select
+            value={currentTask ?? ""}
+            onChange={(event) => {
+              const nextTask = event.target.value;
+              const nextVersions = allDatasetVersions.filter((v) => v.task === nextTask);
+              const nextVersion = nextVersions[0] ?? null;
+              const nextFamilies = familiesMetadata.families.filter((f) => f.task === nextTask);
+              const nextFamily = nextFamilies[0] ?? null;
+              setDraftConfig((current) => {
+                if (!current) return current;
+                let next = cloneModelConfig(current);
+                if (nextVersion) {
+                  const classOrder = nextVersion.labels?.label_schema?.class_order ?? [];
+                  const classesArr = nextVersion.labels?.label_schema?.classes ?? [];
+                  const classNames: Record<string, string> = {};
+                  for (const cls of classesArr) classNames[cls.id] = cls.name;
+                  next = setSourceDataset(next, {
+                    id: nextVersion.dataset_version_id,
+                    manifest_id: nextVersion.dataset_version_id,
+                    num_classes: classOrder.length,
+                    class_order: classOrder,
+                    class_names: classNames,
+                  }) as ModelConfig;
+                }
+                if (nextFamily) {
+                  next = setArchitectureFamily(next, nextFamily.name, familiesMetadata) as ModelConfig;
+                }
+                return next;
+              });
+            }}
+          >
+            {uniqueTasks.length === 0 ? (
+              <option value="">No dataset versions</option>
+            ) : (
+              uniqueTasks.map((task) => (
+                <option key={task} value={task}>
+                  {task}
+                </option>
+              ))
+            )}
+          </select>
+        </label>
+        <label className="project-field">
+          <span>Dataset Version</span>
+          <select
+            value={currentManifestId ?? ""}
+            onChange={(event) => {
+              const versionId = event.target.value;
+              const version = allDatasetVersions.find((v) => v.dataset_version_id === versionId);
+              if (!version) return;
+              const classOrder = version.labels?.label_schema?.class_order ?? [];
+              const classesArr = version.labels?.label_schema?.classes ?? [];
+              const classNames: Record<string, string> = {};
+              for (const cls of classesArr) classNames[cls.id] = cls.name;
+              setDraftConfig((current) =>
+                current
+                  ? (setSourceDataset(current, {
+                      id: version.dataset_version_id,
+                      manifest_id: version.dataset_version_id,
+                      num_classes: classOrder.length,
+                      class_order: classOrder,
+                      class_names: classNames,
+                    }) as ModelConfig)
+                  : current,
+              );
+            }}
+          >
+            {versionsForTask.length === 0 ? (
+              <option value="">No versions for this task</option>
+            ) : (
+              versionsForTask.map((v) => (
+                <option key={v.dataset_version_id} value={v.dataset_version_id}>
+                  {v.name} ({v.task})
+                </option>
+              ))
+            )}
+          </select>
+        </label>
+        <label className="project-field">
+          <span>Family</span>
+          <select
+            value={currentFamilyName ?? ""}
+            onChange={(event) => {
+              const nextFamilyName = event.target.value;
+              setDraftConfig((current) =>
+                current
+                  ? (setArchitectureFamily(current, nextFamilyName, familiesMetadata) as ModelConfig)
+                  : current,
+              );
+            }}
+          >
+            {familiesForTask.length === 0 ? (
+              <option value="">No families for this task</option>
+            ) : (
+              familiesForTask.map((f) => (
+                <option key={f.name} value={f.name}>
+                  {f.name}
+                </option>
+              ))
+            )}
+          </select>
+        </label>
+      </section>
+
+      <section className="model-builder-step">
         <h4>Step 2: Input</h4>
         <label className="project-field">
           <span>Input Size</span>
@@ -330,16 +497,13 @@ export default function ModelDetailPage({ params }: ModelDetailPageProps) {
           <select
             value={backboneName}
             onChange={(event) => {
-              patchDraft((next) => {
-                const nextArchitecture = asRecord(next.architecture);
-                const nextBackbone = asRecord(nextArchitecture.backbone);
-                nextBackbone.name = event.target.value;
-                nextArchitecture.backbone = nextBackbone;
-                next.architecture = nextArchitecture;
-              });
+              const nextBackboneName = event.target.value;
+              setDraftConfig((current) =>
+                current ? (setBackbone(current, nextBackboneName) as ModelConfig) : current,
+              );
             }}
           >
-            {BACKBONE_OPTIONS.map((value) => (
+            {(allowedBackbones.length > 0 ? allowedBackbones : [backboneName]).map((value) => (
               <option key={value} value={value}>
                 {value}
               </option>

@@ -26,3 +26,21 @@ export function setEmbeddingProjection(
 ): Record<string, unknown>;
 export function setSquareInputSize(config: Record<string, unknown>, size: number): Record<string, unknown>;
 export function setDynamicShapeFlags(config: Record<string, unknown>, batch: boolean, heightWidth: boolean): Record<string, unknown>;
+export interface DatasetVersionSummary {
+  id?: string;
+  manifest_id: string;
+  num_classes: number;
+  class_order: string[];
+  class_names: Record<string, string>;
+}
+export interface FamiliesMetadata {
+  schema_version: string;
+  families: Array<{
+    name: string;
+    task: string;
+    allowed_backbones: string[];
+  }>;
+}
+export function setSourceDataset(config: Record<string, unknown>, datasetVersionSummary: DatasetVersionSummary): Record<string, unknown>;
+export function setArchitectureFamily(config: Record<string, unknown>, familyName: string, familiesMetadata: FamiliesMetadata): Record<string, unknown>;
+export function setBackbone(config: Record<string, unknown>, backboneName: string): Record<string, unknown>;
