@@ -38,16 +38,12 @@ interface ModelDetailPageProps {
 type ModelConfig = Record<string, unknown>;
 
 interface DatasetVersionRecord {
-  dataset_version_id: string;
-  task_id: string;
-  task: string;
+  id: string;
   name: string;
-  labels?: {
-    label_schema?: {
-      class_order?: string[];
-      classes?: Array<{ id: string; name: string }>;
-    };
-  };
+  task: string;
+  num_classes: number;
+  class_order: string[];
+  class_names: Record<string, string>;
 }
 
 const INPUT_SIZE_PRESETS = [224, 320, 384, 512, 640] as const;
@@ -148,7 +144,19 @@ export default function ModelDetailPage({ params }: ModelDetailPageProps) {
       try {
         const listed = await listDatasetVersions(projectId);
         if (!isMounted) return;
-        const versions = listed.items.map((envelope) => envelope.version as unknown as DatasetVersionRecord);
+        const versions: DatasetVersionRecord[] = listed.items
+          .map((envelope) => {
+            const v = envelope.version as Record<string, unknown>;
+            return {
+              id: typeof v.dataset_version_id === "string" ? v.dataset_version_id : "",
+              name: typeof v.name === "string" ? v.name : "",
+              task: typeof v.task === "string" ? v.task : "",
+              num_classes: typeof v.num_classes === "number" ? v.num_classes : 0,
+              class_order: Array.isArray(v.class_order) ? (v.class_order as string[]) : [],
+              class_names: v.class_names && typeof v.class_names === "object" ? (v.class_names as Record<string, string>) : {},
+            };
+          })
+          .filter((v) => v.id !== "");
         setAllDatasetVersions(versions);
       } catch {
         // non-fatal — selectors will just be empty
@@ -188,7 +196,7 @@ export default function ModelDetailPage({ params }: ModelDetailPageProps) {
     typeof asRecord(draftConfig?.source_dataset).manifest_id === "string"
       ? (asRecord(draftConfig?.source_dataset).manifest_id as string)
       : null;
-  const currentVersionFromManifest = allDatasetVersions.find((v) => v.dataset_version_id === currentManifestId) ?? null;
+  const currentVersionFromManifest = allDatasetVersions.find((v) => v.id === currentManifestId) ?? null;
   const currentFamilyFromMeta = familiesMetadata.families.find((f) => f.name === currentFamilyName) ?? null;
   const currentTask =
     currentVersionFromManifest?.task ?? currentFamilyFromMeta?.task ?? null;
@@ -318,16 +326,12 @@ export default function ModelDetailPage({ params }: ModelDetailPageProps) {
                 if (!current) return current;
                 let next = cloneModelConfig(current);
                 if (nextVersion) {
-                  const classOrder = nextVersion.labels?.label_schema?.class_order ?? [];
-                  const classesArr = nextVersion.labels?.label_schema?.classes ?? [];
-                  const classNames: Record<string, string> = {};
-                  for (const cls of classesArr) classNames[cls.id] = cls.name;
                   next = setSourceDataset(next, {
-                    id: nextVersion.dataset_version_id,
-                    manifest_id: nextVersion.dataset_version_id,
-                    num_classes: classOrder.length,
-                    class_order: classOrder,
-                    class_names: classNames,
+                    id: nextVersion.id,
+                    manifest_id: nextVersion.id,
+                    num_classes: nextVersion.num_classes,
+                    class_order: nextVersion.class_order,
+                    class_names: nextVersion.class_names,
                   }) as ModelConfig;
                 }
                 if (nextFamily) {
@@ -340,11 +344,14 @@ export default function ModelDetailPage({ params }: ModelDetailPageProps) {
             {uniqueTasks.length === 0 ? (
               <option value="">No dataset versions</option>
             ) : (
-              uniqueTasks.map((task) => (
-                <option key={task} value={task}>
-                  {task}
-                </option>
-              ))
+              <>
+                <option value="" disabled>Select a task</option>
+                {uniqueTasks.map((task) => (
+                  <option key={task} value={task}>
+                    {task}
+                  </option>
+                ))}
+              </>
             )}
           </select>
         </label>
@@ -354,20 +361,16 @@ export default function ModelDetailPage({ params }: ModelDetailPageProps) {
             value={currentManifestId ?? ""}
             onChange={(event) => {
               const versionId = event.target.value;
-              const version = allDatasetVersions.find((v) => v.dataset_version_id === versionId);
+              const version = allDatasetVersions.find((v) => v.id === versionId);
               if (!version) return;
-              const classOrder = version.labels?.label_schema?.class_order ?? [];
-              const classesArr = version.labels?.label_schema?.classes ?? [];
-              const classNames: Record<string, string> = {};
-              for (const cls of classesArr) classNames[cls.id] = cls.name;
               setDraftConfig((current) =>
                 current
                   ? (setSourceDataset(current, {
-                      id: version.dataset_version_id,
-                      manifest_id: version.dataset_version_id,
-                      num_classes: classOrder.length,
-                      class_order: classOrder,
-                      class_names: classNames,
+                      id: version.id,
+                      manifest_id: version.id,
+                      num_classes: version.num_classes,
+                      class_order: version.class_order,
+                      class_names: version.class_names,
                     }) as ModelConfig)
                   : current,
               );
@@ -377,7 +380,7 @@ export default function ModelDetailPage({ params }: ModelDetailPageProps) {
               <option value="">No versions for this task</option>
             ) : (
               versionsForTask.map((v) => (
-                <option key={v.dataset_version_id} value={v.dataset_version_id}>
+                <option key={v.id} value={v.id}>
                   {v.name} ({v.task})
                 </option>
               ))
