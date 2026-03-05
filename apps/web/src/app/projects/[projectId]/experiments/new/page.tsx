@@ -40,7 +40,7 @@ export default function NewExperimentPage({ params }: NewExperimentPageProps) {
 
   const [models, setModels] = useState<ProjectModelSummary[]>([]);
   const [selectedModelId, setSelectedModelId] = useState(modelIdFromQuery);
-  const [datasetVersionOptions, setDatasetVersionOptions] = useState<Array<{ id: string; name: string }>>([]);
+  const [datasetVersionOptions, setDatasetVersionOptions] = useState<Array<{ id: string; name: string; task: string }>>([]);
   const [selectedDatasetVersionId, setSelectedDatasetVersionId] = useState("");
   const [name, setName] = useState("");
   const [isLoadingModels, setIsLoadingModels] = useState(!modelIdFromQuery);
@@ -66,7 +66,8 @@ export default function NewExperimentPage({ params }: NewExperimentPageProps) {
           const version = item.version as Record<string, unknown>;
           const id = typeof version.dataset_version_id === "string" ? version.dataset_version_id : "";
           const name = typeof version.name === "string" ? version.name : id;
-          return { id, name };
+          const task = typeof version.task === "string" ? version.task : "";
+          return { id, name, task };
         });
         setDatasetVersionOptions(versionRows.filter((item) => item.id));
         const activeId = datasetVersions.active_dataset_version_id ?? versionRows[0]?.id ?? "";
@@ -170,7 +171,7 @@ export default function NewExperimentPage({ params }: NewExperimentPageProps) {
                   {datasetVersionOptions.length === 0 ? <option value="">No dataset versions</option> : null}
                   {datasetVersionOptions.map((row) => (
                     <option key={row.id} value={row.id}>
-                      {row.name}
+                      {row.task ? `${row.name} (${row.task})` : row.name}
                     </option>
                   ))}
                 </select>
