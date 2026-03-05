@@ -166,7 +166,7 @@ Trainer detection/segmentation reads `coco_instances.json` (already has all geom
 
 - `apps/trainer/src/pixel_sheriff_trainer/pipeline.py` — `TaskPipeline` Protocol + `PIPELINE_REGISTRY` dict
 - `PIPELINE_REGISTRY` maps task kind string → pipeline instance
-- Registered: `"classification"` → `ClassificationPipeline`, `"bbox"` → `DetectionPipeline`, `"segmentation"` → `SegmentationPipeline`
+- Registered: `"classification"` → `ClassificationPipeline`, `"detection"` → `DetectionPipeline`, `"segmentation"` → `SegmentationPipeline`
 - `runner.py` dispatches via `PIPELINE_REGISTRY[job.task]`
 
 ### How to add a new task type
