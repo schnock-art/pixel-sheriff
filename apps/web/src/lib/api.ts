@@ -278,6 +278,7 @@ export interface ProjectModelSummary {
 
 export interface ProjectModelCreatePayload {
   name?: string;
+  dataset_version_id?: string;
 }
 
 export interface ProjectModelCreateResponse {
