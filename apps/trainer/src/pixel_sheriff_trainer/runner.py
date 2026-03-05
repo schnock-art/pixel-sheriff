@@ -2,22 +2,18 @@ from __future__ import annotations
 
 from typing import Any
 
-from pixel_sheriff_trainer.classification.dataset import build_classification_loaders
 from pixel_sheriff_trainer.classification.train import (
-    EpochMetrics,
     resolve_device,
     resolve_runtime_info,
-    run_training,
 )
-from pixel_sheriff_trainer.export_onnx import export_best_classification_onnx
 from pixel_sheriff_trainer.io.checkpoints import AsyncCheckpointWriter, read_checkpoints
-from pixel_sheriff_trainer.io.evaluation import write_classification_evaluation
 from pixel_sheriff_trainer.io.events import EventLog
 from pixel_sheriff_trainer.io.metrics import append_metric
 from pixel_sheriff_trainer.io.run_logging import RunLogger
 from pixel_sheriff_trainer.io.runtime import write_runtime_info
 from pixel_sheriff_trainer.io.storage import ExperimentStorage
 from pixel_sheriff_trainer.jobs import TrainJob
+from pixel_sheriff_trainer.pipeline import PIPELINE_REGISTRY
 from pixel_sheriff_trainer.utils.seed import seed_everything
 from pixel_sheriff_trainer.utils.time import utc_now_iso
 
@@ -218,12 +214,12 @@ class TrainRunner:
             return self.storage.is_cancel_requested(job.project_id, job.experiment_id)
 
         try:
+            import dataclasses
+
             task = str(job.task or "").lower()
-            family = str((job.model_config.get("architecture") or {}).get("family") or "").lower()
-            if task != "classification":
-                raise ValueError("unsupported_task")
-            if family != "resnet_classifier":
-                raise ValueError("unsupported_family")
+            pipeline = PIPELINE_REGISTRY.get(task)
+            if pipeline is None:
+                raise ValueError(f"unsupported_task:{task}")
 
             advanced = job.training_config.get("advanced")
             seed = 1337
@@ -232,7 +228,8 @@ class TrainRunner:
             seed_everything(seed)
 
             device = resolve_device(job.training_config)
-            runtime_info = resolve_runtime_info(job.training_config, device=device)
+            effective_training_config = job.training_config
+            runtime_info = resolve_runtime_info(effective_training_config, device=device)
             runtime_payload = {
                 "device_selected": runtime_info.device_selected,
                 "cuda_available": runtime_info.cuda_available,
@@ -261,23 +258,13 @@ class TrainRunner:
                 f"torch={runtime_info.torch_version} torchvision={runtime_info.torchvision_version}"
             )
 
-            zip_relpath = str(job.dataset_export.get("zip_relpath") or "")
-            if not zip_relpath:
-                raise ValueError("dataset_export_missing")
-            zip_path = self.storage.resolve(zip_relpath)
             workdir = self.storage.run_dir(job.project_id, job.experiment_id, job.attempt) / "workdir"
-            effective_training_config = job.training_config
-            loaded = build_classification_loaders(
-                export_zip_path=zip_path,
-                workdir=workdir,
-                model_config=job.model_config,
-                training_config=effective_training_config,
-                device_type=device.type,
-            )
-            run_logger.log(f"dataset train_count={loaded.train_count} val_count={loaded.val_count}")
+            effective_job = dataclasses.replace(job, training_config=effective_training_config)
+            loaders = pipeline.build_loaders(effective_job, workdir)
+            run_logger.log(f"dataset train_count={loaders.train_count} val_count={loaders.val_count}")
 
-            if loaded.skipped_unlabeled > 0:
-                emit_status(f"skipped_unlabeled={loaded.skipped_unlabeled}")
+            if loaders.skipped_unlabeled > 0:
+                emit_status(f"skipped_unlabeled={loaders.skipped_unlabeled}")
 
             _save_every, keep_last = self._checkpoint_settings(effective_training_config)
             checkpoint_writer = AsyncCheckpointWriter(
@@ -290,30 +277,11 @@ class TrainRunner:
             )
             checkpoint_writer.start()
 
-            def on_epoch(epoch_metrics: EpochMetrics) -> None:
+            def on_epoch(epoch_row: dict[str, Any]) -> None:
                 metric_row: dict[str, Any] = {
                     "attempt": job.attempt,
-                    "epoch": int(epoch_metrics.epoch),
-                    "train_loss": float(epoch_metrics.train_loss),
-                    "train_accuracy": float(epoch_metrics.train_accuracy)
-                    if isinstance(epoch_metrics.train_accuracy, (int, float))
-                    else None,
-                    "val_loss": float(epoch_metrics.val_loss) if isinstance(epoch_metrics.val_loss, (int, float)) else None,
-                    "val_accuracy": float(epoch_metrics.val_accuracy) if isinstance(epoch_metrics.val_accuracy, (int, float)) else None,
-                    "val_macro_f1": float(epoch_metrics.val_macro_f1)
-                    if isinstance(epoch_metrics.val_macro_f1, (int, float))
-                    else None,
-                    "val_macro_precision": float(epoch_metrics.val_macro_precision)
-                    if isinstance(epoch_metrics.val_macro_precision, (int, float))
-                    else None,
-                    "val_macro_recall": float(epoch_metrics.val_macro_recall)
-                    if isinstance(epoch_metrics.val_macro_recall, (int, float))
-                    else None,
-                    "lr": float(epoch_metrics.lr),
-                    "epoch_seconds": float(epoch_metrics.epoch_seconds),
-                    "eta_seconds": float(epoch_metrics.eta_seconds) if isinstance(epoch_metrics.eta_seconds, (int, float)) else None,
-                    "evaluated": bool(epoch_metrics.evaluated),
                     "created_at": utc_now_iso(),
+                    **epoch_row,
                 }
                 append_metric(
                     self.storage,
@@ -328,13 +296,15 @@ class TrainRunner:
                     job.attempt,
                     {"type": "metric", **metric_row},
                 )
-                summary["last_epoch"] = int(epoch_metrics.epoch)
+                epoch_val = epoch_row.get("epoch")
+                if isinstance(epoch_val, int):
+                    summary["last_epoch"] = epoch_val
                 self.storage.set_summary(job.project_id, job.experiment_id, summary)
                 run_logger.log(
-                    "epoch="
-                    f"{epoch_metrics.epoch} train_loss={epoch_metrics.train_loss:.6f} "
-                    f"val_loss={metric_row['val_loss']} val_accuracy={metric_row['val_accuracy']} "
-                    f"lr={epoch_metrics.lr:.8f} seconds={epoch_metrics.epoch_seconds:.3f}"
+                    f"epoch={epoch_row.get('epoch')} "
+                    f"train_loss={epoch_row.get('train_loss')} "
+                    f"lr={epoch_row.get('lr')} "
+                    f"seconds={epoch_row.get('epoch_seconds')}"
                 )
                 drain_checkpoint_results()
 
@@ -364,17 +334,14 @@ class TrainRunner:
             if resume_message:
                 emit_status(resume_message)
 
-            final_evaluation = None
             try:
-                run_status, final_evaluation = run_training(
-                    model_config=job.model_config,
-                    training_config=effective_training_config,
-                    train_loader=loaded.train_loader,
-                    val_loader=loaded.val_loader,
-                    num_classes=loaded.num_classes,
-                    should_cancel=should_cancel,
+                training_result = pipeline.run_training(
+                    loaders,
+                    effective_job,
+                    workdir,
                     on_epoch=on_epoch,
                     on_checkpoint=on_checkpoint,
+                    should_cancel=should_cancel,
                     device=device,
                     resume_state=resume_state,
                 )
@@ -408,22 +375,15 @@ class TrainRunner:
                     payload=runtime_payload,
                 )
 
-                loaded = build_classification_loaders(
-                    export_zip_path=zip_path,
-                    workdir=workdir,
-                    model_config=job.model_config,
-                    training_config=effective_training_config,
-                    device_type=device.type,
-                )
-                run_status, final_evaluation = run_training(
-                    model_config=job.model_config,
-                    training_config=effective_training_config,
-                    train_loader=loaded.train_loader,
-                    val_loader=loaded.val_loader,
-                    num_classes=loaded.num_classes,
-                    should_cancel=should_cancel,
+                effective_job = dataclasses.replace(job, training_config=effective_training_config)
+                loaders = pipeline.build_loaders(effective_job, workdir)
+                training_result = pipeline.run_training(
+                    loaders,
+                    effective_job,
+                    workdir,
                     on_epoch=on_epoch,
                     on_checkpoint=on_checkpoint,
+                    should_cancel=should_cancel,
                     device=device,
                     resume_state=resume_state,
                 )
@@ -432,6 +392,7 @@ class TrainRunner:
                 checkpoint_writer.flush_and_stop()
             drain_checkpoint_results()
 
+            run_status = training_result.status
             if run_status == "canceled":
                 self.storage.set_experiment_status(job.project_id, job.experiment_id, "canceled")
                 self.events.append(
@@ -444,26 +405,24 @@ class TrainRunner:
                 run_logger.log("run_finished status=canceled")
                 return "canceled"
 
-            if final_evaluation is not None:
-                write_classification_evaluation(
-                    self.storage,
-                    project_id=job.project_id,
-                    experiment_id=job.experiment_id,
-                    attempt=job.attempt,
-                    class_order=loaded.class_order,
-                    class_names=loaded.class_names,
-                    evaluation=final_evaluation,
-                )
-
-            onnx_result = export_best_classification_onnx(
+            eval_result = pipeline.evaluate(loaders, effective_job, workdir, training_result)
+            pipeline.write_evaluation(
                 self.storage,
                 project_id=job.project_id,
                 experiment_id=job.experiment_id,
                 attempt=job.attempt,
-                model_config=job.model_config,
-                num_classes=loaded.num_classes,
-                class_names=loaded.class_names,
-                class_order=loaded.class_order,
+                loaders=loaders,
+                training_result=training_result,
+                eval_result=eval_result,
+            )
+
+            onnx_result = pipeline.export_onnx(
+                self.storage,
+                project_id=job.project_id,
+                experiment_id=job.experiment_id,
+                attempt=job.attempt,
+                job=effective_job,
+                loaders=loaders,
             )
             onnx_event: dict[str, Any] = {
                 "type": "onnx_export",
@@ -496,10 +455,10 @@ class TrainRunner:
             return "completed"
         except ValueError as exc:
             code = str(exc)
-            if code == "unsupported_task":
-                message = "Only classification training is supported in this phase"
+            if code.startswith("unsupported_task"):
+                message = f"Unsupported task: {code}"
             elif code == "unsupported_family":
-                message = "Only resnet_classifier models are supported in this phase"
+                message = "Model family not supported for this task"
             elif code == "batchnorm_small_batch_unsupported":
                 message = "BatchNorm training requires effective batch size >= 2. Increase batch size or enable training.drop_last"
             else:

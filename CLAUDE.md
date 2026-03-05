@@ -134,3 +134,50 @@ Copy `.env.example` to `.env`. The Makefile reads `.env` via `-include .env` so 
 - `INTERNAL_API_BASE_URL=http://api:8000` — server-side (SSR) API URL inside Docker
 - `STORAGE_ROOT=./data` — local artifact root (mounted into all containers)
 - `TRAINER_PYTORCH_INDEX_URL` — set to CUDA wheel index for GPU support
+
+### Annotation payload schema
+
+Stored in `Annotation.payload_json` (v2.0):
+- **classification**: `{category_ids: [UUID], primary_category_id: UUID|None}`
+- **objects**: `[{id, kind:"bbox"|"polygon", category_id, bbox:[x,y,w,h]|segmentation:[[x,y,...]]}]`
+- **image_basis**: `{width, height}` — used for bounds validation
+- **source**: `"web-ui"` | `"api"`
+
+Validated in: `apps/api/src/sheriff_api/services/annotation_payload.py`
+
+### Dataset export format
+
+Export zip contents (created by `dataset_export_pipeline.py`):
+- `assets/` — image files
+- `manifest.json` — v1.2: tasks, label_schema, splits, training_defaults, stats
+- `coco_instances.json` — COCO format with bbox (detection) + polygons (segmentation)
+
+Trainer classification reads `manifest.json`.
+Trainer detection/segmentation reads `coco_instances.json` (already has all geometry).
+
+### ML adapter registry
+
+- `apps/api/src/sheriff_api/ml/registry.py` — `FAMILY_REGISTRY` maps family name → `build_fn`
+- `apps/api/src/sheriff_api/ml/adapters/` — `FamilyAdapter` base + concrete adapters
+- Existing: `resnet_classifier` (classification), `retinanet` (detection), `deeplabv3` (segmentation)
+- `packages/pixel_sheriff_ml/src/pixel_sheriff_ml/model_factory.py` — lightweight `build_resnet_classifier` used by trainer
+
+### TaskPipeline Protocol + PIPELINE_REGISTRY
+
+- `apps/trainer/src/pixel_sheriff_trainer/pipeline.py` — `TaskPipeline` Protocol + `PIPELINE_REGISTRY` dict
+- `PIPELINE_REGISTRY` maps task kind string → pipeline instance
+- Registered: `"classification"` → `ClassificationPipeline`, `"bbox"` → `DetectionPipeline`, `"segmentation"` → `SegmentationPipeline`
+- `runner.py` dispatches via `PIPELINE_REGISTRY[job.task]`
+
+### How to add a new task type
+
+1. Create `apps/trainer/src/pixel_sheriff_trainer/{task}/`
+   - `pipeline.py` → implements `TaskPipeline` Protocol
+   - `dataset.py` → parses `coco_instances.json` for task-specific geometry
+   - `train.py` → training loop
+   - `eval.py` → task metrics
+2. Register in `apps/trainer/src/pixel_sheriff_trainer/pipeline.py`:
+   `PIPELINE_REGISTRY["{task}"] = MyPipeline()`
+3. Add family to `apps/api/src/sheriff_api/ml/registry.py`
+4. Add inference endpoint to `apps/trainer/src/pixel_sheriff_trainer/inference/app.py`
+5. Update `apps/api/src/sheriff_api/services/inference_client.py` to route by `task.kind`

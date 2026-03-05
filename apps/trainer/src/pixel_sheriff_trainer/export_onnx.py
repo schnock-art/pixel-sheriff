@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import torch
 
@@ -11,6 +11,9 @@ from pixel_sheriff_ml.model_factory import build_resnet_classifier
 from pixel_sheriff_trainer.io.checkpoints import read_checkpoints
 from pixel_sheriff_trainer.io.storage import ExperimentStorage
 from pixel_sheriff_trainer.utils.time import utc_now_iso
+
+if TYPE_CHECKING:
+    import torch.nn as nn
 
 
 DEFAULT_INPUT_SHAPE = (3, 224, 224)
@@ -258,6 +261,119 @@ def export_best_classification_onnx(
             "exported_at": utc_now_iso(),
             "error": error,
         }
+        metadata_path.write_text(json.dumps(metadata_payload, indent=2, sort_keys=True), encoding="utf-8")
+        return OnnxExportResult(
+            status="exported" if status == "passed" else "failed",
+            attempt=int(attempt),
+            model_uri=model_uri,
+            metadata_uri=_as_relative_uri(storage, metadata_path),
+            error=error,
+            validation=validation,
+        )
+    except Exception as exc:
+        try:
+            model_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        metadata_payload = {
+            "schema_version": "1",
+            "status": "failed",
+            "attempt": int(attempt),
+            "checkpoint_kind": checkpoint_kind,
+            "checkpoint_uri": checkpoint_uri,
+            "error": str(exc),
+            "exported_at": utc_now_iso(),
+        }
+        metadata_path.write_text(json.dumps(metadata_payload, indent=2, sort_keys=True), encoding="utf-8")
+        return OnnxExportResult(
+            status="failed",
+            attempt=int(attempt),
+            model_uri=None,
+            metadata_uri=_as_relative_uri(storage, metadata_path),
+            error=str(exc),
+            validation=None,
+        )
+
+
+def export_model_to_onnx(
+    model: "nn.Module",
+    storage: ExperimentStorage,
+    *,
+    project_id: str,
+    experiment_id: str,
+    attempt: int,
+    checkpoint_kind: str | None,
+    checkpoint_uri: str | None,
+    input_shape: tuple[int, int, int],
+    input_names: list[str],
+    output_names: list[str],
+    preprocess: dict[str, Any],
+    class_order: list[str] | None,
+    class_names: list[str],
+    extra_metadata: dict[str, Any] | None = None,
+) -> OnnxExportResult:
+    """Generic ONNX export for any pre-built model.
+
+    Callers are responsible for building and configuring the model before calling this.
+    This function handles the ONNX serialization, validation, and metadata persistence.
+    """
+    onnx_dir = storage.run_dir(project_id, experiment_id, attempt) / "onnx"
+    onnx_dir.mkdir(parents=True, exist_ok=True)
+    model_path = onnx_dir / "model.onnx"
+    metadata_path = onnx_dir / "onnx.metadata.json"
+
+    try:
+        model.eval()
+        dynamic_axes = {name: {0: "batch_size"} for name in input_names + output_names}
+        example_input = torch.randn(1, *input_shape, dtype=torch.float32)
+
+        with torch.no_grad():
+            torch.onnx.export(
+                model,
+                (example_input,),
+                model_path,
+                export_params=True,
+                opset_version=17,
+                input_names=input_names,
+                output_names=output_names,
+                dynamic_axes=dynamic_axes,
+            )
+
+        validation = _validate_exported_onnx(model_path, input_shape=input_shape)
+        status = str(validation.get("status") or "failed")
+        error = None
+        if status != "passed":
+            error = str(validation.get("onnxruntime", {}).get("error") or "ONNX validation failed")
+            try:
+                model_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+        model_uri = _as_relative_uri(storage, model_path) if model_path.exists() else None
+        metadata_payload: dict[str, Any] = {
+            "schema_version": "1",
+            "status": "exported" if status == "passed" else "failed",
+            "attempt": int(attempt),
+            "checkpoint_kind": checkpoint_kind,
+            "checkpoint_uri": checkpoint_uri,
+            "model_uri": model_uri,
+            "input_shape": [int(v) for v in input_shape],
+            "class_order": [str(v) for v in class_order] if isinstance(class_order, list) else [],
+            "class_names": [str(n) for n in class_names],
+            "class_ids": [str(v) for v in class_order] if isinstance(class_order, list) else [],
+            "preprocess": preprocess,
+            "onnx": {
+                "opset_version": 17,
+                "input_names": input_names,
+                "output_names": output_names,
+                "dynamic_axes": {k: dict(v) for k, v in dynamic_axes.items()},
+            },
+            "validation": validation,
+            "exported_at": utc_now_iso(),
+            "error": error,
+        }
+        if extra_metadata:
+            metadata_payload.update(extra_metadata)
         metadata_path.write_text(json.dumps(metadata_payload, indent=2, sort_keys=True), encoding="utf-8")
         return OnnxExportResult(
             status="exported" if status == "passed" else "failed",

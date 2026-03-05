@@ -9,11 +9,17 @@ from fastapi import FastAPI, HTTPException
 
 from .preprocess import load_metadata, preprocess_asset
 from .schemas import (
+    DetectionBox,
     InferClassificationRequest,
     InferClassificationResponse,
     InferClassificationWarmupRequest,
+    InferDetectionRequest,
+    InferDetectionResponse,
+    InferSegmentationRequest,
+    InferSegmentationResponse,
     InferWarmupResponse,
     PredictionRow,
+    SegmentationObject,
 )
 from .session_cache import CacheBusyError, SessionCache, sha256_file
 
@@ -142,4 +148,169 @@ def create_app() -> FastAPI:
 
         return InferWarmupResponse(device_selected=device_selected, warmed=True)
 
+    @app.post("/infer/detection", response_model=InferDetectionResponse)
+    async def infer_detection(payload: InferDetectionRequest) -> InferDetectionResponse:
+        try:
+            onnx_path, metadata_path, asset_path = _resolve_paths(
+                storage_root,
+                onnx_relpath=payload.onnx_relpath,
+                metadata_relpath=payload.metadata_relpath,
+                asset_relpath=payload.asset_relpath,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail={"code": "path_invalid", "message": str(exc)}) from exc
+
+        if not onnx_path.exists() or not metadata_path.exists() or asset_path is None or not asset_path.exists():
+            raise HTTPException(status_code=404, detail={"code": "artifact_not_found", "message": "Inference artifacts not found"})
+
+        metadata = await asyncio.to_thread(load_metadata, metadata_path)
+        class_names: list[str] = metadata.get("class_names", [])
+        model_key = payload.model_key or await asyncio.to_thread(sha256_file, onnx_path)
+        onnx_hash = await asyncio.to_thread(sha256_file, onnx_path)
+        if onnx_hash != model_key:
+            raise HTTPException(status_code=409, detail={"code": "model_key_mismatch", "message": "Provided model_key does not match ONNX content"})
+
+        try:
+            session, device_selected = await cache.acquire_session(
+                model_key=model_key, onnx_path=onnx_path, device_preference=payload.device_preference,
+            )
+        except CacheBusyError as exc:
+            raise HTTPException(status_code=503, detail={"code": "cache_busy", "message": "Inference cache is busy"}) from exc
+        except Exception as exc:
+            raise HTTPException(status_code=503, detail={"code": "session_load_failed", "message": str(exc)}) from exc
+
+        try:
+            tensor = await asyncio.to_thread(preprocess_asset, asset_path, metadata)
+            raw_outputs = await asyncio.to_thread(_run_onnx_detection, session, tensor)
+            boxes = _parse_detection_output(
+                raw_outputs, class_names=class_names, score_threshold=payload.score_threshold,
+            )
+            return InferDetectionResponse(device_selected=device_selected, boxes=boxes)
+        finally:
+            await cache.release(model_key, device_selected)
+
+    @app.post("/infer/segmentation", response_model=InferSegmentationResponse)
+    async def infer_segmentation(payload: InferSegmentationRequest) -> InferSegmentationResponse:
+        try:
+            onnx_path, metadata_path, asset_path = _resolve_paths(
+                storage_root,
+                onnx_relpath=payload.onnx_relpath,
+                metadata_relpath=payload.metadata_relpath,
+                asset_relpath=payload.asset_relpath,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail={"code": "path_invalid", "message": str(exc)}) from exc
+
+        if not onnx_path.exists() or not metadata_path.exists() or asset_path is None or not asset_path.exists():
+            raise HTTPException(status_code=404, detail={"code": "artifact_not_found", "message": "Inference artifacts not found"})
+
+        metadata = await asyncio.to_thread(load_metadata, metadata_path)
+        class_names = metadata.get("class_names", [])
+        model_key = payload.model_key or await asyncio.to_thread(sha256_file, onnx_path)
+        onnx_hash = await asyncio.to_thread(sha256_file, onnx_path)
+        if onnx_hash != model_key:
+            raise HTTPException(status_code=409, detail={"code": "model_key_mismatch", "message": "Provided model_key does not match ONNX content"})
+
+        try:
+            session, device_selected = await cache.acquire_session(
+                model_key=model_key, onnx_path=onnx_path, device_preference=payload.device_preference,
+            )
+        except CacheBusyError as exc:
+            raise HTTPException(status_code=503, detail={"code": "cache_busy", "message": "Inference cache is busy"}) from exc
+        except Exception as exc:
+            raise HTTPException(status_code=503, detail={"code": "session_load_failed", "message": str(exc)}) from exc
+
+        try:
+            tensor = await asyncio.to_thread(preprocess_asset, asset_path, metadata)
+            logits = await asyncio.to_thread(_run_onnx, session, tensor)
+            objects = _parse_segmentation_output(logits, class_names=class_names)
+            return InferSegmentationResponse(device_selected=device_selected, objects=objects)
+        finally:
+            await cache.release(model_key, device_selected)
+
     return app
+
+
+def _run_onnx_detection(session: object, tensor: np.ndarray) -> list[np.ndarray]:
+    """Run detection model; returns list of output arrays."""
+    input_name = session.get_inputs()[0].name
+    outputs = session.run(None, {input_name: tensor})
+    return [np.asarray(o, dtype=np.float32) for o in outputs]
+
+
+def _parse_detection_output(
+    raw_outputs: list[np.ndarray],
+    *,
+    class_names: list[str],
+    score_threshold: float,
+) -> list[DetectionBox]:
+    """Parse ONNX detection output into DetectionBox list.
+
+    Expected output format (ONNX export of RetinaNet):
+    - Single output tensor of shape [N, 6]: [x_min, y_min, x_max, y_max, score, class_id]
+    OR torchvision-style separate outputs for boxes/scores/labels.
+    """
+    if not raw_outputs:
+        return []
+    boxes: list[DetectionBox] = []
+    first = raw_outputs[0]
+    if first.ndim == 2 and first.shape[-1] >= 6:
+        for row in first:
+            x_min, y_min, x_max, y_max, score, cls = (
+                float(row[0]), float(row[1]), float(row[2]), float(row[3]), float(row[4]), int(row[5])
+            )
+            if score < score_threshold:
+                continue
+            name = class_names[cls] if 0 <= cls < len(class_names) else f"class_{cls}"
+            boxes.append(DetectionBox(
+                class_index=cls, class_name=name, score=score,
+                bbox=[x_min, y_min, x_max - x_min, y_max - y_min],
+            ))
+    return sorted(boxes, key=lambda b: -b.score)
+
+
+def _parse_segmentation_output(
+    logits: np.ndarray,
+    *,
+    class_names: list[str],
+) -> list[SegmentationObject]:
+    """Parse segmentation logits into polygon objects.
+
+    Takes argmax over class dim → pixel class map.
+    Extracts simple bounding-box polygon per unique class.
+    For production, connected-components contour extraction would be more precise.
+    """
+    if logits.ndim < 3:
+        return []
+
+    # logits shape: (1, C, H, W) or (C, H, W)
+    if logits.ndim == 4:
+        class_map = logits[0].argmax(axis=0)  # (H, W)
+    else:
+        class_map = logits.argmax(axis=0)
+
+    objects: list[SegmentationObject] = []
+    unique_classes = np.unique(class_map)
+    for cls_idx in unique_classes:
+        if cls_idx == 0:
+            continue  # skip background
+        fg_idx = int(cls_idx) - 1  # 0-indexed foreground class
+        name = class_names[fg_idx] if 0 <= fg_idx < len(class_names) else f"class_{fg_idx}"
+        ys, xs = np.where(class_map == cls_idx)
+        if len(xs) == 0:
+            continue
+        x_min, x_max = int(xs.min()), int(xs.max())
+        y_min, y_max = int(ys.min()), int(ys.max())
+        polygon = [
+            [float(x_min), float(y_min)],
+            [float(x_max), float(y_min)],
+            [float(x_max), float(y_max)],
+            [float(x_min), float(y_max)],
+        ]
+        pixel_count = int(len(xs))
+        total_pixels = int(class_map.size)
+        score = float(pixel_count / max(total_pixels, 1))
+        objects.append(SegmentationObject(
+            class_index=fg_idx, class_name=name, score=score, polygon=polygon,
+        ))
+    return objects
