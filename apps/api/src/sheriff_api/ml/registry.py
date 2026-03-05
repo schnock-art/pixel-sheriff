@@ -32,6 +32,23 @@ FAMILY_REGISTRY: dict[str, AdapterBuilder] = {
     "deeplabv3": _build_deeplabv3,
 }
 
+# Maps each family name to the task it implements.
+FAMILY_TASK_MAP: dict[str, str] = {
+    "resnet_classifier": "classification",
+    "retinanet": "detection",
+    "deeplabv3": "segmentation",
+}
+
+# Maps each family name to the backbone names it supports.
+FAMILY_BACKBONES: dict[str, list[str]] = {
+    "resnet_classifier": [
+        "resnet18", "resnet34", "resnet50", "resnet101",
+        "mobilenet_v3_large", "mobilenet_v3_small",
+    ],
+    "retinanet": ["resnet50", "resnet101"],
+    "deeplabv3": ["resnet50", "resnet101"],
+}
+
 
 def list_registered_families() -> list[str]:
     return sorted(FAMILY_REGISTRY.keys())
