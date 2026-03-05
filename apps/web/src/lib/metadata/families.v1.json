@@ -1,0 +1,33 @@
+{
+  "schema_version": "1",
+  "families": [
+    {
+      "name": "deeplabv3",
+      "task": "segmentation",
+      "allowed_backbones": [
+        "resnet50",
+        "resnet101"
+      ]
+    },
+    {
+      "name": "resnet_classifier",
+      "task": "classification",
+      "allowed_backbones": [
+        "resnet18",
+        "resnet34",
+        "resnet50",
+        "resnet101",
+        "mobilenet_v3_large",
+        "mobilenet_v3_small"
+      ]
+    },
+    {
+      "name": "retinanet",
+      "task": "detection",
+      "allowed_backbones": [
+        "resnet50",
+        "resnet101"
+      ]
+    }
+  ]
+}
