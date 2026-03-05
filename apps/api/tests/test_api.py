@@ -2375,7 +2375,6 @@ async def _create_detection_project_with_dataset_version(
             "status": "approved",
             "payload_json": {
                 "version": "2.0",
-                "classification": {"category_ids": [category["id"]], "primary_category_id": category["id"]},
                 "image_basis": {"width": 100, "height": 80},
                 "objects": [
                     {"id": "bbox-1", "kind": "bbox", "category_id": category["id"], "bbox": [10, 10, 20, 15]},
