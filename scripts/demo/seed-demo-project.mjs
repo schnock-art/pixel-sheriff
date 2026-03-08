@@ -4,6 +4,7 @@ import path from "node:path";
 import {
   ensureDemoDirs,
   fixtureDir,
+  repoRoot,
   readFixtureManifest,
   resolveDemoApiBaseUrl,
   resolveDemoWebBaseUrl,
@@ -35,8 +36,15 @@ async function apiRequest(apiBaseUrl, routePath, init = {}) {
   return readResponse(response);
 }
 
+function resolveFixtureAssetPath(assetFixture) {
+  if (typeof assetFixture.source_file === "string" && assetFixture.source_file.trim() !== "") {
+    return path.join(repoRoot, assetFixture.source_file);
+  }
+  return path.join(fixtureDir, assetFixture.file);
+}
+
 async function uploadFixtureAsset(apiBaseUrl, projectId, assetFixture) {
-  const filePath = path.join(fixtureDir, assetFixture.file);
+  const filePath = resolveFixtureAssetPath(assetFixture);
   const bytes = await fs.readFile(filePath);
   const form = new FormData();
   form.append("file", new Blob([bytes], { type: assetFixture.mime_type ?? "image/png" }), path.basename(filePath));
@@ -206,4 +214,3 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const metadata = await seedDemoProject();
   console.log(JSON.stringify(metadata, null, 2));
 }
-

@@ -20,126 +20,99 @@
     }
   },
   "model": {
-    "name": "README Detector"
+    "name": "README Pet Detector"
   },
   "hero": {
-    "asset_relative_path": "yard/loading-bay.png"
+    "asset_relative_path": "cats/cat_03.jpg"
   },
   "categories": [
     {
-      "name": "Vehicle",
+      "name": "Cat",
       "display_order": 0
     },
     {
-      "name": "Pallet",
+      "name": "Dog",
       "display_order": 1
     }
   ],
   "assets": [
     {
-      "file": "images/yard-overview.png",
-      "relative_path": "yard/yard-overview.png",
-      "mime_type": "image/png",
-      "width": 1280,
-      "height": 800,
+      "source_file": "demo/images/cat_01.jpg",
+      "relative_path": "cats/cat_01.jpg",
+      "mime_type": "image/jpeg",
+      "width": 5360,
+      "height": 3560,
       "status": "approved",
       "annotation": {
-        "category": "Vehicle",
-        "object_id": "bbox-yard-overview",
-        "bbox": [180, 320, 360, 180]
+        "category": "Cat",
+        "object_id": "bbox-cat-01",
+        "bbox": [650, 180, 3850, 3150]
       }
     },
     {
-      "file": "images/loading-bay.png",
-      "relative_path": "yard/loading-bay.png",
-      "mime_type": "image/png",
-      "width": 1280,
-      "height": 800,
+      "source_file": "demo/images/cat_02.jpg",
+      "relative_path": "cats/cat_02.jpg",
+      "mime_type": "image/jpeg",
+      "width": 5631,
+      "height": 3922,
       "status": "approved",
       "annotation": {
-        "category": "Vehicle",
-        "object_id": "bbox-loading-bay",
-        "bbox": [420, 260, 330, 190]
+        "category": "Cat",
+        "object_id": "bbox-cat-02",
+        "bbox": [1800, 980, 2050, 980]
       }
     },
     {
-      "file": "images/truck-closeup.png",
-      "relative_path": "yard/truck-closeup.png",
-      "mime_type": "image/png",
-      "width": 1280,
-      "height": 800,
+      "source_file": "demo/images/cat_03.jpg",
+      "relative_path": "cats/cat_03.jpg",
+      "mime_type": "image/jpeg",
+      "width": 2010,
+      "height": 2560,
       "status": "approved",
       "annotation": {
-        "category": "Vehicle",
-        "object_id": "bbox-truck-closeup",
-        "bbox": [300, 250, 420, 230]
+        "category": "Cat",
+        "object_id": "bbox-cat-03",
+        "bbox": [350, 260, 1180, 2080]
       }
     },
     {
-      "file": "images/inspection-station.png",
-      "relative_path": "inspection/inspection-station.png",
-      "mime_type": "image/png",
-      "width": 1280,
-      "height": 800,
+      "source_file": "demo/images/dog_01.jpg",
+      "relative_path": "dogs/dog_01.jpg",
+      "mime_type": "image/jpeg",
+      "width": 3024,
+      "height": 4032,
       "status": "approved",
       "annotation": {
-        "category": "Pallet",
-        "object_id": "bbox-inspection-station",
-        "bbox": [520, 310, 250, 190]
+        "category": "Dog",
+        "object_id": "bbox-dog-01",
+        "bbox": [560, 760, 1910, 2280]
       }
     },
     {
-      "file": "images/checkpoint-lane.png",
-      "relative_path": "inspection/checkpoint-lane.png",
-      "mime_type": "image/png",
-      "width": 1280,
-      "height": 800,
+      "source_file": "demo/images/dog_02.jpg",
+      "relative_path": "dogs/dog_02.jpg",
+      "mime_type": "image/jpeg",
+      "width": 4160,
+      "height": 6240,
       "status": "approved",
       "annotation": {
-        "category": "Vehicle",
-        "object_id": "bbox-checkpoint-lane",
-        "bbox": [620, 280, 320, 210]
+        "category": "Dog",
+        "object_id": "bbox-dog-02",
+        "bbox": [760, 2860, 2600, 2580]
       }
     },
     {
-      "file": "images/pallet-racks.png",
-      "relative_path": "storage/pallet-racks.png",
-      "mime_type": "image/png",
-      "width": 1280,
-      "height": 800,
+      "source_file": "demo/images/dog_03.jpg",
+      "relative_path": "dogs/dog_03.jpg",
+      "mime_type": "image/jpeg",
+      "width": 1728,
+      "height": 2489,
       "status": "approved",
       "annotation": {
-        "category": "Pallet",
-        "object_id": "bbox-pallet-racks",
-        "bbox": [220, 220, 280, 360]
-      }
-    },
-    {
-      "file": "images/forklift-aisle.png",
-      "relative_path": "storage/forklift-aisle.png",
-      "mime_type": "image/png",
-      "width": 1280,
-      "height": 800,
-      "status": "approved",
-      "annotation": {
-        "category": "Vehicle",
-        "object_id": "bbox-forklift-aisle",
-        "bbox": [420, 260, 280, 230]
-      }
-    },
-    {
-      "file": "images/dispatch-corner.png",
-      "relative_path": "storage/dispatch-corner.png",
-      "mime_type": "image/png",
-      "width": 1280,
-      "height": 800,
-      "status": "approved",
-      "annotation": {
-        "category": "Pallet",
-        "object_id": "bbox-dispatch-corner",
-        "bbox": [710, 300, 250, 220]
+        "category": "Dog",
+        "object_id": "bbox-dog-03",
+        "bbox": [180, 970, 1260, 1280]
       }
     }
   ]
 }
-
