@@ -253,56 +253,16 @@ export function LabelPanel({
         </button>
       ) : null}
 
-      {annotationMode === "labels" ? (
-        <section className="placeholder-card">
-          <h4>Suggestions</h4>
-          {hasActiveDeployment ? (
-            <>
-              <p className="labels-empty">
-                Model: {activeDeploymentName ?? "-"} | preference: {activeDeploymentDevicePreference ?? "-"} | last device: {lastInferenceDeviceSelected ?? "-"}
-              </p>
-              <div className="label-actions">
-                <button type="button" className="ghost-button" onClick={onSuggest} disabled={isSuggesting || !onSuggest}>
-                  {isSuggesting ? "Suggesting..." : "Suggest"}
-                </button>
-                <button
-                  type="button"
-                  className="primary-button"
-                  onClick={() => onApplySuggestedLabel?.(suggestionPredictions[0].class_id)}
-                  disabled={suggestionPredictions.length === 0 || !onApplySuggestedLabel}
-                >
-                  Apply top-1
-                </button>
-              </div>
-              {suggestionPredictions.length > 0 ? (
-                <ol className="label-list">
-                  {suggestionPredictions.map((row) => (
-                    <li key={`${row.class_id}-${row.class_name}`}>
-                      <button type="button" className="label-item" onClick={() => onApplySuggestedLabel?.(row.class_id)}>
-                        <span>{row.class_name}</span>
-                        <span className="label-check">{row.score.toFixed(3)}</span>
-                      </button>
-                    </li>
-                  ))}
-                </ol>
-              ) : (
-                <p className="labels-empty">No suggestions yet.</p>
-              )}
-            </>
-          ) : (
-            <p className="labels-empty">No active deployment. Open Deploy tab to configure one.</p>
-          )}
-        </section>
-      ) : null}
-
       {annotationMode !== "labels" ? (
         <>
+          <div className="label-section-head">
+            <h4>Objects</h4>
+            <span>{modeLabelText()}</span>
+          </div>
           <p className="labels-empty">
-            {modeLabelText()}.
-            {" "}
             {geometryObjectCount} object{geometryObjectCount === 1 ? "" : "s"} on this image.
             {" "}
-            {selectedObjectId ? `Selected: ${selectedObjectId}` : "Select or draw an object, then choose a class."}
+            {selectedObjectId ? "Object selected on canvas." : "Select or draw an object, then choose a class."}
           </p>
           {geometryObjects.length === 0 ? (
             <p className="labels-empty">No objects yet on this image.</p>
@@ -331,8 +291,8 @@ export function LabelPanel({
                       }
                     >
                       <span className="geometry-object-index">{index + 1}</span>
-                      <span>{object.kind === "bbox" ? "BBox" : "Segment"}</span>
-                      <span>{object.categoryName}</span>
+                      <span>{`${index + 1} ${object.categoryName}`}</span>
+                      <span>{object.kind === "bbox" ? "Bounding Box" : "Segmentation"}</span>
                     </button>
                   </li>
                 );
@@ -442,6 +402,48 @@ export function LabelPanel({
         </>
       )}
 
+      {annotationMode === "labels" ? (
+        <section className="placeholder-card">
+          <h4>Suggestions</h4>
+          {hasActiveDeployment ? (
+            <>
+              <p className="labels-empty">
+                Model: {activeDeploymentName ?? "-"} | preference: {activeDeploymentDevicePreference ?? "-"} | last device: {lastInferenceDeviceSelected ?? "-"}
+              </p>
+              <div className="label-actions">
+                <button type="button" className="ghost-button" onClick={onSuggest} disabled={isSuggesting || !onSuggest}>
+                  {isSuggesting ? "Suggesting..." : "Suggest"}
+                </button>
+                <button
+                  type="button"
+                  className="primary-button"
+                  onClick={() => onApplySuggestedLabel?.(suggestionPredictions[0].class_id)}
+                  disabled={suggestionPredictions.length === 0 || !onApplySuggestedLabel}
+                >
+                  Apply top-1
+                </button>
+              </div>
+              {suggestionPredictions.length > 0 ? (
+                <ol className="label-list">
+                  {suggestionPredictions.map((row) => (
+                    <li key={`${row.class_id}-${row.class_name}`}>
+                      <button type="button" className="label-item" onClick={() => onApplySuggestedLabel?.(row.class_id)}>
+                        <span>{row.class_name}</span>
+                        <span className="label-check">{row.score.toFixed(3)}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ol>
+              ) : (
+                <p className="labels-empty">No suggestions yet.</p>
+              )}
+            </>
+          ) : (
+            <p className="labels-empty">No active deployment. Open Deploy tab to configure one.</p>
+          )}
+        </section>
+      ) : null}
+
       <div className="label-actions">
         <button type="button" className="ghost-button" onClick={onToggleEditMode}>
           {editMode ? "Exit Edit" : "Edit"}
@@ -450,6 +452,11 @@ export function LabelPanel({
           {isSaving ? "Saving..." : `Submit${pendingCount > 0 ? ` (${pendingCount})` : ""}`}
         </button>
       </div>
+
+      <section className="placeholder-card annotation-shortcuts">
+        <h4>Shortcut Readiness</h4>
+        <p className="labels-empty">E = select | W = draw box | Del = delete | 1-9 = assign class | A / D = previous / next image</p>
+      </section>
     </aside>
   );
 }

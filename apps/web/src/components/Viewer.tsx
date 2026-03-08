@@ -12,7 +12,7 @@ import {
 } from "../lib/workspace/geometry";
 import { getClassColor } from "../lib/workspace/classColors";
 import type { AnnotationMode } from "./LabelPanel";
-import { Pagination } from "./Pagination";
+import type { CanvasTool } from "./workspace/project-assets/CanvasToolbar";
 
 interface ViewerAsset {
   id: string;
@@ -45,11 +45,9 @@ interface ImageBasis {
 
 interface ViewerProps {
   currentAsset: ViewerAsset | null;
-  totalAssets: number;
-  currentIndex: number;
-  pageStatuses?: Array<"labeled" | "unlabeled">;
-  pageDirtyFlags?: boolean[];
   annotationMode: AnnotationMode;
+  canvasTool: CanvasTool;
+  resetToken?: number;
   geometryObjects: GeometryObject[];
   selectedObjectId: string | null;
   hoveredObjectId: string | null;
@@ -59,9 +57,6 @@ interface ViewerProps {
   onUpsertObject: (object: GeometryObject) => void;
   onDeleteSelectedObject: () => void;
   onImageBasisChange: (imageBasis: ImageBasis | null) => void;
-  onSelectIndex: (index: number) => void;
-  onPrev: () => void;
-  onNext: () => void;
 }
 
 function createObjectId(prefix: string) {
@@ -174,11 +169,9 @@ function resizeBBoxFromHandle(
 
 export function Viewer({
   currentAsset,
-  totalAssets,
-  currentIndex,
-  pageStatuses,
-  pageDirtyFlags,
   annotationMode,
+  canvasTool,
+  resetToken = 0,
   geometryObjects,
   selectedObjectId,
   hoveredObjectId,
@@ -188,12 +181,9 @@ export function Viewer({
   onUpsertObject,
   onDeleteSelectedObject,
   onImageBasisChange,
-  onSelectIndex,
-  onPrev,
-  onNext,
 }: ViewerProps) {
-  const hasImage = Boolean(currentAsset?.uri);
-  const maxIndex = Math.max(totalAssets - 1, 0);
+  const [imageLoadError, setImageLoadError] = useState(false);
+  const hasImage = Boolean(currentAsset?.uri) && !imageLoadError;
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
   const [naturalSize, setNaturalSize] = useState<ImageBasis | null>(null);
@@ -224,6 +214,9 @@ export function Viewer({
     if (!imageBasis) return null;
     return computeImageViewport(canvasSize.width, canvasSize.height, imageBasis.width, imageBasis.height);
   }, [canvasSize.height, canvasSize.width, imageBasis]);
+  const canDrawBBox = annotationMode === "bbox" && canvasTool === "bbox";
+  const canDrawPolygon = annotationMode === "segmentation" && canvasTool === "polygon";
+  const canInteractWithGeometry = annotationMode !== "labels" && canvasTool !== "pan";
 
   useEffect(() => {
     setBboxDraft(null);
@@ -231,7 +224,8 @@ export function Viewer({
     setActivePointerId(null);
     setBboxMoveState(null);
     setBboxResizeState(null);
-  }, [currentAsset?.id, annotationMode]);
+    setImageLoadError(false);
+  }, [currentAsset?.id, annotationMode, canvasTool, resetToken]);
 
   // Use a ref so this effect only fires when imageBasis actually changes, not when
   // the callback reference changes. Without this, the effect creates a circular update
@@ -253,11 +247,6 @@ export function Viewer({
     window.addEventListener("resize", measure);
     return () => window.removeEventListener("resize", measure);
   }, [currentAsset?.id]);
-
-  function jump(delta: number) {
-    const nextIndex = Math.min(maxIndex, Math.max(0, currentIndex + delta));
-    onSelectIndex(nextIndex);
-  }
 
   function toImagePoint(event: PointerEvent<SVGSVGElement>) {
     if (!viewport || !imageBasis) return null;
@@ -281,7 +270,7 @@ export function Viewer({
   }
 
   const finalizePolygon = useCallback(() => {
-    if (annotationMode !== "segmentation") return;
+    if (!canDrawPolygon) return;
     if (!imageBasis || !defaultCategoryId) return;
     if (polygonDraft.length < 3) return;
     const object: GeometryPolygonObject = {
@@ -293,7 +282,7 @@ export function Viewer({
     onUpsertObject(object);
     onSelectObject(object.id);
     setPolygonDraft([]);
-  }, [annotationMode, defaultCategoryId, imageBasis, onSelectObject, onUpsertObject, polygonDraft]);
+  }, [canDrawPolygon, defaultCategoryId, imageBasis, onSelectObject, onUpsertObject, polygonDraft]);
 
   useEffect(() => {
     if (annotationMode === "labels") return;
@@ -312,7 +301,7 @@ export function Viewer({
         onDeleteSelectedObject();
         return;
       }
-      if (annotationMode === "segmentation" && event.key === "Enter") {
+      if (canDrawPolygon && event.key === "Enter") {
         event.preventDefault();
         finalizePolygon();
       }
@@ -320,15 +309,15 @@ export function Viewer({
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [annotationMode, finalizePolygon, onDeleteSelectedObject, onHoverObject, selectedObjectId]);
+  }, [annotationMode, canDrawPolygon, finalizePolygon, onDeleteSelectedObject, onHoverObject, selectedObjectId]);
 
   function handlePointerDown(event: PointerEvent<SVGSVGElement>) {
-    if (annotationMode === "labels" || !imageBasis || !viewport) return;
+    if (!canInteractWithGeometry || !imageBasis || !viewport) return;
     if (event.button !== 0) return;
     const point = toImagePoint(event);
     if (!point) return;
 
-    if (annotationMode === "bbox") {
+    if (canDrawBBox) {
       if (selectedObjectId) {
         const selectedObject = geometryObjects.find(
           (object): object is GeometryBBoxObject => object.id === selectedObjectId && object.kind === "bbox",
@@ -395,7 +384,7 @@ export function Viewer({
       return;
     }
 
-    if (annotationMode === "segmentation") {
+    if (canDrawPolygon) {
       if (event.detail > 1 && polygonDraft.length >= 3) {
         finalizePolygon();
         return;
@@ -422,15 +411,20 @@ export function Viewer({
       setPolygonDraft((previous) => [...previous, point]);
       onSelectObject(null);
       onHoverObject(null);
+      return;
     }
+
+    const hitObjectId = hitTestObject(point);
+    onSelectObject(hitObjectId);
+    onHoverObject(hitObjectId);
   }
 
   function handlePointerMove(event: PointerEvent<SVGSVGElement>) {
-    if (annotationMode === "labels") return;
+    if (!canInteractWithGeometry) return;
     const point = toImagePoint(event);
     if (!point) return;
 
-    if (bboxResizeState && annotationMode === "bbox") {
+    if (bboxResizeState && canDrawBBox) {
       if (event.pointerId !== bboxResizeState.pointerId) return;
       const objectToResize = geometryObjects.find((object) => object.id === bboxResizeState.objectId);
       if (!objectToResize || objectToResize.kind !== "bbox") return;
@@ -447,7 +441,7 @@ export function Viewer({
       return;
     }
 
-    if (bboxMoveState && annotationMode === "bbox") {
+    if (bboxMoveState && canDrawBBox) {
       if (event.pointerId !== bboxMoveState.pointerId) return;
       const objectToMove = geometryObjects.find((object) => object.id === bboxMoveState.objectId);
       if (!objectToMove || objectToMove.kind !== "bbox") return;
@@ -468,7 +462,7 @@ export function Viewer({
       return;
     }
 
-    if (bboxDraft && annotationMode === "bbox") {
+    if (bboxDraft && canDrawBBox) {
       if (activePointerId !== null && event.pointerId !== activePointerId) return;
       setBboxDraft((previous) => (previous ? { ...previous, end: point } : previous));
       return;
@@ -479,7 +473,7 @@ export function Viewer({
   }
 
   function handlePointerUp(event: PointerEvent<SVGSVGElement>) {
-    if (annotationMode !== "bbox") return;
+    if (!canDrawBBox) return;
     if (activePointerId !== null && event.pointerId !== activePointerId) return;
 
     if (bboxResizeState) {
@@ -553,7 +547,7 @@ export function Viewer({
   }
 
   function handleDoubleClick(event: MouseEvent<SVGSVGElement>) {
-    if (annotationMode !== "segmentation") return;
+    if (!canDrawPolygon) return;
     if (polygonDraft.length < 3) return;
     event.preventDefault();
     finalizePolygon();
@@ -616,7 +610,7 @@ export function Viewer({
   function renderDraft() {
     if (!viewport) return null;
     const draftColor = getClassColor(defaultCategoryId ?? 1);
-    if (annotationMode === "bbox" && bboxDraft) {
+    if (canDrawBBox && bboxDraft) {
       const bbox = bboxFromPoints(bboxDraft.start, bboxDraft.end);
       const topLeft = toViewportCoords(bbox[0], bbox[1], viewport);
       return (
@@ -632,7 +626,7 @@ export function Viewer({
       );
     }
 
-    if (annotationMode === "segmentation" && polygonDraft.length > 0) {
+    if (canDrawPolygon && polygonDraft.length > 0) {
       const points = polygonDraft.map((point) => {
         const projected = toViewportCoords(point.x, point.y, viewport);
         return `${projected.x},${projected.y}`;
@@ -652,18 +646,21 @@ export function Viewer({
 
   return (
     <section className="viewer-panel" aria-label="Image viewer">
-      <div className={hasImage ? "viewer-canvas has-image" : "viewer-canvas"} role="img" aria-label="Traffic scene with annotations" ref={canvasRef}>
+      <div className={hasImage ? "viewer-canvas has-image" : "viewer-canvas"} role="img" aria-label="Image annotation canvas" ref={canvasRef}>
         {currentAsset?.uri ? (
           <img
             src={currentAsset.uri}
-            alt={`Asset ${currentIndex + 1}`}
+            alt={`Asset ${currentAsset.id}`}
             className="viewer-image"
+            draggable={false}
             onLoad={(event) => {
+              setImageLoadError(false);
               const image = event.currentTarget;
               if (image.naturalWidth > 0 && image.naturalHeight > 0) {
                 setNaturalSize({ width: image.naturalWidth, height: image.naturalHeight });
               }
             }}
+            onError={() => setImageLoadError(true)}
           />
         ) : null}
         {hasImage && viewport ? (
@@ -685,47 +682,18 @@ export function Viewer({
         <div className="car car-main" />
         <div className="car car-left" />
         <div className="car car-right" />
+        {imageLoadError ? <div className="viewer-load-state">Unable to load the selected image preview.</div> : null}
       </div>
-      {annotationMode === "bbox" && bboxDraft ? (
+      {canDrawBBox && bboxDraft ? (
         <p className="viewer-draft-warning" role="status" aria-live="polite">
           Draft box not saved yet. Release mouse to create the object. Drag boxes to move; drag corner/edge handles to resize.
         </p>
       ) : null}
-      {annotationMode === "segmentation" && polygonDraft.length > 0 ? (
+      {canDrawPolygon && polygonDraft.length > 0 ? (
         <p className="viewer-draft-warning" role="status" aria-live="polite">
           Draft polygon not saved yet. Click near the first point, double-click, or press Enter to close.
         </p>
       ) : null}
-
-      <div className="viewer-controls">
-        <Pagination
-          total={Math.max(totalAssets, 1)}
-          current={Math.max(currentIndex, 0)}
-          onSelect={onSelectIndex}
-          statuses={pageStatuses}
-          dirtyFlags={pageDirtyFlags}
-        />
-        <div className="viewer-nav">
-          <button type="button" className="ghost-icon-button" aria-label="Back 10 frames" onClick={() => jump(-10)}>
-            -10
-          </button>
-          <button type="button" className="ghost-icon-button" aria-label="Back 5 frames" onClick={() => jump(-5)}>
-            -5
-          </button>
-          <button type="button" className="ghost-icon-button" aria-label="Previous frame" onClick={onPrev}>
-            {"<"}
-          </button>
-          <button type="button" className="ghost-icon-button" aria-label="Next frame" onClick={onNext}>
-            {">"}
-          </button>
-          <button type="button" className="ghost-icon-button" aria-label="Forward 5 frames" onClick={() => jump(5)}>
-            +5
-          </button>
-          <button type="button" className="ghost-icon-button" aria-label="Forward 10 frames" onClick={() => jump(10)}>
-            +10
-          </button>
-        </div>
-      </div>
     </section>
   );
 }

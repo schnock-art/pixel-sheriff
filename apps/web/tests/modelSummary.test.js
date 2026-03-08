@@ -34,6 +34,7 @@ test("readModelSummary extracts key model config fields", () => {
   });
 
   assert.equal(summary.task, "detection");
+  assert.equal(summary.datasetVersionId, "-");
   assert.equal(summary.numClasses, 3);
   assert.equal(summary.classNamesText, "rock, lake, sky");
   assert.equal(summary.inputSizeText, "640 x 640");
@@ -46,9 +47,9 @@ test("readModelSummary extracts key model config fields", () => {
 test("readModelSummary falls back safely for missing fields", () => {
   const summary = readModelSummary({});
   assert.equal(summary.task, "-");
+  assert.equal(summary.datasetVersionId, "-");
   assert.equal(summary.numClasses, 0);
   assert.equal(summary.classNamesText, "-");
   assert.equal(summary.inputSizeText, "-");
   assert.equal(summary.onnxEnabled, false);
 });
-

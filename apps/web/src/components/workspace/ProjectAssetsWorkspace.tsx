@@ -1,14 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 
 import { LabelPanel } from "../LabelPanel";
 import { Viewer } from "../Viewer";
 import {
   ApiError,
-  listDatasetVersions,
-  createProjectModel,
   createCategory,
   deleteCategory,
   createProject,
@@ -27,10 +25,7 @@ import { useDeleteWorkflow } from "../../lib/hooks/useDeleteWorkflow";
 import { buildTargetRelativePath, isImageCandidate, useImportWorkflow } from "../../lib/hooks/useImportWorkflow";
 import { useLabels } from "../../lib/hooks/useLabels";
 import { useProjectAssetsTreeState } from "../../lib/hooks/useProjectAssetsTreeState";
-import { useProject } from "../../lib/hooks/useProject";
 import { useWorkspaceSuggestions } from "../../lib/hooks/useWorkspaceSuggestions";
-import { useWorkspaceTaskState } from "../../lib/hooks/useWorkspaceTaskState";
-import { useTasks } from "../../lib/hooks/useTasks";
 import { useWorkspaceHotkeys } from "../../lib/hooks/useWorkspaceHotkeys";
 import {
   buildAssetReviewStateById,
@@ -38,16 +33,15 @@ import {
   buildFolderReviewStatusByPath,
   deriveMessageTone,
 } from "../../lib/workspace/projectAssetsDerived";
-import { buildModelBuilderHref } from "../../lib/workspace/projectRouting";
 import { collectFolderPathsFromRelativePaths } from "../../lib/workspace/tree";
-import { ProjectAssetsFooterActions } from "./project-assets/ProjectAssetsFooterActions";
+import { ProjectSectionLayout } from "./project-shell/ProjectSectionLayout";
+import { useProjectShell } from "./project-shell/ProjectShellContext";
+import { AssetBrowser } from "./project-assets/AssetBrowser";
+import { AssetFilmstrip } from "./project-assets/AssetFilmstrip";
+import { CanvasToolbar, type CanvasTool } from "./project-assets/CanvasToolbar";
 import { ProjectAssetsImportModal } from "./project-assets/ProjectAssetsImportModal";
 import { ProjectAssetsStatusOverlay } from "./project-assets/ProjectAssetsStatusOverlay";
-import { ProjectAssetsTaskModal } from "./project-assets/ProjectAssetsTaskModal";
-import { ProjectAssetsTreeSidebar } from "./project-assets/ProjectAssetsTreeSidebar";
 import { useProjectNavigationGuard } from "./ProjectNavigationContext";
-
-const PROJECT_STATUS_REFRESH_EVENT = "pixel-sheriff:project-status-refresh";
 
 type FolderReviewStatus = "all_labeled" | "has_unlabeled" | "empty";
 type WorkspaceAnnotationMode = "labels" | "bbox" | "segmentation";
@@ -73,51 +67,48 @@ function taskKindToAnnotationMode(taskKind: TaskKind | null | undefined): Worksp
 
 export default function ProjectAssetsWorkspace() {
   const router = useRouter();
-  const searchParams = useSearchParams();
   const params = useParams<{ projectId: string }>();
   const routeProjectId = decodeURIComponent(params?.projectId ?? "");
   const { guardedNavigate, setHasUnsavedDrafts } = useProjectNavigationGuard();
-  const { data: projects, refetch: refetchProjects } = useProject();
+  const {
+    project: selectedProject,
+    projects,
+    selectedTask,
+    selectedTaskId,
+    isTaskLabelsLocked,
+    refetchProjects,
+  } = useProjectShell();
   const selectedProjectId = routeProjectId.trim() ? routeProjectId : null;
   const [isCreatingLabel, setIsCreatingLabel] = useState(false);
   const [isSavingLabelChanges, setIsSavingLabelChanges] = useState(false);
   const [deletingLabelId, setDeletingLabelId] = useState<string | null>(null);
-  const [isCreatingModel, setIsCreatingModel] = useState(false);
   const [editMode, setEditMode] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [annotationMode, setAnnotationMode] = useState<WorkspaceAnnotationMode>("labels");
+  const [canvasTool, setCanvasTool] = useState<CanvasTool>("select");
+  const [viewerResetToken, setViewerResetToken] = useState(0);
   const [importNewProjectTaskType, setImportNewProjectTaskType] = useState<NewProjectTaskType>("classification_single");
   const [geometryCategoryId, setGeometryCategoryId] = useState<string | null>(null);
   const [hoveredGeometryObjectId, setHoveredGeometryObjectId] = useState<string | null>(null);
-
-  const selectedProject = useMemo(
-    () => projects.find((project) => project.id === selectedProjectId) ?? null,
-    [projects, selectedProjectId],
-  );
-  const { data: tasks, refetch: refetchTasks } = useTasks(selectedProjectId);
-  const requestedTaskId = searchParams.get("taskId");
-  function updateTaskInUrl(taskId: string) {
-    const nextParams = new URLSearchParams(searchParams.toString());
-    nextParams.set("taskId", taskId);
-    router.replace(`/projects/${encodeURIComponent(routeProjectId)}/datasets?${nextParams.toString()}`);
-  }
-  const taskState = useWorkspaceTaskState({
-    selectedProjectId,
-    selectedProjectDefaultTaskId: selectedProject?.default_task_id,
-    tasks,
-    requestedTaskId,
-    syncTaskInUrl: updateTaskInUrl,
-    refetchTasks,
-    setMessage,
-  });
-  const selectedTask = taskState.selectedTask;
-  const selectedTaskId = taskState.selectedTaskId;
   const projectAnnotationMode = useMemo(() => taskKindToAnnotationMode(selectedTask?.kind), [selectedTask?.kind]);
 
   useEffect(() => {
     if (annotationMode === projectAnnotationMode) return;
     setAnnotationMode(projectAnnotationMode);
   }, [annotationMode, projectAnnotationMode]);
+
+  useEffect(() => {
+    if (annotationMode === "bbox") {
+      setCanvasTool("bbox");
+      return;
+    }
+    if (annotationMode === "segmentation") {
+      setCanvasTool("polygon");
+      return;
+    }
+    setCanvasTool("select");
+  }, [annotationMode]);
+
   const multiLabelEnabled = selectedTask?.label_mode === "multi_label";
 
   const { data: assets, annotations, setAnnotations, refetch: refetchAssets, isLoading: isAssetsLoading } = useAssets(
@@ -308,33 +299,11 @@ export default function ProjectAssetsWorkspace() {
     [assetReviewStateById, treeState.assetRows],
   );
   const messageTone = useMemo(() => deriveMessageTone(message), [message]);
-  const labeledImageCount = useMemo(() => {
-    const labeledAssetIds = new Set<string>();
-    for (const annotation of annotations) {
-      if (annotation.status !== "unlabeled") labeledAssetIds.add(annotation.asset_id);
-    }
-    return labeledAssetIds.size;
-  }, [annotations]);
-
   useEffect(() => {
     setHasUnsavedDrafts(pendingCount > 0);
   }, [pendingCount, setHasUnsavedDrafts]);
 
   useEffect(() => () => setHasUnsavedDrafts(false), [setHasUnsavedDrafts]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    if (!selectedProjectId) return;
-    window.dispatchEvent(
-      new CustomEvent(PROJECT_STATUS_REFRESH_EVENT, {
-        detail: {
-          projectId: selectedProjectId,
-          labeledImageCount,
-          classCount: labels.length,
-        },
-      }),
-    );
-  }, [labeledImageCount, labels.length, selectedProjectId]);
 
   const folderReviewStatusByPath = useMemo(
     () => buildFolderReviewStatusByPath({ folderAssetIds: treeState.treeBuild.folderAssetIds, assetReviewStateById }) as Record<string, FolderReviewStatus>,
@@ -439,7 +408,7 @@ export default function ProjectAssetsWorkspace() {
       setMessage("Select a project before creating labels.");
       return;
     }
-    if (taskState.isTaskLabelsLocked) {
+    if (isTaskLabelsLocked) {
       setMessage("This task is locked because dataset versions already exist. Create a new task to change labels.");
       return;
     }
@@ -462,7 +431,7 @@ export default function ProjectAssetsWorkspace() {
   async function handleSaveLabelChanges(
     changes: Array<{ id: string; name: string; isActive: boolean; displayOrder: number }>,
   ) {
-    if (taskState.isTaskLabelsLocked) {
+    if (isTaskLabelsLocked) {
       setMessage("This task is locked because dataset versions already exist. Create a new task to change labels.");
       return;
     }
@@ -486,7 +455,7 @@ export default function ProjectAssetsWorkspace() {
   }
 
   async function handleDeleteLabel(labelId: string, labelName: string) {
-    if (taskState.isTaskLabelsLocked) {
+    if (isTaskLabelsLocked) {
       setMessage("This task is locked because dataset versions already exist. Create a new task to change labels.");
       return;
     }
@@ -674,28 +643,16 @@ export default function ProjectAssetsWorkspace() {
     picker.click();
   }
 
-  function handleBuildModel() {
+  function handleCreateDataset() {
     if (!selectedProjectId) {
-      setMessage("Select a project before building a model.");
+      setMessage("Select a project before creating a dataset.");
       return;
     }
     guardedNavigate(() => {
-      void (async () => {
-        try {
-          setIsCreatingModel(true);
-          setMessage("Creating model draft...");
-          const created = await createProjectModel(selectedProjectId, {});
-          router.push(buildModelBuilderHref(selectedProjectId, created.id));
-        } catch (error) {
-          if (error instanceof ApiError) {
-            setMessage(`Build model failed: ${error.responseBody ?? error.message}`);
-          } else {
-            setMessage(error instanceof Error ? `Build model failed: ${error.message}` : "Build model failed.");
-          }
-        } finally {
-          setIsCreatingModel(false);
-        }
-      })();
+      const nextParams = new URLSearchParams();
+      if (selectedTaskId) nextParams.set("taskId", selectedTaskId);
+      const query = nextParams.toString();
+      router.push(`/projects/${encodeURIComponent(selectedProjectId)}/dataset${query ? `?${query}` : ""}`);
     });
   }
 
@@ -707,43 +664,19 @@ export default function ProjectAssetsWorkspace() {
   const headerTitle = treeState.selectedTreeFolderPath ? `${selectedProjectName} / ${treeState.selectedTreeFolderPath}` : selectedProjectName;
 
   return (
-    <main className="workspace-shell">
-      <section className="workspace-frame">
-        <header className="workspace-header">
-          <div className="workspace-header-cell">Project Assets</div>
-          <div className="workspace-header-cell workspace-header-title">{headerTitle}</div>
-          <div className="workspace-header-cell workspace-header-actions" aria-label="Toolbar">
-            <label htmlFor="task-selector" className="sr-only">
-              Task
-            </label>
-            <select
-              id="task-selector"
-              value={selectedTaskId ?? ""}
-              onChange={(event) => taskState.handleSelectTask(event.target.value)}
-              disabled={!selectedProjectId || tasks.length === 0}
-              className="workspace-task-select"
-              title={selectedTask?.kind ? `${selectedTask.kind}${selectedTask.label_mode ? ` (${selectedTask.label_mode})` : ""}` : "Task"}
-            >
-              {tasks.length === 0 ? <option value="">No tasks</option> : null}
-              {tasks.map((task) => (
-                <option key={task.id} value={task.id}>
-                  {task.name} [{task.kind}]
-                </option>
-              ))}
-            </select>
-            <button
-              type="button"
-              className="primary-button workspace-task-create-button"
-              onClick={taskState.handleOpenCreateTaskModal}
-              disabled={!selectedProjectId}
-            >
-              + New Task
-            </button>
-          </div>
-        </header>
-
-        <div className="workspace-body">
-          <ProjectAssetsTreeSidebar
+    <>
+      <ProjectSectionLayout
+        title="Labeling"
+        description={`Manage imported assets, annotate images, and move cleanly into dataset creation. Current scope: ${headerTitle}`}
+        actions={
+          <button type="button" className="primary-button" onClick={handleCreateDataset} disabled={!selectedProjectId}>
+            Create Dataset
+          </button>
+        }
+      >
+        <div className="labeling-workspace-shell">
+          <div className="labeling-workspace-grid">
+          <AssetBrowser
             selectedTreeFolderPath={treeState.selectedTreeFolderPath}
             bulkDeleteMode={bulkDeleteMode}
             isDeletingAssets={isDeletingAssets}
@@ -757,14 +690,17 @@ export default function ProjectAssetsWorkspace() {
             selectedDeleteAssets={selectedDeleteAssets}
             currentAssetId={treeState.currentAsset?.id ?? null}
             assetReviewStateById={assetReviewStateById}
+            onImport={handleImport}
             onCollapseAllFolders={treeState.handleCollapseAllFolders}
             onExpandAllFolders={treeState.handleExpandAllFolders}
             onSelectFolderScope={treeState.handleSelectFolderScope}
             onToggleBulkDeleteMode={handleToggleBulkDeleteMode}
             onSelectAllDeleteScope={handleSelectAllDeleteScope}
             onClearDeleteSelection={handleClearDeleteSelection}
+            onDeleteCurrentAsset={handleDeleteCurrentAsset}
             onDeleteSelectedAssets={handleDeleteSelectedAssets}
             onDeleteSelectedFolder={handleDeleteSelectedFolder}
+            onDeleteCurrentProject={handleDeleteCurrentProject}
             onToggleFolderCollapsed={treeState.handleToggleFolderCollapsed}
             onDeleteFolderPath={handleDeleteFolderPath}
             onToggleDeleteSelection={handleToggleDeleteSelection}
@@ -776,26 +712,42 @@ export default function ProjectAssetsWorkspace() {
             onChangeFilterCategoryId={treeState.setFilterCategoryId}
           />
 
-          <Viewer
-            currentAsset={viewerAsset}
-            totalAssets={treeState.assetRows.length}
-            currentIndex={treeState.safeAssetIndex}
-            pageStatuses={pageStatuses}
-            pageDirtyFlags={pageDirtyFlags}
-            annotationMode={annotationMode}
-            geometryObjects={currentObjects}
-            selectedObjectId={selectedObjectId}
-            hoveredObjectId={hoveredGeometryObjectId}
-            defaultCategoryId={defaultGeometryCategoryId}
-            onSelectObject={handleSelectGeometryObject}
-            onHoverObject={setHoveredGeometryObjectId}
-            onUpsertObject={upsertGeometryObject}
-            onDeleteSelectedObject={deleteSelectedGeometryObject}
-            onImageBasisChange={setCurrentImageBasis}
-            onSelectIndex={treeState.setAssetIndex}
-            onPrev={treeState.handlePrevAsset}
-            onNext={treeState.handleNextAsset}
-          />
+          <div className="labeling-canvas-column">
+            <CanvasToolbar
+              annotationMode={annotationMode}
+              activeTool={canvasTool}
+              onSelectTool={setCanvasTool}
+              onResetView={() => {
+                setViewerResetToken((value) => value + 1);
+                handleSelectGeometryObject(null);
+              }}
+            />
+            <Viewer
+              currentAsset={viewerAsset}
+              annotationMode={annotationMode}
+              canvasTool={canvasTool}
+              resetToken={viewerResetToken}
+              geometryObjects={currentObjects}
+              selectedObjectId={selectedObjectId}
+              hoveredObjectId={hoveredGeometryObjectId}
+              defaultCategoryId={defaultGeometryCategoryId}
+              onSelectObject={handleSelectGeometryObject}
+              onHoverObject={setHoveredGeometryObjectId}
+              onUpsertObject={upsertGeometryObject}
+              onDeleteSelectedObject={deleteSelectedGeometryObject}
+              onImageBasisChange={setCurrentImageBasis}
+            />
+            <AssetFilmstrip
+              assetRows={treeState.assetRows}
+              currentIndex={treeState.safeAssetIndex}
+              pageStatuses={pageStatuses}
+              pageDirtyFlags={pageDirtyFlags}
+              onSelectIndex={treeState.setAssetIndex}
+              onPrev={treeState.handlePrevAsset}
+              onNext={treeState.handleNextAsset}
+            />
+          </div>
+
           <LabelPanel
             labels={activeLabelRows}
             allLabels={allLabelRows}
@@ -813,7 +765,7 @@ export default function ProjectAssetsWorkspace() {
             isSavingLabelChanges={isSavingLabelChanges}
             onDeleteLabel={handleDeleteLabel}
             deletingLabelId={deletingLabelId}
-            labelsLocked={taskState.isTaskLabelsLocked}
+            labelsLocked={isTaskLabelsLocked}
             canSubmit={canSubmit}
             multiLabelEnabled={multiLabelEnabled}
             onToggleMultiLabel={() => setMessage("Classification label mode is controlled by the selected task.")}
@@ -836,45 +788,14 @@ export default function ProjectAssetsWorkspace() {
             onSuggest={suggestionState.handleSuggest}
             onApplySuggestedLabel={handleApplySuggestedLabel}
           />
+          </div>
         </div>
-
-        <ProjectAssetsFooterActions
-          isImporting={isImporting}
-          selectedProjectId={selectedProjectId}
-          isDeletingAssets={isDeletingAssets}
-          hasCurrentAsset={Boolean(treeState.currentAsset)}
-          bulkDeleteMode={bulkDeleteMode}
-          selectedDeleteAssetIdsLength={selectedDeleteAssetIds.length}
-          selectedTreeFolderPath={treeState.selectedTreeFolderPath}
-          selectedFolderAssetCount={treeState.selectedFolderAssetCount}
-          isDeletingProject={isDeletingProject}
-          isCreatingModel={isCreatingModel}
-          onImport={handleImport}
-          onDeleteCurrentAsset={handleDeleteCurrentAsset}
-          onToggleBulkDeleteMode={handleToggleBulkDeleteMode}
-          onDeleteSelectedAssets={handleDeleteSelectedAssets}
-          onDeleteSelectedFolder={handleDeleteSelectedFolder}
-          onDeleteCurrentProject={handleDeleteCurrentProject}
-          onBuildModel={handleBuildModel}
-        />
-      </section>
+      </ProjectSectionLayout>
       <ProjectAssetsStatusOverlay
         message={message}
         messageTone={messageTone}
         importFailures={importFailures}
         onDismissMessage={() => setMessage(null)}
-      />
-      <ProjectAssetsTaskModal
-        open={taskState.isTaskModalOpen}
-        newTaskName={taskState.newTaskName}
-        newTaskKind={taskState.newTaskKind}
-        newTaskLabelMode={taskState.newTaskLabelMode}
-        isCreatingTask={taskState.isCreatingTask}
-        onSetNewTaskName={taskState.setNewTaskName}
-        onSetNewTaskKind={taskState.setNewTaskKind}
-        onSetNewTaskLabelMode={taskState.setNewTaskLabelMode}
-        onClose={() => taskState.setIsTaskModalOpen(false)}
-        onCreate={() => void taskState.handleCreateTask()}
       />
       <ProjectAssetsImportModal
         open={importDialog.open}
@@ -900,6 +821,6 @@ export default function ProjectAssetsWorkspace() {
         onClose={closeImportDialog}
         onConfirm={confirmImportFromDialog}
       />
-    </main>
+    </>
   );
 }

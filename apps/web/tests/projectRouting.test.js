@@ -5,6 +5,7 @@ const {
   deriveProjectSectionFromPathname,
   buildProjectSectionHref,
   buildModelBuilderHref,
+  buildModelCreateHref,
   normalizeSection,
 } = require("../src/lib/workspace/projectRouting.js");
 
@@ -33,6 +34,12 @@ test("buildProjectSectionHref and builder href create project scoped links", () 
 
   assert.equal(buildModelBuilderHref("abc", null), "/projects/abc/models/new");
   assert.equal(buildModelBuilderHref("abc", "retinanet_v1"), "/projects/abc/models/retinanet_v1");
+  assert.equal(buildModelCreateHref("abc"), "/projects/abc/models/new");
+  assert.equal(buildModelCreateHref("abc", { taskId: "task-1" }), "/projects/abc/models/new?taskId=task-1");
+  assert.equal(
+    buildModelCreateHref("abc", { taskId: "task-1", datasetVersionId: "dataset-v2" }),
+    "/projects/abc/models/new?taskId=task-1&datasetVersionId=dataset-v2",
+  );
 });
 
 test("normalizeSection accepts only supported sections", () => {

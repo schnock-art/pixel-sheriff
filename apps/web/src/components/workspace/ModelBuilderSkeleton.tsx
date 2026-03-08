@@ -2,12 +2,14 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 
 import { readModelSummary } from "../../lib/workspace/modelSummary";
+import { ProjectSectionLayout } from "./project-shell/ProjectSectionLayout";
 
 interface ModelBuilderSkeletonProps {
   title: string;
   backHref?: string | null;
   backLabel?: string;
   modelName?: string | null;
+  datasetVersionName?: string | null;
   config?: Record<string, unknown> | null;
   isLoading?: boolean;
   errorMessage?: string | null;
@@ -31,6 +33,7 @@ export function ModelBuilderSkeleton({
   backHref = null,
   backLabel = "Back to Models",
   modelName,
+  datasetVersionName = null,
   config,
   isLoading = false,
   errorMessage = null,
@@ -49,22 +52,24 @@ export function ModelBuilderSkeleton({
   const summary = readModelSummary(config ?? {});
 
   return (
-    <main className="workspace-shell project-page-shell">
-      <section className="workspace-frame project-content-frame">
-        <header className="project-section-header">
-          <h2>{title}</h2>
-          {backHref ? (
-            <Link href={backHref} className="ghost-button">
-              {backLabel}
-            </Link>
-          ) : null}
-        </header>
+    <ProjectSectionLayout
+      title={title}
+      actions={
+        backHref ? (
+          <Link href={backHref} className="ghost-button">
+            {backLabel}
+          </Link>
+        ) : null
+      }
+    >
         <div className="model-builder-grid">
           <aside className="model-builder-steps">
             <h3>Builder Steps</h3>
             <ol>
               {STEPS.map((step) => (
-                <li key={step}>{step}</li>
+                <li key={step}>
+                  <a href={`#model-step-${step.toLowerCase()}`}>{step}</a>
+                </li>
               ))}
             </ol>
           </aside>
@@ -95,6 +100,10 @@ export function ModelBuilderSkeleton({
               <div>
                 <dt>Task</dt>
                 <dd>{summary.task}</dd>
+              </div>
+              <div>
+                <dt>Dataset Version</dt>
+                <dd>{datasetVersionName ?? summary.datasetVersionId}</dd>
               </div>
               <div>
                 <dt>Classes</dt>
@@ -157,7 +166,6 @@ export function ModelBuilderSkeleton({
             {trainButtonLabel}
           </button>
         </footer>
-      </section>
-    </main>
+    </ProjectSectionLayout>
   );
 }

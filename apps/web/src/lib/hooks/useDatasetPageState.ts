@@ -8,13 +8,12 @@ import {
   listCategories,
   listDatasetVersionAssets,
   listDatasetVersions,
-  listTasks,
   previewDatasetVersion,
   setActiveDatasetVersion,
   type AnnotationStatus,
   type DatasetVersionAssetsPayload,
   type DatasetVersionSummaryEnvelope,
-  type Task,
+  type TaskKind,
 } from "../api";
 import { collectFolderPaths } from "../workspace/tree";
 import { useDatasetBrowserState } from "./useDatasetBrowserState";
@@ -50,17 +49,17 @@ function parseApiErrorMessage(error: unknown, fallback: string): string {
 
 export function useDatasetPageState({
   projectId,
-  requestedTaskId,
+  selectedTaskId,
+  selectedTaskKind,
 }: {
   projectId: string;
-  requestedTaskId: string | null;
+  selectedTaskId: string | null;
+  selectedTaskKind: TaskKind | null;
 }) {
   const browser = useDatasetBrowserState();
   const draft = useDatasetDraftState();
 
   const [mode, setMode] = useState<"browse" | "draft">("browse");
-  const [tasks, setTasks] = useState<Task[]>([]);
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [versions, setVersions] = useState<DatasetVersionSummaryEnvelope[]>([]);
   const [activeDatasetVersionId, setActiveDatasetVersionIdState] = useState<string | null>(null);
   const [assetsPayload, setAssetsPayload] = useState<DatasetVersionAssetsPayload | null>(null);
@@ -78,7 +77,6 @@ export function useDatasetPageState({
     () => versions.find((item) => datasetVersionIdOf(item) === browser.selectedDatasetVersionId) ?? null,
     [browser.selectedDatasetVersionId, versions],
   );
-  const selectedTask = useMemo(() => tasks.find((task) => task.id === selectedTaskId) ?? null, [tasks, selectedTaskId]);
   const savedSummary = useMemo(() => summaryFromVersion(selectedVersion), [selectedVersion]);
   const versionClassNames = useMemo(() => classNamesFromVersion(selectedVersion), [selectedVersion]);
   const summarySource: "draft" | "saved" = mode === "draft" ? "draft" : "saved";
@@ -115,53 +113,6 @@ export function useDatasetPageState({
       }),
     [browser.searchText, browser.splitFilter, browser.statusFilter, classFilter, draft.previewSummary?.sample_assets],
   );
-
-  useEffect(() => {
-    let isMounted = true;
-    async function loadTasks() {
-      try {
-        const rows = await listTasks(projectId);
-        if (!isMounted) return;
-        setTasks(rows);
-      } catch {
-        if (!isMounted) return;
-        setTasks([]);
-      }
-    }
-    void loadTasks();
-    return () => {
-      isMounted = false;
-    };
-  }, [projectId]);
-
-  useEffect(() => {
-    if (tasks.length === 0) {
-      setSelectedTaskId(null);
-      return;
-    }
-    const validIds = new Set(tasks.map((task) => task.id));
-    const storageKey = `pixel-sheriff:project-active-task:v1:${projectId}`;
-    const storedTaskId = typeof window !== "undefined" ? window.localStorage.getItem(storageKey) : null;
-    const defaultTaskId = tasks.find((task) => task.is_default)?.id ?? tasks[0]?.id ?? null;
-    const nextTaskId =
-      [requestedTaskId, storedTaskId, defaultTaskId].find(
-        (value): value is string => Boolean(value && validIds.has(value)),
-      ) ?? null;
-    setSelectedTaskId((previous) => (previous === nextTaskId ? previous : nextTaskId));
-    if (nextTaskId && typeof window !== "undefined") {
-      window.localStorage.setItem(storageKey, nextTaskId);
-    }
-  }, [projectId, requestedTaskId, tasks]);
-
-  useEffect(() => {
-    if (!selectedTaskId || typeof window === "undefined") return;
-    const storageKey = `pixel-sheriff:project-active-task:v1:${projectId}`;
-    window.localStorage.setItem(storageKey, selectedTaskId);
-    const url = new URL(window.location.href);
-    if (url.searchParams.get("taskId") === selectedTaskId) return;
-    url.searchParams.set("taskId", selectedTaskId);
-    window.history.replaceState({}, "", url.toString());
-  }, [projectId, selectedTaskId]);
 
   async function loadVersions() {
     setIsLoadingVersions(true);
@@ -283,7 +234,7 @@ export function useDatasetPageState({
       mode: "filter_snapshot" as const,
       filters: {
         include_labeled_only: draft.includeLabeledOnly,
-        include_negative_images: selectedTask?.kind === "bbox" || selectedTask?.kind === "segmentation" ? draft.includeNegativeImages : undefined,
+        include_negative_images: selectedTaskKind === "bbox" || selectedTaskKind === "segmentation" ? draft.includeNegativeImages : undefined,
         include_statuses: draft.includeStatuses,
         exclude_statuses: draft.excludeStatuses,
         include_folder_paths: draft.includeFolderPaths,
@@ -421,10 +372,7 @@ export function useDatasetPageState({
     draft,
     mode,
     setMode,
-    tasks,
     selectedTaskId,
-    setSelectedTaskId,
-    selectedTask,
     versions,
     selectedVersion,
     activeDatasetVersionId,

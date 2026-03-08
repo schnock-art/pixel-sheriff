@@ -34,6 +34,7 @@ function readModelSummary(config) {
 
   return {
     task: asString(source.task),
+    datasetVersionId: asString(source.manifest_id),
     numClasses: asNumber(source.num_classes, 0),
     classNames,
     classNamesText: classNames.length > 0 ? classNames.join(", ") : "-",
@@ -55,4 +56,3 @@ function readModelSummary(config) {
 module.exports = {
   readModelSummary,
 };
-

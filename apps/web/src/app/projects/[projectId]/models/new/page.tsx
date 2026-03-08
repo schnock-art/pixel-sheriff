@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 
+import { ProjectSectionLayout } from "../../../../../components/workspace/project-shell/ProjectSectionLayout";
+import { useProjectShell } from "../../../../../components/workspace/project-shell/ProjectShellContext";
 import { ApiError, createProjectModel, listDatasetVersions } from "../../../../../lib/api";
 
 interface NewModelPageProps {
@@ -27,9 +29,14 @@ function parseApiErrorMessage(error: unknown, fallback: string): string {
 
 export default function NewModelPage({ params }: NewModelPageProps) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const projectId = useMemo(() => decodeURIComponent(params.projectId), [params.projectId]);
+  const { selectedTaskId } = useProjectShell();
+  const taskIdFromQuery = searchParams.get("taskId");
+  const datasetVersionIdFromQuery = searchParams.get("datasetVersionId");
+  const preferredTaskId = taskIdFromQuery || selectedTaskId;
 
-  const [datasetVersionOptions, setDatasetVersionOptions] = useState<Array<{ id: string; name: string; task: string }>>([]);
+  const [datasetVersionOptions, setDatasetVersionOptions] = useState<Array<{ id: string; name: string; task: string; taskId: string | null }>>([]);
   const [selectedTask, setSelectedTask] = useState("");
   const [selectedVersionId, setSelectedVersionId] = useState("");
   const [isLoading, setIsLoading] = useState(true);
@@ -43,21 +50,28 @@ export default function NewModelPage({ params }: NewModelPageProps) {
       try {
         const data = await listDatasetVersions(projectId);
         if (!isMounted) return;
-        const rows = (data.items ?? []).map((item) => {
-          const version = item.version as Record<string, unknown>;
-          const id = typeof version.dataset_version_id === "string" ? version.dataset_version_id : "";
-          const name = typeof version.name === "string" ? version.name : id;
-          const task = typeof version.task === "string" ? version.task : "";
-          return { id, name, task };
-        }).filter((item) => item.id);
+        const rows = (data.items ?? [])
+          .map((item) => {
+            const version = item.version as Record<string, unknown>;
+            const id = typeof version.dataset_version_id === "string" ? version.dataset_version_id : "";
+            const name = typeof version.name === "string" ? version.name : id;
+            const task = typeof version.task === "string" ? version.task : "";
+            const taskId = typeof version.task_id === "string" ? version.task_id : null;
+            return { id, name, task, taskId };
+          })
+          .filter((item) => item.id);
         setDatasetVersionOptions(rows);
 
-        // Set initial selected version (active or first available)
+        const rowsForPreferredTask = preferredTaskId ? rows.filter((row) => row.taskId === preferredTaskId) : rows;
+        const requestedVersion = datasetVersionIdFromQuery ? rows.find((row) => row.id === datasetVersionIdFromQuery) ?? null : null;
         const activeId = data.active_dataset_version_id ?? "";
-        const activeVersion = rows.find((r) => r.id === activeId);
-        const defaultVersion = activeVersion ?? rows[0];
-        setSelectedTask(defaultVersion?.task ?? "");
-        setSelectedVersionId(defaultVersion?.id ?? "");
+        const activeForTask = rowsForPreferredTask.find((row) => row.id === activeId) ?? null;
+        const fallbackForTask = rowsForPreferredTask[0] ?? rows[0] ?? null;
+        const chosen = requestedVersion ?? activeForTask ?? fallbackForTask;
+
+        setSelectedTask(chosen?.taskId ?? preferredTaskId ?? "");
+        setSelectedVersionId(chosen?.id ?? "");
+        setErrorMessage(null);
       } catch (error) {
         if (!isMounted) return;
         setErrorMessage(parseApiErrorMessage(error, "Failed to load dataset versions"));
@@ -69,31 +83,27 @@ export default function NewModelPage({ params }: NewModelPageProps) {
     return () => {
       isMounted = false;
     };
-  }, [projectId]);
+  }, [datasetVersionIdFromQuery, preferredTaskId, projectId]);
 
-  // Unique tasks derived from loaded versions
   const taskOptions = useMemo(() => {
     const seen = new Set<string>();
-    const tasks: string[] = [];
+    const options: Array<{ taskId: string; taskLabel: string }> = [];
     for (const row of datasetVersionOptions) {
-      if (row.task && !seen.has(row.task)) {
-        seen.add(row.task);
-        tasks.push(row.task);
-      }
+      if (!row.taskId || seen.has(row.taskId)) continue;
+      seen.add(row.taskId);
+      options.push({ taskId: row.taskId, taskLabel: row.task || row.taskId });
     }
-    return tasks;
+    return options;
   }, [datasetVersionOptions]);
 
-  // Versions filtered by selected task
   const filteredVersions = useMemo(
-    () => datasetVersionOptions.filter((r) => !selectedTask || r.task === selectedTask),
+    () => datasetVersionOptions.filter((row) => !selectedTask || row.taskId === selectedTask),
     [datasetVersionOptions, selectedTask],
   );
 
-  function handleTaskChange(task: string) {
-    setSelectedTask(task);
-    // Reset selected version to first in filtered list
-    const first = datasetVersionOptions.find((r) => r.task === task);
+  function handleTaskChange(taskId: string) {
+    setSelectedTask(taskId);
+    const first = datasetVersionOptions.find((row) => row.taskId === taskId);
     setSelectedVersionId(first?.id ?? "");
   }
 
@@ -112,61 +122,57 @@ export default function NewModelPage({ params }: NewModelPageProps) {
   }
 
   return (
-    <main className="workspace-shell project-page-shell">
-      <section className="workspace-frame project-content-frame placeholder-page">
-        <header className="project-section-header">
-          <h2>New Model</h2>
-        </header>
-        <div className="placeholder-card">
-          {isLoading ? (
-            <p>Loading dataset versions...</p>
-          ) : errorMessage && datasetVersionOptions.length === 0 ? (
-            <p className="project-field-error">{errorMessage}</p>
-          ) : datasetVersionOptions.length === 0 ? (
-            <p>No dataset versions found. Create a dataset version before adding a model.</p>
-          ) : (
-            <form onSubmit={(e) => void handleSubmit(e)}>
-              <label className="project-field">
-                <span>Task</span>
-                <select value={selectedTask} onChange={(e) => handleTaskChange(e.target.value)}>
-                  {taskOptions.map((task) => (
-                    <option key={task} value={task}>
-                      {task}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="project-field">
-                <span>Dataset Version</span>
-                <select
-                  value={selectedVersionId}
-                  onChange={(e) => setSelectedVersionId(e.target.value)}
-                  disabled={filteredVersions.length === 0}
-                >
-                  {filteredVersions.length === 0 ? (
-                    <option value="">No versions for this task</option>
-                  ) : null}
-                  {filteredVersions.map((row) => (
-                    <option key={row.id} value={row.id}>
-                      {row.task ? `${row.name} (${row.task})` : row.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              {errorMessage ? <p className="project-field-error">{errorMessage}</p> : null}
-              <div className="project-modal-actions">
-                <button
-                  type="submit"
-                  className="primary-button"
-                  disabled={!selectedVersionId || isCreating}
-                >
-                  {isCreating ? "Creating..." : "Create Model"}
-                </button>
-              </div>
-            </form>
-          )}
-        </div>
-      </section>
-    </main>
+    <ProjectSectionLayout
+      title="New Model"
+      description="Start from a dataset version, confirm the task context, and continue into the model builder with the source dataset already attached."
+    >
+      <div className="placeholder-card model-entry-card">
+        {isLoading ? (
+          <p>Loading dataset versions...</p>
+        ) : errorMessage && datasetVersionOptions.length === 0 ? (
+          <p className="project-field-error">{errorMessage}</p>
+        ) : datasetVersionOptions.length === 0 ? (
+          <p>No dataset versions found. Create a dataset version before adding a model.</p>
+        ) : (
+          <form className="model-entry-form" onSubmit={(event) => void handleSubmit(event)}>
+            <div className="model-entry-intro">
+              <h3>Model source</h3>
+              <p>Select the dataset version you want this model to track. The next screen opens the full builder with architecture and export settings.</p>
+            </div>
+            <label className="project-field">
+              <span>Task</span>
+              <select value={selectedTask} onChange={(event) => handleTaskChange(event.target.value)}>
+                {taskOptions.map((task) => (
+                  <option key={task.taskId} value={task.taskId}>
+                    {task.taskLabel}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="project-field">
+              <span>Dataset Version</span>
+              <select
+                value={selectedVersionId}
+                onChange={(event) => setSelectedVersionId(event.target.value)}
+                disabled={filteredVersions.length === 0}
+              >
+                {filteredVersions.length === 0 ? <option value="">No versions for this task</option> : null}
+                {filteredVersions.map((row) => (
+                  <option key={row.id} value={row.id}>
+                    {row.task ? `${row.name} (${row.task})` : row.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {errorMessage ? <p className="project-field-error">{errorMessage}</p> : null}
+            <div className="project-modal-actions">
+              <button type="submit" className="primary-button" disabled={!selectedVersionId || isCreating}>
+                {isCreating ? "Creating..." : "Continue to Builder"}
+              </button>
+            </div>
+          </form>
+        )}
+      </div>
+    </ProjectSectionLayout>
   );
 }

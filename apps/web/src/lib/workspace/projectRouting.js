@@ -29,9 +29,30 @@ function buildModelBuilderHref(projectId, modelId) {
   return `/projects/${encodeURIComponent(projectId)}/models/new`;
 }
 
+function buildModelCreateHref(projectId, options) {
+  if (typeof projectId !== "string" || projectId.trim() === "") {
+    return "/projects";
+  }
+
+  const searchParams = new URLSearchParams();
+  if (options && typeof options === "object") {
+    if (typeof options.taskId === "string" && options.taskId.trim() !== "") {
+      searchParams.set("taskId", options.taskId);
+    }
+    if (typeof options.datasetVersionId === "string" && options.datasetVersionId.trim() !== "") {
+      searchParams.set("datasetVersionId", options.datasetVersionId);
+    }
+  }
+
+  const query = searchParams.toString();
+  const base = `/projects/${encodeURIComponent(projectId)}/models/new`;
+  return query ? `${base}?${query}` : base;
+}
+
 module.exports = {
   normalizeSection,
   deriveProjectSectionFromPathname,
   buildProjectSectionHref,
   buildModelBuilderHref,
+  buildModelCreateHref,
 };

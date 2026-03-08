@@ -387,7 +387,7 @@ export default function ModelDetailPage({ params }: ModelDetailPageProps) {
 
   const editorContent = (
     <div className="model-builder-form-grid">
-      <section className="model-builder-step">
+      <section className="model-builder-step" id="model-step-dataset">
         <h4>Step 1: Source</h4>
         <label className="project-field">
           <span>Task</span>
@@ -494,7 +494,7 @@ export default function ModelDetailPage({ params }: ModelDetailPageProps) {
         </label>
       </section>
 
-      <section className="model-builder-step">
+      <section className="model-builder-step" id="model-step-input">
         <h4>Step 2: Input</h4>
         <label className="project-field">
           <span>Input Size</span>
@@ -580,7 +580,7 @@ export default function ModelDetailPage({ params }: ModelDetailPageProps) {
         </label>
       </section>
 
-      <section className="model-builder-step">
+      <section className="model-builder-step" id="model-step-backbone">
         <h4>Step 3: Backbone</h4>
         <label className="project-field">
           <span>Backbone Name</span>
@@ -618,7 +618,22 @@ export default function ModelDetailPage({ params }: ModelDetailPageProps) {
         </label>
       </section>
 
-      <section className="model-builder-step">
+      <section className="model-builder-step" id="model-step-neck">
+        <h4>Step 4: Neck</h4>
+        <p className="project-field-help">Neck configuration is currently inherited from the selected architecture family. Family changes will keep this in sync.</p>
+      </section>
+
+      <section className="model-builder-step" id="model-step-head">
+        <h4>Step 5: Head</h4>
+        <p className="project-field-help">Head configuration is currently managed by the family preset and task-specific defaults.</p>
+      </section>
+
+      <section className="model-builder-step" id="model-step-loss">
+        <h4>Step 6: Loss</h4>
+        <p className="project-field-help">Loss settings are not exposed as editable controls yet. Current defaults are preserved when you save this model draft.</p>
+      </section>
+
+      <section className="model-builder-step" id="model-step-outputs">
         <h4>Step 7: Outputs</h4>
         <label className="model-builder-checkbox">
           <input
@@ -671,7 +686,7 @@ export default function ModelDetailPage({ params }: ModelDetailPageProps) {
         ) : null}
       </section>
 
-      <section className="model-builder-step">
+      <section className="model-builder-step" id="model-step-export">
         <h4>Step 8: Export</h4>
         <label className="model-builder-checkbox">
           <input
@@ -758,6 +773,7 @@ export default function ModelDetailPage({ params }: ModelDetailPageProps) {
         title={`Model: ${modelName ?? modelId}`}
         backHref={`/projects/${encodeURIComponent(projectId)}/models`}
         modelName={modelName ?? modelId}
+        datasetVersionName={currentVersionFromManifest?.name ?? currentManifestId ?? "-"}
         config={draftConfig ?? savedConfig ?? {}}
         isLoading={isLoading}
         errorMessage={errorMessage}

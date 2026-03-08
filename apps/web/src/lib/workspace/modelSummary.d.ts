@@ -1,5 +1,6 @@
 export interface ModelSummaryView {
   task: string;
+  datasetVersionId: string;
   numClasses: number;
   classNames: string[];
   classNamesText: string;
@@ -18,4 +19,3 @@ export interface ModelSummaryView {
 }
 
 export function readModelSummary(config: Record<string, unknown> | null | undefined): ModelSummaryView;
-
