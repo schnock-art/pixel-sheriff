@@ -59,6 +59,10 @@ make up
 7. Start training in `Experiments` and monitor metrics/logs.
 8. Export dataset zip or model artifacts as needed.
 
+Experiment consistency note:
+- Experiments default to the model's recorded `source_dataset.manifest_id`, not simply the latest active dataset version in the project.
+- To train on a newer dataset version, create or refresh the model from that dataset version first.
+
 ## Useful Make Commands
 
 Core workflow:
@@ -138,6 +142,12 @@ make contracts-check
   - `types.ts` for shared request/response types
   - domain modules such as `datasets.ts`, `experiments.ts`, `deployments.ts`, `models.ts`
   - `apps/web/src/lib/api.ts` remains a compatibility barrel for existing imports
+- Experiment logs are now viewed per run attempt:
+  - the API/UI preserve historical `runs/{attempt}/training.log` files
+  - the experiment detail page resets the visible log buffer when a new run starts and labels the current log view with the served run number
+- Cancel requests are cooperative:
+  - queued runs cancel immediately
+  - running jobs are marked `cancel_requested` and the trainer stops at the next batch boundary
 - When changing frontend structure, run both `./scripts/run_web_tests.sh` and `cd apps/web && npx tsc --noEmit`.
 
 ## Contract Artifacts

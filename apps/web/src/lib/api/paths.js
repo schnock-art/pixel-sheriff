@@ -40,6 +40,9 @@ function buildExperimentAnalyticsPath(projectId, options = {}) {
 
 function buildExperimentLogsPath(projectId, experimentId, options = {}) {
   const params = new URLSearchParams();
+  if (typeof options.attempt === "number" && Number.isFinite(options.attempt) && options.attempt >= 1) {
+    params.set("attempt", String(Math.floor(options.attempt)));
+  }
   if (typeof options.fromByte === "number" && Number.isFinite(options.fromByte) && options.fromByte >= 0) {
     params.set("from_byte", String(Math.floor(options.fromByte)));
   }

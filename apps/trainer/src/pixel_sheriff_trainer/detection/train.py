@@ -25,7 +25,7 @@ class DetectionEpochMetrics:
 def _build_retinanet(num_classes: int) -> torch.nn.Module:
     import torchvision.models.detection as tv_det
     # num_classes here is foreground classes (background added internally by RetinaNet)
-    model = tv_det.retinanet_resnet50_fpn(weights=None, num_classes=num_classes)
+    model = tv_det.retinanet_resnet50_fpn(weights=None, weights_backbone=None, num_classes=num_classes)
     return model
 
 
@@ -99,6 +99,8 @@ def run_detection_training(
         non_blocking = resolved_device.type == "cuda"
 
         for images, targets in train_loader:
+            if should_cancel():
+                return "canceled", None
             images = [img.to(resolved_device, non_blocking=non_blocking) for img in images]
             targets = [{k: v.to(resolved_device, non_blocking=non_blocking) for k, v in t.items()} for t in targets]
 

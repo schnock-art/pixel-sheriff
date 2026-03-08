@@ -29,9 +29,11 @@ export function setDynamicShapeFlags(config: Record<string, unknown>, batch: boo
 export interface DatasetVersionSummary {
   id?: string;
   manifest_id: string;
+  task?: string;
+  label_mode?: "single_label" | "multi_label" | null;
   num_classes: number;
   class_order: string[];
-  class_names: Record<string, string>;
+  class_names: Record<string, string> | string[];
 }
 export interface FamiliesMetadata {
   schema_version: string;

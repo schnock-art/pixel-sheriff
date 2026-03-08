@@ -309,6 +309,8 @@ def run_training(
         total_correct = 0
         non_blocking = resolved_device.type == "cuda"
         for images, labels in train_loader:
+            if should_cancel():
+                return "canceled", None
             images = images.to(resolved_device, non_blocking=non_blocking)
             labels = labels.to(resolved_device, non_blocking=non_blocking)
             optimizer.zero_grad(set_to_none=True)

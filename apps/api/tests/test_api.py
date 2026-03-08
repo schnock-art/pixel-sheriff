@@ -967,8 +967,14 @@ async def test_regression_segmentation_preserves_class_from_object_when_classifi
 async def _create_detection_project_with_manifest(client: AsyncClient, *, project_name: str) -> tuple[str, dict]:
     project = (await client.post("/api/v1/projects", json={"name": project_name, "task_type": "bbox"})).json()
     project_id = project["id"]
+    task_id = project["default_task_id"]
 
-    category = (await client.post(f"/api/v1/projects/{project_id}/categories", json={"name": "boat"})).json()
+    category = (
+        await client.post(
+            f"/api/v1/projects/{project_id}/categories",
+            json={"task_id": task_id, "name": "boat"},
+        )
+    ).json()
     upload = await client.post(
         f"/api/v1/projects/{project_id}/assets/upload",
         files={"file": ("sample.jpg", b"fake-image-bytes", "image/jpeg")},
@@ -980,6 +986,7 @@ async def _create_detection_project_with_manifest(client: AsyncClient, *, projec
         f"/api/v1/projects/{project_id}/annotations",
         json={
             "asset_id": asset["id"],
+            "task_id": task_id,
             "status": "approved",
             "payload_json": {
                 "version": "2.0",
@@ -993,9 +1000,23 @@ async def _create_detection_project_with_manifest(client: AsyncClient, *, projec
     )
     assert annotation.status_code == 200
 
-    export = await client.post(f"/api/v1/projects/{project_id}/exports", json={"selection_criteria_json": {"status": "approved"}})
-    assert export.status_code == 200
-    return project_id, export.json()["manifest_json"]
+    created_dataset = await client.post(
+        f"/api/v1/projects/{project_id}/datasets/versions",
+        json={
+            "name": "detection-v1",
+            "task_id": task_id,
+            "selection": {"mode": "filter_snapshot", "filters": {"include_labeled_only": True}},
+            "split": {
+                "seed": 42,
+                "ratios": {"train": 1.0, "val": 0.0, "test": 0.0},
+                "stratify": {"enabled": False, "by": "label_primary"},
+            },
+            "set_active": True,
+        },
+    )
+    assert created_dataset.status_code == 200
+    dataset_version = created_dataset.json()["version"]
+    return project_id, {"label_schema": dataset_version["labels"]["label_schema"]}
 
 
 @pytest.mark.asyncio
@@ -1025,6 +1046,64 @@ async def test_project_model_create_builds_schema_valid_config_from_manifest(cli
     detail_payload = detail.json()
     assert detail_payload["project_id"] == project_id
     assert detail_payload["config_json"]["source_dataset"]["num_classes"] == len(manifest["label_schema"]["class_order"])
+
+
+@pytest.mark.asyncio
+async def test_project_model_create_allows_multi_label_classification_loss(client: AsyncClient) -> None:
+    project = (await client.post("/api/v1/projects", json={"name": "multi-label-model", "task_type": "classification"})).json()
+    project_id = project["id"]
+    task_id = project["default_task_id"]
+
+    category = (
+        await client.post(
+            f"/api/v1/projects/{project_id}/categories",
+            json={"task_id": task_id, "name": "flower", "display_order": 1},
+        )
+    ).json()
+    upload = await client.post(
+        f"/api/v1/projects/{project_id}/assets/upload",
+        files={"file": ("sample.jpg", b"fake-image-bytes", "image/jpeg")},
+    )
+    assert upload.status_code == 200
+    asset = upload.json()
+
+    annotation = await client.post(
+        f"/api/v1/projects/{project_id}/annotations",
+        json={
+            "asset_id": asset["id"],
+            "task_id": task_id,
+            "status": "approved",
+            "payload_json": {
+                "version": "2.0",
+                "category_ids": [category["id"]],
+                "classification": {"category_ids": [category["id"]], "primary_category_id": category["id"]},
+                "image_basis": {"width": 100, "height": 80},
+            },
+        },
+    )
+    assert annotation.status_code == 200
+
+    created_dataset = await client.post(
+        f"/api/v1/projects/{project_id}/datasets/versions",
+        json={
+            "name": "multi-label-v1",
+            "task_id": task_id,
+            "selection": {"mode": "filter_snapshot", "filters": {"include_labeled_only": True}},
+            "split": {
+                "seed": 42,
+                "ratios": {"train": 1.0, "val": 0.0, "test": 0.0},
+                "stratify": {"enabled": False, "by": "label_primary"},
+            },
+            "set_active": True,
+        },
+    )
+    assert created_dataset.status_code == 200
+
+    created_model = await client.post(f"/api/v1/projects/{project_id}/models", json={})
+    assert created_model.status_code == 200
+    config = created_model.json()["config"]
+    assert config["source_dataset"]["label_mode"] == "multi_label"
+    assert config["loss"]["type"] == "classification_bce_with_logits"
 
 
 @pytest.mark.asyncio
@@ -1328,6 +1407,7 @@ def _seed_experiment_run_artifacts(
     experiment_id: str,
     attempt: int = 1,
     metrics_rows: list[dict] | None = None,
+    log_content: str | None = None,
     include_onnx: bool = False,
     onnx_status: str = "exported",
 ) -> None:
@@ -1352,6 +1432,17 @@ def _seed_experiment_run_artifacts(
         "computed_at": "2025-01-01T00:00:00Z",
         "split": "val",
         "num_samples": 4,
+        "provenance": {
+            "project_id": project_id,
+            "experiment_id": experiment_id,
+            "attempt": attempt,
+            "model_id": "model-1",
+            "task_id": "task-1",
+            "job_id": "job-1",
+            "dataset_version_id": "dv-1",
+            "dataset_export_hash": "hash-1",
+            "dataset_export_relpath": f"exports/{project_id}/hash-1.zip",
+        },
         "classes": {
             "class_order": [1, 2],
             "class_names": ["one", "two"],
@@ -1410,6 +1501,17 @@ def _seed_experiment_run_artifacts(
         "task": "classification",
         "split": "val",
         "computed_at": "2025-01-01T00:00:00Z",
+        "provenance": {
+            "project_id": project_id,
+            "experiment_id": experiment_id,
+            "attempt": attempt,
+            "model_id": "model-1",
+            "task_id": "task-1",
+            "job_id": "job-1",
+            "dataset_version_id": "dv-1",
+            "dataset_export_hash": "hash-1",
+            "dataset_export_relpath": f"exports/{project_id}/hash-1.zip",
+        },
     }
 
     for target in [run_dir / "evaluation.json", experiment_dir / "evaluation.json"]:
@@ -1433,11 +1535,12 @@ def _seed_experiment_run_artifacts(
     for target in [run_dir / "runtime.json", experiment_dir / "runtime.json"]:
         target.write_text(json.dumps(runtime_payload, indent=2, sort_keys=True), encoding="utf-8")
 
-    (run_dir / "training.log").write_text(
-        "epoch=1 train_loss=0.90 val_loss=0.80 val_accuracy=0.50\n"
-        "epoch=2 train_loss=0.70 val_loss=0.60 val_accuracy=0.65\n",
-        encoding="utf-8",
-    )
+    if log_content is None:
+        log_content = (
+            "epoch=1 train_loss=0.90 val_loss=0.80 val_accuracy=0.50\n"
+            "epoch=2 train_loss=0.70 val_loss=0.60 val_accuracy=0.65\n"
+        )
+    (run_dir / "training.log").write_text(log_content, encoding="utf-8")
 
     if include_onnx:
         onnx_dir = run_dir / "onnx"
@@ -1656,6 +1759,9 @@ async def test_experiment_evaluation_endpoint_returns_attempt_payload(client: As
     assert payload["attempt"] == 3
     assert payload["schema_version"] == "1"
     assert payload["overall"]["accuracy"] == 0.75
+    assert payload["provenance"]["dataset_version_id"] == "dv-1"
+    assert payload["provenance"]["attempt"] == 3
+    assert payload["provenance"]["project_id"] == project_id
 
 
 @pytest.mark.asyncio
@@ -1981,6 +2087,7 @@ async def test_experiment_logs_endpoint_returns_chunk_and_cursor(client: AsyncCl
     )
     assert response.status_code == 200
     payload = response.json()
+    assert payload["attempt"] == 1
     assert payload["from_byte"] == 0
     assert payload["to_byte"] > 0
     assert "epoch=1" in payload["content"]
@@ -2002,8 +2109,41 @@ async def test_experiment_logs_endpoint_resets_cursor_when_from_byte_exceeds_fil
     )
     assert response.status_code == 200
     payload = response.json()
+    assert payload["attempt"] == 1
     assert payload["from_byte"] == 0
     assert payload["to_byte"] > 0
+
+
+@pytest.mark.asyncio
+async def test_experiment_logs_endpoint_returns_requested_attempt_chunk(client: AsyncClient) -> None:
+    project_id, model_id = await _create_project_model(client, project_name="exp-logs-attempt")
+    created = await client.post(
+        f"/api/v1/projects/{project_id}/experiments",
+        json={"model_id": model_id, "name": "logs-attempt"},
+    )
+    assert created.status_code == 200
+    experiment_id = created.json()["id"]
+    _seed_experiment_run_artifacts(
+        project_id=project_id,
+        experiment_id=experiment_id,
+        attempt=1,
+        log_content="attempt=1 epoch=1 train_loss=0.90\n",
+    )
+    _seed_experiment_run_artifacts(
+        project_id=project_id,
+        experiment_id=experiment_id,
+        attempt=2,
+        log_content="attempt=2 epoch=1 train_loss=0.40\n",
+    )
+
+    response = await client.get(
+        f"/api/v1/projects/{project_id}/experiments/{experiment_id}/logs?attempt=1&from_byte=0&max_bytes=64"
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["attempt"] == 1
+    assert "attempt=1" in payload["content"]
+    assert "attempt=2" not in payload["content"]
 
 
 @pytest.mark.asyncio
@@ -2464,6 +2604,32 @@ async def _create_detection_project_with_dataset_version(
     return project_id, task_id, dataset_version_id
 
 
+async def _create_dataset_version_for_task(
+    client: AsyncClient,
+    *,
+    project_id: str,
+    task_id: str,
+    name: str,
+    set_active: bool = True,
+) -> str:
+    version_resp = await client.post(
+        f"/api/v1/projects/{project_id}/datasets/versions",
+        json={
+            "name": name,
+            "task_id": task_id,
+            "selection": {"mode": "filter_snapshot", "filters": {}},
+            "split": {
+                "seed": 42,
+                "ratios": {"train": 1.0, "val": 0.0, "test": 0.0},
+                "stratify": {"enabled": False, "by": "label_primary"},
+            },
+            "set_active": set_active,
+        },
+    )
+    assert version_resp.status_code == 200
+    return version_resp.json()["version"]["dataset_version_id"]
+
+
 @pytest.mark.asyncio
 async def test_model_create_with_explicit_dataset_version_id(client: AsyncClient) -> None:
     project_id, _task_id, dataset_version_id = await _create_detection_project_with_dataset_version(
@@ -2508,3 +2674,115 @@ async def test_model_create_with_unknown_dataset_version_id_returns_404(client: 
     )
     assert resp.status_code == 404
     assert resp.json()["error"]["code"] == "dataset_version_not_found"
+
+
+@pytest.mark.asyncio
+async def test_experiment_create_defaults_to_model_source_dataset_not_latest_active_version(client: AsyncClient) -> None:
+    project_id, task_id, dataset_version_id = await _create_detection_project_with_dataset_version(
+        client, project_name="exp-source-dataset-default"
+    )
+
+    created_model = await client.post(
+        f"/api/v1/projects/{project_id}/models",
+        json={"dataset_version_id": dataset_version_id},
+    )
+    assert created_model.status_code == 200
+    model_id = created_model.json()["id"]
+
+    newer_dataset_version_id = await _create_dataset_version_for_task(
+        client,
+        project_id=project_id,
+        task_id=task_id,
+        name="v2",
+        set_active=True,
+    )
+    assert newer_dataset_version_id != dataset_version_id
+
+    created_experiment = await client.post(
+        f"/api/v1/projects/{project_id}/experiments",
+        json={"model_id": model_id, "name": "uses-model-source-dataset"},
+    )
+    assert created_experiment.status_code == 200
+    payload = created_experiment.json()
+    assert payload["config_json"]["dataset_version_id"] == dataset_version_id
+
+
+@pytest.mark.asyncio
+async def test_experiment_create_rejects_dataset_version_mismatch_with_model_source_dataset(client: AsyncClient) -> None:
+    project_id, task_id, dataset_version_id = await _create_detection_project_with_dataset_version(
+        client, project_name="exp-source-dataset-mismatch"
+    )
+
+    created_model = await client.post(
+        f"/api/v1/projects/{project_id}/models",
+        json={"dataset_version_id": dataset_version_id},
+    )
+    assert created_model.status_code == 200
+    model_id = created_model.json()["id"]
+
+    newer_dataset_version_id = await _create_dataset_version_for_task(
+        client,
+        project_id=project_id,
+        task_id=task_id,
+        name="v2",
+        set_active=True,
+    )
+
+    created_experiment = await client.post(
+        f"/api/v1/projects/{project_id}/experiments",
+        json={"model_id": model_id, "name": "mismatch", "dataset_version_id": newer_dataset_version_id},
+    )
+    assert_api_error(
+        created_experiment,
+        status_code=409,
+        code="model_dataset_mismatch",
+        message="Model source dataset does not match the selected dataset version",
+    )
+    payload = created_experiment.json()
+    assert payload["error"]["details"]["dataset_version_id"] == newer_dataset_version_id
+    assert payload["error"]["details"]["issues"][0]["path"] == "source_dataset.manifest_id"
+
+
+@pytest.mark.asyncio
+async def test_experiment_start_rejects_dataset_version_mismatch_with_model_source_dataset(client: AsyncClient) -> None:
+    project_id, task_id, dataset_version_id = await _create_detection_project_with_dataset_version(
+        client, project_name="exp-start-source-dataset-mismatch"
+    )
+
+    created_model = await client.post(
+        f"/api/v1/projects/{project_id}/models",
+        json={"dataset_version_id": dataset_version_id},
+    )
+    assert created_model.status_code == 200
+    model_id = created_model.json()["id"]
+
+    newer_dataset_version_id = await _create_dataset_version_for_task(
+        client,
+        project_id=project_id,
+        task_id=task_id,
+        name="v2",
+        set_active=True,
+    )
+
+    created_experiment = await client.post(
+        f"/api/v1/projects/{project_id}/experiments",
+        json={"model_id": model_id, "name": "draft"},
+    )
+    assert created_experiment.status_code == 200
+    experiment_payload = created_experiment.json()
+    updated_config = dict(experiment_payload["config_json"])
+    updated_config["dataset_version_id"] = newer_dataset_version_id
+
+    updated_experiment = await client.put(
+        f"/api/v1/projects/{project_id}/experiments/{experiment_payload['id']}",
+        json={"config_json": updated_config},
+    )
+    assert updated_experiment.status_code == 200
+
+    started = await client.post(f"/api/v1/projects/{project_id}/experiments/{experiment_payload['id']}/start")
+    assert_api_error(
+        started,
+        status_code=409,
+        code="model_dataset_mismatch",
+        message="Model source dataset does not match the selected dataset version",
+    )

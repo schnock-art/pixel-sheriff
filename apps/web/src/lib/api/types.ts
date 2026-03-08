@@ -423,6 +423,7 @@ export interface ExperimentOnnxPayload {
 }
 
 export interface ExperimentLogsChunk {
+  attempt: number;
   from_byte: number;
   to_byte: number;
   content: string;

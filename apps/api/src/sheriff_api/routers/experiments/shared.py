@@ -58,6 +58,158 @@ def normalize_task(raw_task: str) -> str:
     return "classification"
 
 
+def model_source_manifest_id(model_config: dict[str, Any] | None) -> str | None:
+    if not isinstance(model_config, dict):
+        return None
+    source_dataset = model_config.get("source_dataset")
+    if not isinstance(source_dataset, dict):
+        return None
+    manifest_id = str(source_dataset.get("manifest_id") or "").strip()
+    return manifest_id or None
+
+
+def _source_dataset_contract(model_config: dict[str, Any]) -> dict[str, Any] | None:
+    source_dataset = model_config.get("source_dataset")
+    if not isinstance(source_dataset, dict):
+        return None
+    return source_dataset
+
+
+def _as_str_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    result: list[str] = []
+    for item in value:
+        if isinstance(item, str) and item.strip():
+            result.append(item.strip())
+            continue
+        if isinstance(item, int):
+            result.append(str(item))
+    return result
+
+
+def _dataset_label_contract(dataset_version: dict[str, Any]) -> tuple[list[str], list[str]]:
+    label_schema = dataset_version.get("labels", {}).get("label_schema", {})
+    if not isinstance(label_schema, dict):
+        return [], []
+
+    class_order = _as_str_list(label_schema.get("class_order"))
+    classes = label_schema.get("classes")
+    class_name_by_id: dict[str, str] = {}
+    if isinstance(classes, list):
+        for row in classes:
+            if not isinstance(row, dict):
+                continue
+            class_id = row.get("category_id")
+            if not isinstance(class_id, str) or not class_id.strip():
+                continue
+            name = row.get("export_name") or row.get("name")
+            if isinstance(name, str) and name.strip():
+                class_name_by_id[class_id] = name.strip()
+
+    class_names = [class_name_by_id.get(class_id, class_id) for class_id in class_order]
+    return class_order, class_names
+
+
+def ensure_model_matches_dataset_version(
+    *,
+    project_id: str,
+    model_id: str,
+    model_config: dict[str, Any],
+    dataset_version: dict[str, Any],
+) -> None:
+    source_dataset = _source_dataset_contract(model_config)
+    dataset_version_id = str(dataset_version.get("dataset_version_id") or "")
+    dataset_task_id = str(dataset_version.get("task_id") or "")
+    dataset_task = normalize_task(str(dataset_version.get("task") or "classification"))
+    dataset_class_order, dataset_class_names = _dataset_label_contract(dataset_version)
+
+    issues: list[dict[str, Any]] = []
+    if source_dataset is None:
+        issues.append({"path": "source_dataset", "message": "model config is missing source_dataset"})
+    else:
+        manifest_id = str(source_dataset.get("manifest_id") or "").strip()
+        if not manifest_id:
+            issues.append({"path": "source_dataset.manifest_id", "message": "model config is missing source_dataset.manifest_id"})
+        elif manifest_id != dataset_version_id:
+            issues.append(
+                {
+                    "path": "source_dataset.manifest_id",
+                    "message": "model source dataset differs from selected dataset version",
+                    "expected": manifest_id,
+                    "actual": dataset_version_id,
+                }
+            )
+
+        source_task_id = str(source_dataset.get("task_id") or "").strip()
+        if source_task_id and dataset_task_id and source_task_id != dataset_task_id:
+            issues.append(
+                {
+                    "path": "source_dataset.task_id",
+                    "message": "model source task_id differs from selected dataset task_id",
+                    "expected": source_task_id,
+                    "actual": dataset_task_id,
+                }
+            )
+
+        source_task = normalize_task(str(source_dataset.get("task") or "classification"))
+        if source_task != dataset_task:
+            issues.append(
+                {
+                    "path": "source_dataset.task",
+                    "message": "model source task differs from selected dataset task",
+                    "expected": source_task,
+                    "actual": dataset_task,
+                }
+            )
+
+        source_class_order = _as_str_list(source_dataset.get("class_order"))
+        if source_class_order != dataset_class_order:
+            issues.append(
+                {
+                    "path": "source_dataset.class_order",
+                    "message": "model source class order differs from selected dataset label schema",
+                    "expected": source_class_order,
+                    "actual": dataset_class_order,
+                }
+            )
+
+        source_num_classes = source_dataset.get("num_classes")
+        if isinstance(source_num_classes, int) and source_num_classes != len(dataset_class_order):
+            issues.append(
+                {
+                    "path": "source_dataset.num_classes",
+                    "message": "model source num_classes differs from selected dataset class count",
+                    "expected": source_num_classes,
+                    "actual": len(dataset_class_order),
+                }
+            )
+
+        source_class_names = _as_str_list(source_dataset.get("class_names"))
+        if source_class_names and source_class_names != dataset_class_names:
+            issues.append(
+                {
+                    "path": "source_dataset.class_names",
+                    "message": "model source class names differ from selected dataset label schema",
+                    "expected": source_class_names,
+                    "actual": dataset_class_names,
+                }
+            )
+
+    if issues:
+        raise api_error(
+            status_code=409,
+            code="model_dataset_mismatch",
+            message="Model source dataset does not match the selected dataset version",
+            details={
+                "project_id": project_id,
+                "model_id": model_id,
+                "dataset_version_id": dataset_version_id,
+                "issues": issues,
+            },
+        )
+
+
 def default_training_config(*, model_id: str, dataset_version_id: str, task_id: str | None, task: str) -> dict[str, Any]:
     normalized_task = normalize_task(task)
     return TrainingConfigV0(

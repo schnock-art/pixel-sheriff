@@ -83,3 +83,12 @@ test("validateModelConfigDraft returns normalized AJV issues for invalid config"
   assert.equal(typeof result.errors[0].path, "string");
   assert.equal(typeof result.errors[0].message, "string");
 });
+
+test("validateModelConfigDraft accepts multi-label classification loss type", () => {
+  const config = buildValidConfig();
+  config.source_dataset.label_mode = "multi_label";
+  config.loss.type = "classification_bce_with_logits";
+
+  const result = validateModelConfigDraft(config);
+  assert.equal(result.isValid, true);
+});

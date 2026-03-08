@@ -60,7 +60,7 @@ export function getExperimentOnnx(projectId: string, experimentId: string): Prom
 export function getExperimentLogs(
   projectId: string,
   experimentId: string,
-  options: { fromByte?: number; maxBytes?: number } = {},
+  options: { attempt?: number; fromByte?: number; maxBytes?: number } = {},
 ): Promise<ExperimentLogsChunk> {
   return apiGet<ExperimentLogsChunk>(buildExperimentLogsPath(projectId, experimentId, options));
 }

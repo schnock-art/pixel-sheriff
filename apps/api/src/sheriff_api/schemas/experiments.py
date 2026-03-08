@@ -257,6 +257,7 @@ class ExperimentRuntimeResponse(BaseModel):
 
 
 class ExperimentLogsChunkResponse(BaseModel):
+    attempt: int = Field(ge=1)
     from_byte: int = Field(ge=0)
     to_byte: int = Field(ge=0)
     content: str

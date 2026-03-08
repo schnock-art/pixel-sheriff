@@ -15,6 +15,7 @@ from .shared import (
     as_sse,
     collect_config_issues,
     ensure_dataset_export_zip,
+    ensure_model_matches_dataset_version,
     experiment_store,
     get_dataset_version,
     model_store,
@@ -115,6 +116,12 @@ async def start_project_experiment(
             message="Model config is not available",
             details={"project_id": project_id, "model_id": model_id},
         )
+    ensure_model_matches_dataset_version(
+        project_id=project_id,
+        model_id=model_id,
+        model_config=model_config,
+        dataset_version=dataset_version,
+    )
 
     model_family = shared_architecture_family(model_config)
     task = str(config_json.get("task") or "classification")

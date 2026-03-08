@@ -104,41 +104,126 @@ function setSquareInputSize(config, size) {
   return nextConfig;
 }
 
-const _FAMILY_DEFAULTS = {
-  resnet_classifier: {
+function normalizeModelTask(task) {
+  const normalized = typeof task === "string" ? task.trim().toLowerCase() : "";
+  if (!normalized) return "classification";
+  if (normalized === "bbox" || normalized === "detection") return "detection";
+  if (normalized === "segmentation") return "segmentation";
+  return "classification";
+}
+
+function readSourceDataset(config) {
+  return isPlainObject(config?.source_dataset) ? config.source_dataset : {};
+}
+
+function readSourceDatasetNumClasses(config) {
+  const sourceDataset = readSourceDataset(config);
+  const value = Number(sourceDataset.num_classes);
+  return Number.isInteger(value) && value > 0 ? value : 2;
+}
+
+function readSourceDatasetLabelMode(config) {
+  const sourceDataset = readSourceDataset(config);
+  return sourceDataset.label_mode === "multi_label" ? "multi_label" : "single_label";
+}
+
+function buildFamilyDefaults(familyName, config) {
+  const numClasses = readSourceDatasetNumClasses(config);
+  if (familyName === "retinanet") {
+    return {
+      architecture: {
+        family: "retinanet",
+        framework: "torchvision",
+        precision: "fp32",
+        backbone: { name: "resnet50", pretrained: true },
+        neck: { type: "fpn", fpn_channels: 256 },
+        head: { type: "retinanet", num_classes: numClasses },
+      },
+      loss: { type: "retinanet_default" },
+      outputs: {
+        primary: {
+          name: "coco_detections",
+          type: "task_output",
+          task: "detection",
+          format: "coco_detections",
+        },
+        aux: [],
+      },
+    };
+  }
+
+  if (familyName === "deeplabv3") {
+    return {
+      architecture: {
+        family: "deeplabv3",
+        framework: "torchvision",
+        precision: "fp32",
+        backbone: { name: "resnet50", pretrained: true },
+        neck: { type: "none" },
+        head: { type: "deeplabv3_head", num_classes: numClasses },
+      },
+      loss: { type: "deeplabv3_default" },
+      outputs: {
+        primary: {
+          name: "coco_segmentation",
+          type: "task_output",
+          task: "segmentation",
+          format: "coco_segmentation",
+        },
+        aux: [],
+      },
+    };
+  }
+
+  return {
     architecture: {
-      backbone: { name: "resnet50" },
-      head: { num_classes: 2, dropout: 0.5 },
+      family: "resnet_classifier",
+      framework: "torchvision",
+      precision: "fp32",
+      backbone: { name: "resnet18", pretrained: true },
+      neck: { type: "none" },
+      head: { type: "linear", num_classes: numClasses },
     },
-    loss: { name: "cross_entropy" },
-    outputs: [{ kind: "classification", top_k: [1, 5] }],
-  },
-  retinanet: {
-    architecture: {
-      backbone: { name: "resnet50" },
-      head: { num_classes: 2, score_threshold: 0.3, nms_threshold: 0.4 },
+    loss: {
+      type: readSourceDatasetLabelMode(config) === "multi_label"
+        ? "classification_bce_with_logits"
+        : "classification_cross_entropy",
     },
-    loss: { name: "focal_loss" },
-    outputs: [{ kind: "detection" }],
-  },
-  deeplabv3: {
-    architecture: {
-      backbone: { name: "resnet50" },
-      head: { num_classes: 2 },
+    outputs: {
+      primary: {
+        name: "classification_logits",
+        type: "task_output",
+        task: "classification",
+        format: "classification_logits",
+      },
+      aux: [],
     },
-    loss: { name: "cross_entropy" },
-    outputs: [{ kind: "segmentation" }],
-  },
-};
+  };
+}
 
 function setSourceDataset(config, datasetVersionSummary) {
   const nextConfig = cloneModelConfig(config);
   const sourceDataset = isPlainObject(nextConfig.source_dataset) ? nextConfig.source_dataset : {};
   const manifestId = datasetVersionSummary.manifest_id || datasetVersionSummary.id;
+  const classOrder = Array.isArray(datasetVersionSummary.class_order) ? datasetVersionSummary.class_order.slice() : [];
+  const normalizedTask = normalizeModelTask(datasetVersionSummary.task);
+  let classNames = [];
+  if (Array.isArray(datasetVersionSummary.class_names)) {
+    classNames = datasetVersionSummary.class_names.slice();
+  } else if (isPlainObject(datasetVersionSummary.class_names)) {
+    classNames = classOrder.map((classId) => {
+      const value = datasetVersionSummary.class_names[classId];
+      return typeof value === "string" && value ? value : String(classId);
+    });
+  }
   sourceDataset.manifest_id = manifestId;
+  sourceDataset.task = normalizedTask;
+  if (datasetVersionSummary.label_mode === "single_label" || datasetVersionSummary.label_mode === "multi_label") {
+    sourceDataset.label_mode = datasetVersionSummary.label_mode;
+  }
   sourceDataset.num_classes = datasetVersionSummary.num_classes;
-  sourceDataset.class_order = Array.isArray(datasetVersionSummary.class_order) ? datasetVersionSummary.class_order.slice() : [];
-  sourceDataset.class_names = isPlainObject(datasetVersionSummary.class_names) ? { ...datasetVersionSummary.class_names } : {};
+  sourceDataset.class_order = classOrder;
+  sourceDataset.class_names = classNames;
   nextConfig.source_dataset = sourceDataset;
   const architecture = isPlainObject(nextConfig.architecture) ? nextConfig.architecture : {};
   const head = isPlainObject(architecture.head) ? architecture.head : {};
@@ -158,7 +243,7 @@ function setArchitectureFamily(config, familyName, familiesMetadata) {
     ? currentBackboneName
     : allowedBackbones[0] || "resnet50";
 
-  const defaults = _FAMILY_DEFAULTS[familyName];
+  const defaults = buildFamilyDefaults(familyName, config);
   const nextConfig = cloneModelConfig(config);
 
   if (defaults) {

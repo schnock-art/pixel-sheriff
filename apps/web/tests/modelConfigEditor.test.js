@@ -89,10 +89,28 @@ test("setSourceDataset patches manifest_id, num_classes, class_order, class_name
   };
   const next = setSourceDataset(config, summary);
   assert.equal(next.source_dataset.manifest_id, "manifest-456");
+  assert.equal(next.source_dataset.task, "classification");
   assert.equal(next.source_dataset.num_classes, 5);
   assert.deepEqual(next.source_dataset.class_order, summary.class_order);
-  assert.deepEqual(next.source_dataset.class_names, summary.class_names);
+  assert.deepEqual(next.source_dataset.class_names, ["Cat", "Dog", "Bird", "Fish", "Rabbit"]);
   assert.equal(next.architecture.head.num_classes, 5);
+});
+
+test("setSourceDataset normalizes bbox task names and preserves label mode", () => {
+  const next = setSourceDataset(
+    { source_dataset: {}, architecture: { head: { num_classes: 1 } } },
+    {
+      id: "ds-bbox",
+      task: "bbox",
+      label_mode: "multi_label",
+      num_classes: 2,
+      class_order: ["flower", "bee"],
+      class_names: { flower: "Flower", bee: "Bee" },
+    },
+  );
+  assert.equal(next.source_dataset.task, "detection");
+  assert.equal(next.source_dataset.label_mode, "multi_label");
+  assert.deepEqual(next.source_dataset.class_names, ["Flower", "Bee"]);
 });
 
 test("setSourceDataset falls back to id when manifest_id is absent", () => {
@@ -116,17 +134,33 @@ test("setSourceDataset does not mutate the input config", () => {
 
 test("setArchitectureFamily regenerates architecture, head, loss, and outputs for the new family", () => {
   const config = {
-    source_dataset: { manifest_id: "ds-1", num_classes: 3 },
+    source_dataset: { manifest_id: "ds-1", task: "detection", num_classes: 3 },
     architecture: { backbone: { name: "resnet50" }, head: { num_classes: 3 } },
-    loss: { name: "old_loss" },
-    outputs: [{ kind: "old" }],
+    loss: { type: "classification_cross_entropy" },
+    outputs: { primary: { name: "old", type: "task_output", task: "classification", format: "classification_logits" }, aux: [] },
   };
   const next = setArchitectureFamily(config, "retinanet", FAMILIES_METADATA);
-  assert.equal(next.loss.name, "focal_loss");
-  assert.deepEqual(next.outputs, [{ kind: "detection" }]);
-  assert.equal(next.architecture.head.score_threshold, 0.3);
-  assert.equal(next.architecture.head.nms_threshold, 0.4);
+  assert.equal(next.loss.type, "retinanet_default");
+  assert.equal(next.outputs.primary.task, "detection");
+  assert.equal(next.outputs.primary.format, "coco_detections");
+  assert.equal(next.architecture.head.type, "retinanet");
+  assert.equal(next.architecture.head.num_classes, 3);
+  assert.equal(next.architecture.framework, "torchvision");
   assert.equal(next.architecture.family, "retinanet");
+});
+
+test("setArchitectureFamily uses BCE loss for multi-label classification datasets", () => {
+  const next = setArchitectureFamily(
+    {
+      source_dataset: { task: "classification", label_mode: "multi_label", num_classes: 4 },
+      architecture: { backbone: { name: "resnet18" }, head: { num_classes: 4 } },
+    },
+    "resnet_classifier",
+    FAMILIES_METADATA,
+  );
+  assert.equal(next.loss.type, "classification_bce_with_logits");
+  assert.equal(next.architecture.head.num_classes, 4);
+  assert.equal(next.outputs.primary.format, "classification_logits");
 });
 
 test("setArchitectureFamily keeps existing backbone when it is in allowed_backbones", () => {
@@ -150,8 +184,8 @@ test("setArchitectureFamily resets backbone to first allowed when current backbo
 test("setArchitectureFamily does not mutate the input config", () => {
   const config = {
     architecture: { backbone: { name: "resnet50" }, head: { num_classes: 2 } },
-    loss: { name: "cross_entropy" },
-    outputs: [{ kind: "classification" }],
+    loss: { type: "classification_cross_entropy" },
+    outputs: { primary: { name: "classification_logits", type: "task_output", task: "classification", format: "classification_logits" }, aux: [] },
   };
   const frozen = JSON.parse(JSON.stringify(config));
   setArchitectureFamily(config, "retinanet", FAMILIES_METADATA);

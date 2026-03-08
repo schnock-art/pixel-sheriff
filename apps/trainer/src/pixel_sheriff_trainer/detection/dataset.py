@@ -16,7 +16,7 @@ from torchvision import transforms
 class DetectionSample:
     path: Path
     asset_id: str
-    image_id: int
+    image_id: str
     width: int
     height: int
 
@@ -32,7 +32,7 @@ class DetectionDataset(Dataset):
     def __init__(
         self,
         samples: list[DetectionSample],
-        annotations: dict[int, list[dict[str, Any]]],  # image_id → [ann, ...]
+        annotations: dict[str, list[dict[str, Any]]],  # image_id → [ann, ...]
         transform: Any,
         *,
         target_width: int,
@@ -140,18 +140,30 @@ def build_detection_loaders(
 
     # Parse images
     images_raw = coco.get("images", [])
-    image_map: dict[int, dict[str, Any]] = {int(img["id"]): img for img in images_raw}
+    image_map: dict[str, dict[str, Any]] = {}
+    for img in images_raw:
+        image_id = str(img.get("id", "")).strip()
+        if not image_id:
+            continue
+        image_map[image_id] = img
 
-    # Parse annotations → per-image-id lists (remap cat_id to 1-indexed for RetinaNet)
+    # Parse annotations → per-image-id lists. Torchvision RetinaNet expects
+    # class labels in the foreground range [0, num_classes - 1].
     annotations_raw = coco.get("annotations", [])
-    annotations_by_image: dict[int, list[dict[str, Any]]] = {}
+    annotations_by_image: dict[str, list[dict[str, Any]]] = {}
     for ann in annotations_raw:
-        img_id = int(ann.get("image_id", -1))
-        cat_id = int(ann.get("category_id", -1))
-        if img_id < 0 or cat_id not in cat_id_to_idx:
+        image_id = ann.get("image_id")
+        if image_id is None:
+            continue
+        img_id = str(image_id)
+        try:
+            cat_id = int(ann.get("category_id", -1))
+        except (TypeError, ValueError):
+            continue
+        if cat_id not in cat_id_to_idx:
             continue
         remapped = dict(ann)
-        remapped["category_id"] = cat_id_to_idx[cat_id] + 1  # 1-indexed (0 = background)
+        remapped["category_id"] = cat_id_to_idx[cat_id]
         annotations_by_image.setdefault(img_id, []).append(remapped)
 
     # Build samples list
@@ -176,12 +188,12 @@ def build_detection_loaders(
 
     # Split
     manifest_path = dataset_dir / "manifest.json"
-    train_ids: set[int] = set()
-    val_ids: set[int] = set()
+    train_ids: set[str] = set()
+    val_ids: set[str] = set()
     if manifest_path.exists():
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         splits = manifest.get("splits", {})
-        asset_to_image: dict[str, int] = {
+        asset_to_image: dict[str, str] = {
             str(img_info.get("asset_id", img_id)): img_id
             for img_id, img_info in image_map.items()
         }

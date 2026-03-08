@@ -41,6 +41,7 @@ interface DatasetVersionRecord {
   id: string;
   name: string;
   task: string;
+  label_mode?: "single_label" | "multi_label" | null;
   num_classes: number;
   class_order: string[];
   class_names: Record<string, string>;
@@ -70,6 +71,22 @@ function parseApiErrorMessage(error: unknown, fallback: string): string {
     return error.message;
   }
   return error instanceof Error ? error.message : fallback;
+}
+
+function normalizeModelTask(task: string | null | undefined): string | null {
+  if (typeof task !== "string") return null;
+  const normalized = task.trim().toLowerCase();
+  if (!normalized) return null;
+  if (normalized === "bbox" || normalized === "detection") return "detection";
+  if (normalized === "classification_single" || normalized === "classification") return "classification";
+  if (normalized === "segmentation") return "segmentation";
+  return normalized;
+}
+
+function tasksMatch(left: string | null | undefined, right: string | null | undefined): boolean {
+  const normalizedLeft = normalizeModelTask(left);
+  const normalizedRight = normalizeModelTask(right);
+  return normalizedLeft !== null && normalizedLeft === normalizedRight;
 }
 
 export default function ModelDetailPage({ params }: ModelDetailPageProps) {
@@ -151,6 +168,10 @@ export default function ModelDetailPage({ params }: ModelDetailPageProps) {
               id: typeof v.dataset_version_id === "string" ? v.dataset_version_id : "",
               name: typeof v.name === "string" ? v.name : "",
               task: typeof v.task === "string" ? v.task : "",
+              label_mode:
+                typeof v.label_mode === "string" && (v.label_mode === "single_label" || v.label_mode === "multi_label")
+                  ? (v.label_mode as "single_label" | "multi_label")
+                  : null,
               num_classes: typeof v.num_classes === "number" ? v.num_classes : 0,
               class_order: Array.isArray(v.class_order) ? (v.class_order as string[]) : [],
               class_names: v.class_names && typeof v.class_names === "object" ? (v.class_names as Record<string, string>) : {},
@@ -199,14 +220,17 @@ export default function ModelDetailPage({ params }: ModelDetailPageProps) {
   const currentVersionFromManifest = allDatasetVersions.find((v) => v.id === currentManifestId) ?? null;
   const currentFamilyFromMeta = familiesMetadata.families.find((f) => f.name === currentFamilyName) ?? null;
   const currentTask =
-    currentVersionFromManifest?.task ?? currentFamilyFromMeta?.task ?? null;
+    currentVersionFromManifest?.task
+    ?? allDatasetVersions.find((v) => tasksMatch(v.task, currentFamilyFromMeta?.task))?.task
+    ?? currentFamilyFromMeta?.task
+    ?? null;
 
   const uniqueTasks = Array.from(new Set(allDatasetVersions.map((v) => v.task))).filter(Boolean);
   const familiesForTask = currentTask
-    ? familiesMetadata.families.filter((f) => f.task === currentTask)
+    ? familiesMetadata.families.filter((f) => tasksMatch(f.task, currentTask))
     : familiesMetadata.families;
   const versionsForTask = currentTask
-    ? allDatasetVersions.filter((v) => v.task === currentTask)
+    ? allDatasetVersions.filter((v) => tasksMatch(v.task, currentTask))
     : allDatasetVersions;
   const allowedBackbones = currentFamilyFromMeta?.allowed_backbones ?? [];
 
@@ -318,9 +342,9 @@ export default function ModelDetailPage({ params }: ModelDetailPageProps) {
             value={currentTask ?? ""}
             onChange={(event) => {
               const nextTask = event.target.value;
-              const nextVersions = allDatasetVersions.filter((v) => v.task === nextTask);
+              const nextVersions = allDatasetVersions.filter((v) => tasksMatch(v.task, nextTask));
               const nextVersion = nextVersions[0] ?? null;
-              const nextFamilies = familiesMetadata.families.filter((f) => f.task === nextTask);
+              const nextFamilies = familiesMetadata.families.filter((f) => tasksMatch(f.task, nextTask));
               const nextFamily = nextFamilies[0] ?? null;
               setDraftConfig((current) => {
                 if (!current) return current;
@@ -329,6 +353,8 @@ export default function ModelDetailPage({ params }: ModelDetailPageProps) {
                   next = setSourceDataset(next, {
                     id: nextVersion.id,
                     manifest_id: nextVersion.id,
+                    task: nextVersion.task,
+                    label_mode: nextVersion.label_mode,
                     num_classes: nextVersion.num_classes,
                     class_order: nextVersion.class_order,
                     class_names: nextVersion.class_names,
@@ -368,6 +394,8 @@ export default function ModelDetailPage({ params }: ModelDetailPageProps) {
                   ? (setSourceDataset(current, {
                       id: version.id,
                       manifest_id: version.id,
+                      task: version.task,
+                      label_mode: version.label_mode,
                       num_classes: version.num_classes,
                       class_order: version.class_order,
                       class_names: version.class_names,

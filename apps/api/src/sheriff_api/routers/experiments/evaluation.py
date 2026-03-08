@@ -64,6 +64,7 @@ async def get_project_experiment_runtime(
 async def get_project_experiment_logs(
     project_id: str,
     experiment_id: str,
+    attempt: int | None = Query(default=None, ge=1),
     from_byte: int = Query(default=0, ge=0),
     max_bytes: int = Query(default=65536, ge=1, le=524288),
     db: AsyncSession = Depends(get_db),
@@ -81,6 +82,7 @@ async def get_project_experiment_logs(
     payload = experiment_store.read_training_log_chunk(
         project_id,
         experiment_id,
+        attempt=attempt,
         from_byte=from_byte,
         max_bytes=max_bytes,
     )
@@ -92,6 +94,7 @@ async def get_project_experiment_logs(
             details={"project_id": project_id, "experiment_id": experiment_id},
         )
     return ExperimentLogsChunkResponse(
+        attempt=int(payload.get("attempt", 0)),
         from_byte=int(payload.get("from_byte", 0)),
         to_byte=int(payload.get("to_byte", 0)),
         content=str(payload.get("content", "")),

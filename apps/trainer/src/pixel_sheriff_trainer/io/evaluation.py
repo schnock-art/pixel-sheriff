@@ -43,6 +43,10 @@ def write_classification_evaluation(
     project_id: str,
     experiment_id: str,
     attempt: int,
+    model_id: str | None,
+    task_id: str | None,
+    job_id: str | None,
+    dataset_export: dict[str, Any] | None,
     class_order: list[str],
     class_names: list[str],
     evaluation: ClassifierEvaluation,
@@ -69,12 +73,25 @@ def write_classification_evaluation(
 
     sample_limit = max(1, int(sample_bucket_limit))
     prediction_rows = [_as_prediction_payload(row) for row in evaluation.predictions]
+    dataset_export = dataset_export if isinstance(dataset_export, dict) else {}
+    provenance = {
+        "project_id": project_id,
+        "experiment_id": experiment_id,
+        "attempt": int(attempt),
+        "model_id": str(model_id or ""),
+        "task_id": str(task_id or ""),
+        "job_id": str(job_id or ""),
+        "dataset_version_id": str(dataset_export.get("dataset_version_id") or ""),
+        "dataset_export_hash": str(dataset_export.get("content_hash") or ""),
+        "dataset_export_relpath": str(dataset_export.get("zip_relpath") or ""),
+    }
     evaluation_payload = {
         "schema_version": "1",
         "task": "classification",
         "computed_at": computed_at,
         "split": "val",
         "num_samples": len(prediction_rows),
+        "provenance": provenance,
         "classes": {
             "class_order": [str(class_id) for class_id in class_order],
             "class_names": [str(name) for name in class_names],
@@ -102,6 +119,7 @@ def write_classification_evaluation(
         "task": "classification",
         "split": "val",
         "computed_at": computed_at,
+        "provenance": provenance,
     }
 
     # Persist run-attempt artifacts.

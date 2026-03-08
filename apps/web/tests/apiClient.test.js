@@ -77,8 +77,8 @@ test("buildDatasetVersionAssetsPath normalizes paging and filter params", () => 
 
 test("buildExperimentLogsPath and event url keep query parameters stable", () => {
   assert.equal(
-    buildExperimentLogsPath("project-1", "exp-2", { fromByte: 12.8, maxBytes: 4096 }),
-    "/projects/project-1/experiments/exp-2/logs?from_byte=12&max_bytes=4096",
+    buildExperimentLogsPath("project-1", "exp-2", { attempt: 3, fromByte: 12.8, maxBytes: 4096 }),
+    "/projects/project-1/experiments/exp-2/logs?attempt=3&from_byte=12&max_bytes=4096",
   );
   assert.equal(
     buildExperimentEventsUrl("http://localhost:8010/", "project 1", "exp/2", { fromLine: 5.7, attempt: 3 }),

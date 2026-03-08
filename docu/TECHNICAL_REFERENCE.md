@@ -94,6 +94,7 @@ make help
   - `manifest.json` now includes explicit `tasks`, `label_schema`, `splits`, `training_defaults`, and `stats`
   - COCO companion file is now `coco_instances.json`
   - COCO and manifest now use the same canonical UUID asset IDs (`image_id == asset_id`)
+  - trainer detection/segmentation dataset loaders accept those UUID image IDs directly; only COCO `category_id` remains integer
   - class names are normalized to lowercase slug in model-facing/export fields
   - detection/segmentation exports now support explicit negative-image policy (`include_negative_images`)
   - detection COCO annotations now omit `segmentation` instead of emitting empty lists
@@ -113,6 +114,7 @@ make help
   - model detail `Train Model` CTA supports `Continue` or `New run`
   - training config draft save/edit in `draft`/`failed` states
   - `start`/`cancel` lifecycle APIs
+  - queued cancel is immediate; running cancel is cooperative and polled between training batches so long epochs do not trap the run in `running` until epoch end
   - Redis-queued trainer worker execution with persisted metrics/checkpoints
   - run-attempt isolation under `runs/{attempt}` to avoid metric/event/checkpoint mixing across restarts
   - live SSE stream consumed by web chart UI
@@ -130,6 +132,7 @@ make help
   - predictions rows now include `confidence` (top-1 softmax probability) and optional `margin` (`top1-top2`)
   - analytics API endpoint for multi-run comparison with `max_points` (default `200`, bounded server-side)
   - evaluation/samples API endpoints include served `attempt` in responses
+  - evaluation and predictions metadata now include a `provenance` block with project/experiment/attempt/model/task/dataset-export identifiers
   - experiments list page now includes summary cards, multi-run metric chart, and hyperparameter scatter
   - experiment detail page now includes confusion matrix drill-down, per-class metrics, and prediction explorer
 - Backend ML model-building layer (v0) is now implemented under `apps/api/src/sheriff_api/ml`:
@@ -189,6 +192,10 @@ make help
   - list endpoint supports optional `task_id` filtering
   - preview/list endpoints support pagination/filter/search without dumping full membership
   - experiment start export uses stored version split map (membership is not recomputed from live annotation state)
+- Experiment create/start consistency:
+  - experiment drafts default to the model's recorded `source_dataset.manifest_id`
+  - experiment create/start rejects dataset versions whose recorded task/class/source contract diverges from the saved model config (`model_dataset_mismatch`)
+  - to train against a newer dataset version, create or refresh the model from that dataset version first
 - Category/class identity contract uses UUID strings across API/web/trainer/deploy metadata.
 - Models pages support project-scoped create/list/detail plus editable model config drafting/saving
 - Model export contract:
@@ -240,10 +247,16 @@ make help
   - latest mirrors at experiment root are default API/UI read targets
   - `GET /experiments/{id}/evaluation` serves latest available evaluation and includes `attempt`
   - `GET /experiments/{id}/samples` supports `mode`, `true_class_index`, `pred_class_index`, `limit`, and includes `attempt`
+  - `GET /experiments/{id}/logs` supports optional `attempt`, `from_byte`, and `max_bytes`; responses include the served `attempt`
+  - experiment detail log viewer resets byte cursor/content on run-attempt changes instead of mixing prior-run output into the current view
+  - evaluation and predictions metadata carry provenance for `project_id`, `experiment_id`, `attempt`, `model_id`, `task_id`, and dataset export identity
   - confusion-matrix normalization stays client-side:
     - `none`: raw counts
     - `by_true`: row-normalized
     - `by_pred`: column-normalized
+- Detection trainer contract:
+  - COCO `category_id` values remain integer in exports but RetinaNet training remaps them to zero-based foreground label indices (`0..num_classes-1`)
+  - trainer RetinaNet construction disables implicit backbone weight downloads (`weights=None`, `weights_backbone=None`) for deterministic local/container runs
     - zero-sum rows/columns render `0` safely
 - Local folder import with one modal:
   - import into existing or new project
@@ -314,6 +327,7 @@ make help
   - deterministic zip artifact with `manifest.json`, `coco_instances.json`, and `assets/`
   - one-click download from web UI
   - canonical join key is UUID `asset_id` across manifest and COCO
+  - trainer loaders consume UUID string `image_id` values directly from COCO/manifest joins
   - classification exports keep `coco_instances.json` with empty `annotations`
   - detection/segmentation exports include geometry records with validated `bbox`/`segmentation` and computed `area`
   - configurable detection/segmentation negative-image policy through `selection_criteria_json.include_negative_images` (`true` by default)
@@ -328,6 +342,8 @@ make help
   - `packages/pixel_sheriff_ml` provides shared helpers used by API + trainer (`architecture_family`, `build_resnet_classifier`)
   - trainer uses shared classifier builder for real classification runs
   - API experiment queue/start flow uses shared architecture-family resolution
+  - model config defaults normalize dataset task kinds before family selection (`bbox` -> `detection`, `classification_single` -> `classification`)
+  - multi-label classification defaults now use `loss.type = "classification_bce_with_logits"` and that loss is part of the shared `ModelConfig` schema
 - Trainer reliability safeguards:
   - classification dataloader defaults to `runtime.num_workers=0` (falls back to `advanced.num_workers`) for container-safe execution
   - if a shared-memory dataloader failure occurs with `num_workers > 0`, trainer retries once with `num_workers=0`
@@ -506,7 +522,7 @@ Also, trainer Dockerfiles now share a named BuildKit pip cache (`id=pixel-sherif
 - `GET /api/v1/projects/{project_id}/experiments/{experiment_id}/evaluation` (includes top-level `attempt`; returns `evaluation_not_found` when unavailable)
 - `GET /api/v1/projects/{project_id}/experiments/{experiment_id}/samples` (supports mode/class filters + `limit`; includes top-level `attempt`)
 - `GET /api/v1/projects/{project_id}/experiments/{experiment_id}/runtime` (latest runtime info; returns `runtime_not_found` when unavailable)
-- `GET /api/v1/projects/{project_id}/experiments/{experiment_id}/logs` (byte-range tailing for `training.log`; returns `logs_not_found` when unavailable)
+- `GET /api/v1/projects/{project_id}/experiments/{experiment_id}/logs` (byte-range tailing for `training.log`; supports optional `attempt`; response includes served `attempt`; returns `logs_not_found` when unavailable)
 - `GET /api/v1/projects/{project_id}/experiments/{experiment_id}/onnx`
 - `GET /api/v1/projects/{project_id}/experiments/{experiment_id}/onnx/download?file=model|metadata`
 - `GET/POST /api/v1/models`

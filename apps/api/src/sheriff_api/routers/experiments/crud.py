@@ -18,9 +18,11 @@ from .shared import (
     collect_config_issues,
     deep_merge,
     default_training_config,
+    ensure_model_matches_dataset_version,
     experiment_store,
     get_dataset_version,
     latest_dataset_version,
+    model_source_manifest_id,
     model_store,
     require_project,
 )
@@ -55,9 +57,19 @@ async def create_project_experiment(
             details={"project_id": project_id, "model_id": payload.model_id},
         )
 
-    selected_dataset_version_id = payload.dataset_version_id if isinstance(payload.dataset_version_id, str) else None
+    model_config = model_record.get("config_json")
+    source_manifest_id = model_source_manifest_id(model_config)
+
+    selected_dataset_version_id = payload.dataset_version_id if isinstance(payload.dataset_version_id, str) else source_manifest_id
     if selected_dataset_version_id:
         selected_dataset = await get_dataset_version(db, project_id, selected_dataset_version_id)
+        if selected_dataset is None:
+            raise api_error(
+                status_code=404,
+                code="dataset_version_not_found",
+                message="Dataset version not found in project",
+                details={"project_id": project_id, "dataset_version_id": selected_dataset_version_id},
+            )
     else:
         selected_dataset = await latest_dataset_version(db, project_id)
     if selected_dataset is None:
@@ -77,7 +89,6 @@ async def create_project_experiment(
             details={"project_id": project_id, "dataset_version_id": selected_dataset.get("dataset_version_id")},
         )
 
-    model_config = model_record.get("config_json")
     model_task_id = str(model_record.get("task_id") or "")
     if not model_task_id and isinstance(model_config, dict):
         source_dataset = model_config.get("source_dataset")
@@ -89,6 +100,13 @@ async def create_project_experiment(
             code="task_mismatch",
             message="Model and dataset tasks are incompatible",
             details={"project_id": project_id, "model_task_id": model_task_id, "dataset_task_id": dataset_task_id},
+        )
+    if isinstance(model_config, dict):
+        ensure_model_matches_dataset_version(
+            project_id=project_id,
+            model_id=payload.model_id,
+            model_config=model_config,
+            dataset_version=selected_dataset,
         )
 
     task = str(selected_dataset.get("task") or "classification")

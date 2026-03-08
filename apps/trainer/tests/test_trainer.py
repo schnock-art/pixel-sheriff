@@ -11,23 +11,30 @@ try:
     import torch  # noqa: F401
     from pixel_sheriff_ml.model_factory import build_resnet_classifier
     from pixel_sheriff_trainer.classification.dataset import build_classification_loaders
+    from pixel_sheriff_trainer.detection.dataset import build_detection_loaders
+    from pixel_sheriff_trainer.detection.train import DetectionEpochMetrics, run_detection_training
     from pixel_sheriff_trainer.export_onnx import export_best_classification_onnx
     from pixel_sheriff_trainer.io.checkpoints import save_checkpoint
     from pixel_sheriff_trainer.io.storage import ExperimentStorage
     from pixel_sheriff_trainer.jobs import TrainJob, parse_train_job
     from pixel_sheriff_trainer.runner import TrainRunner
+    from pixel_sheriff_trainer.segmentation.dataset import build_segmentation_loaders
 
     HAS_TORCH = True
 except Exception:
     HAS_TORCH = False
     build_resnet_classifier = None  # type: ignore[assignment]
     build_classification_loaders = None  # type: ignore[assignment]
+    build_detection_loaders = None  # type: ignore[assignment]
+    DetectionEpochMetrics = None  # type: ignore[assignment]
+    run_detection_training = None  # type: ignore[assignment]
     export_best_classification_onnx = None  # type: ignore[assignment]
     save_checkpoint = None  # type: ignore[assignment]
     ExperimentStorage = None  # type: ignore[assignment]
     TrainJob = None  # type: ignore[assignment]
     parse_train_job = None  # type: ignore[assignment]
     TrainRunner = None  # type: ignore[assignment]
+    build_segmentation_loaders = None  # type: ignore[assignment]
 
 try:
     import numpy as np  # noqa: F401
@@ -203,6 +210,113 @@ def _seed_experiment_layout(root: Path, project_id: str, experiment_id: str, job
     )
 
 
+def _write_tiny_coco_export_zip(root: Path, project_id: str, *, include_segmentation: bool) -> Path:
+    from PIL import Image
+
+    asset_ids = [str(uuid.uuid4()), str(uuid.uuid4())]
+    assets_dir = root / "tmp_coco_assets"
+    assets_dir.mkdir(parents=True, exist_ok=True)
+    image_paths: list[Path] = []
+    for index, color in enumerate([(255, 255, 255), (220, 220, 220)]):
+        image_path = assets_dir / f"coco_{index}.png"
+        Image.new("RGB", (16, 16), color=color).save(image_path)
+        image_paths.append(image_path)
+
+    manifest = {
+        "schema_version": "1.2",
+        "label_schema": {
+            "classes": [{"id": 1, "name": "flower"}],
+            "class_order": [1],
+        },
+        "splits": {
+            "train": {"asset_ids": [asset_ids[0]]},
+            "val": {"asset_ids": [asset_ids[1]]},
+            "test": {"asset_ids": []},
+        },
+        "assets": [
+            {
+                "asset_id": asset_ids[0],
+                "path": "assets/coco_0.png",
+                "media_type": "image",
+                "width": 16,
+                "height": 16,
+                "coco": {"image_id": asset_ids[0]},
+            },
+            {
+                "asset_id": asset_ids[1],
+                "path": "assets/coco_1.png",
+                "media_type": "image",
+                "width": 16,
+                "height": 16,
+                "coco": {"image_id": asset_ids[1]},
+            },
+        ],
+    }
+
+    coco = {
+        "images": [
+            {
+                "id": asset_ids[0],
+                "asset_id": asset_ids[0],
+                "file_name": "assets/coco_0.png",
+                "width": 16,
+                "height": 16,
+            },
+            {
+                "id": asset_ids[1],
+                "asset_id": asset_ids[1],
+                "file_name": "assets/coco_1.png",
+                "width": 16,
+                "height": 16,
+            },
+        ],
+        "categories": [
+            {
+                "id": 1,
+                "name": "flower",
+                "stable_id": "flower",
+            }
+        ],
+        "annotations": [
+            {
+                "id": 1,
+                "image_id": asset_ids[0],
+                "category_id": 1,
+                "bbox": [1, 1, 8, 8],
+                "area": 64,
+                "iscrowd": 0,
+                **(
+                    {"segmentation": [[1, 1, 9, 1, 9, 9, 1, 9]]}
+                    if include_segmentation else
+                    {}
+                ),
+            },
+            {
+                "id": 2,
+                "image_id": asset_ids[1],
+                "category_id": 1,
+                "bbox": [2, 2, 6, 6],
+                "area": 36,
+                "iscrowd": 0,
+                **(
+                    {"segmentation": [[2, 2, 8, 2, 8, 8, 2, 8]]}
+                    if include_segmentation else
+                    {}
+                ),
+            },
+        ],
+    }
+
+    zip_path = root / "exports" / project_id / "tiny_coco.zip"
+    zip_path.parent.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as bundle:
+        bundle.writestr("manifest.json", json.dumps(manifest, indent=2, sort_keys=True))
+        bundle.writestr("coco_instances.json", json.dumps(coco, indent=2, sort_keys=True))
+        for index, image_path in enumerate(image_paths):
+            bundle.write(image_path, arcname=f"assets/coco_{index}.png")
+    return zip_path
+
+
 def test_dataset_loader_reads_tiny_export_zip(tmp_path: Path) -> None:
     if not HAS_TORCH:
         pytest.skip("torch/torchvision not available")
@@ -243,6 +357,152 @@ def test_dataset_loader_runtime_prefetch_and_cache_overrides(tmp_path: Path) -> 
     assert int(getattr(loaded.train_loader, "prefetch_factor", 0)) == 3
 
 
+def test_detection_loader_accepts_uuid_image_ids(tmp_path: Path) -> None:
+    if not HAS_TORCH:
+        pytest.skip("torch/torchvision not available")
+    project_id = str(uuid.uuid4())
+    zip_path = _write_tiny_coco_export_zip(tmp_path, project_id, include_segmentation=False)
+    loaded = build_detection_loaders(
+        export_zip_path=zip_path,
+        workdir=tmp_path / "workdir_detection",
+        model_config={"input": {"input_size": [32, 32]}},
+        training_config={"batch_size": 1},
+    )
+    assert loaded.num_classes == 1
+    assert loaded.train_count == 1
+    assert loaded.val_count == 1
+
+    train_images, train_targets = next(iter(loaded.train_loader))
+    assert len(train_images) == 1
+    assert tuple(train_targets[0]["boxes"].shape) == (1, 4)
+    assert train_targets[0]["labels"].tolist() == [0]
+
+
+def test_detection_training_smoke_accepts_zero_based_labels(tmp_path: Path) -> None:
+    if not HAS_TORCH:
+        pytest.skip("torch/torchvision not available")
+    project_id = str(uuid.uuid4())
+    zip_path = _write_tiny_coco_export_zip(tmp_path, project_id, include_segmentation=False)
+    loaded = build_detection_loaders(
+        export_zip_path=zip_path,
+        workdir=tmp_path / "workdir_detection_train",
+        model_config={"input": {"input_size": [32, 32]}},
+        training_config={"batch_size": 1},
+    )
+
+    captured_epochs: list[DetectionEpochMetrics] = []
+    checkpoints: list[tuple[str, int]] = []
+    status, evaluation = run_detection_training(
+        model_config={
+            "architecture": {
+                "family": "retinanet",
+                "backbone": {"name": "resnet50", "pretrained": False},
+                "head": {"num_classes": loaded.num_classes},
+            }
+        },
+        training_config={
+            "optimizer": {"lr": 0.0001, "weight_decay": 0.0001},
+            "scheduler": {"type": "none"},
+            "logging": {"save_every_epochs": 1, "keep_best": False},
+            "evaluation": {"eval_interval_epochs": 1},
+            "epochs": 1,
+            "batch_size": 1,
+        },
+        train_loader=loaded.train_loader,
+        val_loader=loaded.val_loader,
+        num_classes=loaded.num_classes,
+        should_cancel=lambda: False,
+        on_epoch=lambda row: captured_epochs.append(row),
+        on_checkpoint=lambda kind, epoch, _metric_name, _value, _payload: checkpoints.append((kind, epoch)),
+        device=torch.device("cpu"),
+        resume_state=None,
+    )
+    assert status == "completed"
+    assert evaluation is not None
+    assert len(captured_epochs) == 1
+    assert checkpoints
+
+
+def test_detection_training_cancel_stops_between_batches(monkeypatch: pytest.MonkeyPatch) -> None:
+    if not HAS_TORCH:
+        pytest.skip("torch/torchvision not available")
+
+    import pixel_sheriff_trainer.detection.train as detection_train
+
+    class FakeDetector(torch.nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.scale = torch.nn.Parameter(torch.tensor(1.0))
+
+        def forward(self, images, targets=None):  # type: ignore[override]
+            return {"total_loss": self.scale}
+
+    yielded_batches = {"count": 0}
+    sample_image = torch.zeros((3, 8, 8), dtype=torch.float32)
+    sample_target = {
+        "boxes": torch.tensor([[1.0, 1.0, 4.0, 4.0]], dtype=torch.float32),
+        "labels": torch.tensor([0], dtype=torch.int64),
+    }
+
+    class FakeLoader:
+        def __iter__(self):
+            for _ in range(3):
+                yielded_batches["count"] += 1
+                yield [sample_image.clone()], [{key: value.clone() for key, value in sample_target.items()}]
+
+    monkeypatch.setattr(detection_train, "_build_retinanet", lambda _num_classes: FakeDetector())
+    monkeypatch.setattr(
+        detection_train,
+        "evaluate_detection",
+        lambda *_args, **_kwargs: pytest.fail("evaluation should not run after cancellation"),
+    )
+
+    status, evaluation = run_detection_training(
+        model_config={"architecture": {"family": "retinanet"}},
+        training_config={
+            "optimizer": {"lr": 0.0001, "weight_decay": 0.0},
+            "scheduler": {"type": "none"},
+            "logging": {"save_every_epochs": 1, "keep_best": False},
+            "evaluation": {"eval_interval_epochs": 1},
+            "epochs": 1,
+            "batch_size": 1,
+        },
+        train_loader=FakeLoader(),
+        val_loader=[],
+        num_classes=1,
+        should_cancel=lambda: yielded_batches["count"] >= 2,
+        on_epoch=lambda _row: pytest.fail("epoch metrics should not be emitted after cancellation"),
+        on_checkpoint=lambda *_args, **_kwargs: pytest.fail("checkpoints should not be written after cancellation"),
+        device=torch.device("cpu"),
+        resume_state=None,
+    )
+
+    assert yielded_batches["count"] == 2
+    assert status == "canceled"
+    assert evaluation is None
+
+
+def test_segmentation_loader_accepts_uuid_image_ids(tmp_path: Path) -> None:
+    if not HAS_TORCH:
+        pytest.skip("torch/torchvision not available")
+    project_id = str(uuid.uuid4())
+    zip_path = _write_tiny_coco_export_zip(tmp_path, project_id, include_segmentation=True)
+    loaded = build_segmentation_loaders(
+        export_zip_path=zip_path,
+        workdir=tmp_path / "workdir_segmentation",
+        model_config={"input": {"input_size": [32, 32]}},
+        training_config={"batch_size": 1},
+    )
+    assert loaded.num_classes == 1
+    assert loaded.train_count == 1
+    assert loaded.val_count == 1
+
+    train_images, train_masks = next(iter(loaded.train_loader))
+    assert tuple(train_images.shape) == (1, 3, 32, 32)
+    assert tuple(train_masks.shape) == (1, 32, 32)
+    assert int(train_masks.max().item()) == 1
+
+
 @pytest.mark.skipif(not HAS_TORCH, reason="torch is required")
 def test_runner_process_writes_events_metrics_and_checkpoints(tmp_path: Path) -> None:
     if not HAS_TORCH:
@@ -262,6 +522,7 @@ def test_runner_process_writes_events_metrics_and_checkpoints(tmp_path: Path) ->
         experiment_id=experiment_id,
         model_id="model-1",
         task="classification",
+        task_id="task-1",
         model_config={
             "architecture": {
                 "family": "resnet_classifier",
@@ -440,6 +701,7 @@ def test_runner_respects_eval_interval_and_writes_null_val_metrics(tmp_path: Pat
         experiment_id=experiment_id,
         model_id="model-1",
         task="classification",
+        task_id="task-1",
         model_config={
             "architecture": {
                 "family": "resnet_classifier",
@@ -500,6 +762,7 @@ def test_runner_fails_fast_for_batchnorm_small_batch(tmp_path: Path) -> None:
         experiment_id=experiment_id,
         model_id="model-1",
         task="classification",
+        task_id="task-1",
         model_config={
             "architecture": {
                 "family": "resnet_classifier",

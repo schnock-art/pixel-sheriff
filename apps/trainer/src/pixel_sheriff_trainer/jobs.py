@@ -15,6 +15,7 @@ class TrainJob:
     experiment_id: str
     model_id: str
     task: str
+    task_id: str | None
     model_config: dict[str, Any]
     training_config: dict[str, Any]
     dataset_export: dict[str, Any]
@@ -70,8 +71,8 @@ def parse_train_job(raw_payload: str | dict[str, Any]) -> TrainJob:
         experiment_id=str(payload["experiment_id"]),
         model_id=str(payload["model_id"]),
         task=str(payload["task"]),
+        task_id=str(payload["task_id"]) if payload.get("task_id") is not None else None,
         model_config=model_config,
         training_config=training_config,
         dataset_export=dataset_export,
     )
-

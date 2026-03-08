@@ -244,6 +244,7 @@
           "type": "string",
           "enum": [
             "classification_cross_entropy",
+            "classification_bce_with_logits",
             "retinanet_default",
             "fasterrcnn_default",
             "maskrcnn_default",

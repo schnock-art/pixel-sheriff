@@ -425,6 +425,10 @@ Status reflects current repository behavior.
     - [x] task-aware labeling -> dataset activation -> experiment creation
   - [x] add CI/typecheck coverage that catches schema drift and TypeScript prop-signature regressions early
   - [x] keep this block targeted; prefer high-signal seam tests over broad snapshot-heavy suites
+- [x] Workflow Consistency Hardening
+  - [x] default experiment drafts to the model's recorded source dataset instead of the latest project dataset version
+  - [x] reject experiment create/start when the selected dataset version diverges from the saved model source contract
+  - [x] persist evaluation provenance so classification run artifacts can be audited without joining multiple files first
 
 ## Deferred (Roadmap-aligned)
 - [ ] Review/QA mode

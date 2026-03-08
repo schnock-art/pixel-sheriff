@@ -411,6 +411,7 @@ class TrainRunner:
                 project_id=job.project_id,
                 experiment_id=job.experiment_id,
                 attempt=job.attempt,
+                job=job,
                 loaders=loaders,
                 training_result=training_result,
                 eval_result=eval_result,

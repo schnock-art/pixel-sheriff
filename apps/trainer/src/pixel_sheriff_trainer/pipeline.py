@@ -72,6 +72,7 @@ class TaskPipeline:
         project_id: str,
         experiment_id: str,
         attempt: int,
+        job: Any,
         loaders: TaskLoaders,
         training_result: TrainingResult,
         eval_result: EvaluationResult,

@@ -102,6 +102,8 @@ def run_segmentation_training(
         non_blocking = resolved_device.type == "cuda"
 
         for images, masks in train_loader:
+            if should_cancel():
+                return "canceled", None
             images = images.to(resolved_device, non_blocking=non_blocking)
             masks = masks.to(resolved_device, non_blocking=non_blocking)
 

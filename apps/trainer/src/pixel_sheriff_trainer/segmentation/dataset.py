@@ -17,7 +17,7 @@ from torchvision import transforms
 class SegmentationSample:
     path: Path
     asset_id: str
-    image_id: int
+    image_id: str
     width: int
     height: int
 
@@ -33,7 +33,7 @@ class SegmentationDataset(Dataset):
     def __init__(
         self,
         samples: list[SegmentationSample],
-        annotations: dict[int, list[dict[str, Any]]],
+        annotations: dict[str, list[dict[str, Any]]],
         cat_id_to_idx: dict[int, int],
         image_transform: Any,
         *,
@@ -147,14 +147,20 @@ def build_segmentation_loaders(
     num_classes = len(categories)
 
     images_raw = coco.get("images", [])
-    image_map: dict[int, dict[str, Any]] = {int(img["id"]): img for img in images_raw}
+    image_map: dict[str, dict[str, Any]] = {}
+    for img in images_raw:
+        image_id = str(img.get("id", "")).strip()
+        if not image_id:
+            continue
+        image_map[image_id] = img
 
     annotations_raw = coco.get("annotations", [])
-    annotations_by_image: dict[int, list[dict[str, Any]]] = {}
+    annotations_by_image: dict[str, list[dict[str, Any]]] = {}
     for ann in annotations_raw:
-        img_id = int(ann.get("image_id", -1))
-        if img_id < 0:
+        image_id = ann.get("image_id")
+        if image_id is None:
             continue
+        img_id = str(image_id)
         annotations_by_image.setdefault(img_id, []).append(ann)
 
     samples: list[SegmentationSample] = []
@@ -178,12 +184,12 @@ def build_segmentation_loaders(
 
     # Split
     manifest_path = dataset_dir / "manifest.json"
-    train_ids: set[int] = set()
-    val_ids: set[int] = set()
+    train_ids: set[str] = set()
+    val_ids: set[str] = set()
     if manifest_path.exists():
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         splits = manifest.get("splits", {})
-        asset_to_image: dict[str, int] = {
+        asset_to_image: dict[str, str] = {
             str(img_info.get("asset_id", img_id)): img_id
             for img_id, img_info in image_map.items()
         }

@@ -102,6 +102,10 @@ Defined in `apps/api/src/sheriff_api/db/models.py`:
     - `predictions.jsonl`
     - `predictions.meta.json`
   - implementation: `apps/api/src/sheriff_api/services/experiment_store.py`
+- Experiment source-of-truth rule:
+  - model configs own the canonical training data contract through `source_dataset`
+  - experiment drafts default to that recorded dataset version
+  - experiment create/start rejects runs whose selected dataset version diverges from the saved model source contract
 
 Key invariants:
 
@@ -185,6 +189,9 @@ Extensible model-building runtime is now implemented for `ModelConfig v1.0`:
   - `resnet_classifier` (normalized primary output: `{"predictions": logits}`)
   - `retinanet` (normalized primary output wraps native detection list under `predictions`)
   - `deeplabv3` (normalized primary output uses segmentation `out` tensor under `predictions`)
+- Model/dataset task normalization:
+  - dataset/task kinds are normalized before model-family matching (`bbox` -> `detection`, `classification_single` -> `classification`)
+  - multi-label classification model defaults use `classification_bce_with_logits`
 - Output composer:
   - composes primary + aux outputs
   - deterministic output tuple ordering from `export.onnx.output_names`
@@ -256,6 +263,11 @@ Trainer responsibilities and runtime behavior:
   - export-zip dataset loader (`classification/dataset.py`)
   - epoch train/eval loops (`classification/train.py`, `classification/eval.py`)
   - evaluation artifact writer (`io/evaluation.py`) persists per-attempt + latest mirrors
+  - evaluation artifacts now include provenance for project/experiment/attempt/model/task/dataset export identity
+- Detection/segmentation data contract:
+  - export zips use UUID `asset_id` as COCO `image_id`
+  - trainer detection and segmentation loaders consume string `image_id` values directly and only remap integer COCO `category_id`
+  - detection loader remaps exported COCO category ids to zero-based RetinaNet foreground labels before training
 - Shared experiment-file contract:
   - reads/writes run-attempt files under `experiments/{project_id}/{experiment_id}/runs/{attempt}/...`
   - appends `events.jsonl` for SSE tail streaming
@@ -271,13 +283,14 @@ Trainer responsibilities and runtime behavior:
     - confusion matrix raw counts
     - per-class precision/recall/f1/support
     - prediction rows with `asset_id`, `relative_path`, `true_class_index`, `pred_class_index`, `confidence` (top-1 softmax), optional `margin` (top1-top2)
-  - `predictions.meta.json` carries `schema_version`, `attempt`, `num_samples`, `task`, `split`, `computed_at`
+  - `predictions.meta.json` carries `schema_version`, `attempt`, `num_samples`, `task`, `split`, `computed_at`, and provenance identifiers
 - Idempotency + attempt safety:
   - validates `status.json` active job/attempt before execution
   - stale/duplicate jobs are ignored
 - Worker reliability safeguards:
   - default `TrainingConfig v0.1` uses `runtime.num_workers = 0` (fallback `advanced.num_workers`) for container-safe data loading
   - if a shared-memory dataloader failure occurs with `num_workers > 0`, trainer retries once with `num_workers=0` and emits a status message event
+  - detection RetinaNet builder disables implicit pretrained-backbone downloads to keep trainer behavior deterministic offline
   - runtime tuning fields supported in config:
     - `runtime.pin_memory`, `runtime.persistent_workers`
     - `runtime.prefetch_factor`, `runtime.cache_resized_images`, `runtime.max_cached_images`
@@ -395,6 +408,7 @@ Project-scoped experiments:
 - start flow pins dataset export, creates run attempt metadata, enqueues Redis job, and transitions to `queued`
 - experiment export split membership comes from stored dataset-version `splits.items` (saved version map), not live split recomputation
 - SSE events stream by tailing run-attempt `events.jsonl` with optional resume cursor (`from_line`) and run selection (`attempt`)
+- logs endpoint can tail a specific run attempt via `attempt`; responses include the served attempt so the web client can keep the viewer aligned with the current run
 - router implementation is decomposed by concern under `apps/api/src/sheriff_api/routers/experiments/`:
   - `crud.py`
   - `analytics.py`
@@ -405,6 +419,7 @@ Project-scoped experiments:
 - analytics endpoint returns multi-run `series` with `max_points` query support (default 200, bounded server-side)
 - router registration keeps `/analytics` before `/{experiment_id}` to avoid path shadowing
 - evaluation/samples endpoints default to latest completed attempt and include top-level `attempt` in responses
+- logs endpoint defaults to the latest attempt with a log file, but the experiment detail UI requests `activeAttempt` explicitly and clears the visible buffer on run-attempt changes
 - latest mirror files at experiment root are convenience snapshots; run-attempt artifacts remain source-of-truth
 
 Error response contract:
@@ -594,6 +609,7 @@ Labeling workspace leaf components (`apps/web/src/components/workspace/project-a
   - experiment detail header includes `Back to Experiments` navigation to project experiments list
   - `Start Training` enqueues worker job and transitions `queued -> running -> terminal`
   - `Cancel` supports queued cancel and running cancel-request semantics
+  - trainer pipelines poll `cancel_requested` between batches, so long detection/segmentation epochs no longer need to finish before cancellation takes effect
   - checkpoints tracked as `best_metric`, `best_loss`, `latest` with selection placeholder (`Pick`)
   - metrics chart supports axis/ticks, legend, series toggles, crosshair hover, and per-epoch tooltip values
   - metrics panel shows last epoch duration + ETA + estimated finish clock time
@@ -610,6 +626,7 @@ Labeling workspace leaf components (`apps/web/src/components/workspace/project-a
   - non-classification experiments show dashboard placeholder (`not supported yet`)
   - trainer failure details are surfaced in UI (toast + inline `Last run error` in experiment header)
   - refresh-safe behavior: persisted history loads first, then live stream resumes for running experiments
+  - training log panel is attempt-scoped and displays the served run number so reruns do not look like one continuous log stream
 - Feedback behavior:
   - auto-dismiss toast message for success/error summaries
   - delete summaries include removed image and annotation counts

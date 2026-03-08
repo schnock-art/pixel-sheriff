@@ -191,6 +191,7 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
   const [isOnnxLoading, setIsOnnxLoading] = useState(false);
   const [logsContent, setLogsContent] = useState("");
   const [logsCursor, setLogsCursor] = useState(0);
+  const [logsAttempt, setLogsAttempt] = useState<number | null>(null);
   const [logsError, setLogsError] = useState<string | null>(null);
   const [isLogsLoading, setIsLogsLoading] = useState(false);
   const [isLogsExpanded, setIsLogsExpanded] = useState(true);
@@ -210,6 +211,7 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
   const eventCursorRef = useRef(0);
   const logsCursorRef = useRef(0);
   const logsContentRef = useRef("");
+  const activeAttemptRef = useRef<number | null>(null);
 
   const isEditable = status === "draft" || status === "failed" || status === "canceled";
   const isRunningLike = status === "running" || status === "queued";
@@ -515,25 +517,35 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
 
   const fetchLogsChunk = useCallback(
     async (reset = false) => {
+      const requestedAttempt = activeAttempt;
       setIsLogsLoading(true);
       try {
         const chunk = await getExperimentLogs(projectId, experimentId, {
+          attempt: requestedAttempt ?? undefined,
           fromByte: reset ? 0 : logsCursorRef.current,
           maxBytes: 65536,
         });
+        if ((activeAttemptRef.current ?? null) !== (requestedAttempt ?? null)) {
+          return;
+        }
         setLogsError(null);
         const merged = mergeLogChunk(reset ? "" : logsContentRef.current, chunk, { maxBytes: 200 * 1024, maxLines: 5000 });
         logsContentRef.current = merged.content;
         logsCursorRef.current = merged.cursor;
         setLogsContent(merged.content);
         setLogsCursor(merged.cursor);
+        setLogsAttempt(chunk.attempt);
       } catch (error) {
         if (error instanceof ApiError && error.status === 404) {
+          if ((activeAttemptRef.current ?? null) !== (requestedAttempt ?? null)) {
+            return;
+          }
           if (reset) {
             logsContentRef.current = "";
             logsCursorRef.current = 0;
             setLogsCursor(0);
             setLogsContent("");
+            setLogsAttempt(requestedAttempt ?? null);
           }
           setLogsError(null);
         } else {
@@ -543,7 +555,7 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
         setIsLogsLoading(false);
       }
     },
-    [experimentId, projectId],
+    [activeAttempt, experimentId, projectId],
   );
 
   useEffect(() => {
@@ -559,13 +571,18 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
   }, [loadOnnx, status]);
 
   useEffect(() => {
+    activeAttemptRef.current = activeAttempt;
+  }, [activeAttempt]);
+
+  useEffect(() => {
     logsCursorRef.current = 0;
     logsContentRef.current = "";
     setLogsCursor(0);
     setLogsContent("");
+    setLogsAttempt(activeAttempt);
     setLogsError(null);
     void fetchLogsChunk(true);
-  }, [experimentId, fetchLogsChunk]);
+  }, [activeAttempt, experimentId, fetchLogsChunk]);
 
   useEffect(() => {
     if (!logsAutoRefresh || !isRunningLike) return;
@@ -1335,7 +1352,9 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
                   {isLogsExpanded ? (
                     <pre className="experiment-log-viewer">{logsContent || "No training logs available yet."}</pre>
                   ) : null}
-                  <p className="experiment-log-cursor">Cursor: {logsCursor}</p>
+                  <p className="experiment-log-cursor">
+                    {logsAttempt ? `Run #${logsAttempt} • ` : ""}Cursor: {logsCursor}
+                  </p>
                 </div>
 
                 <div className="experiment-card">
