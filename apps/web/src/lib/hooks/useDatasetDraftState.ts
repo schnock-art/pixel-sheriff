@@ -1,19 +1,22 @@
 import { useState } from "react";
 
-import type { AnnotationStatus } from "../api";
+import type { AnnotationStatus, DatasetVersionAssetsPayload } from "../api";
 import { normalizeStatusList } from "../workspace/datasetPage";
 
 export interface DraftPreviewSummary {
   total: number;
   class_counts: Record<string, number>;
+  class_names: Record<string, string>;
   split_counts: { train: number; val: number; test: number };
   warnings: string[];
   sample_asset_ids: string[];
+  sample_assets: DatasetVersionAssetsPayload["items"];
 }
 
 export interface DraftStateFromVersion {
   name?: string;
   include_labeled_only?: boolean;
+  include_negative_images?: boolean;
   include_statuses?: AnnotationStatus[];
   exclude_statuses?: AnnotationStatus[];
   include_folder_paths?: string[];
@@ -28,6 +31,7 @@ const DEFAULT_INCLUDE_STATUSES: AnnotationStatus[] = ["labeled", "approved", "ne
 export function useDatasetDraftState() {
   const [draftName, setDraftName] = useState("Dataset v1");
   const [includeLabeledOnly, setIncludeLabeledOnly] = useState(true);
+  const [includeNegativeImages, setIncludeNegativeImages] = useState(true);
   const [includeStatuses, setIncludeStatuses] = useState<AnnotationStatus[]>(DEFAULT_INCLUDE_STATUSES);
   const [excludeStatuses, setExcludeStatuses] = useState<AnnotationStatus[]>([]);
   const [includeFolderPaths, setIncludeFolderPaths] = useState<string[]>([]);
@@ -42,6 +46,7 @@ export function useDatasetDraftState() {
   function resetDraft() {
     setDraftName("Dataset v1");
     setIncludeLabeledOnly(true);
+    setIncludeNegativeImages(true);
     setIncludeStatuses(DEFAULT_INCLUDE_STATUSES);
     setExcludeStatuses([]);
     setIncludeFolderPaths([]);
@@ -57,6 +62,7 @@ export function useDatasetDraftState() {
   function initDraftFromVersion(value: DraftStateFromVersion) {
     setDraftName(typeof value.name === "string" && value.name.trim() ? `${value.name} copy` : "Dataset version copy");
     setIncludeLabeledOnly(Boolean(value.include_labeled_only));
+    setIncludeNegativeImages(value.include_negative_images !== false);
     setIncludeStatuses(normalizeStatusList(value.include_statuses ?? []) as AnnotationStatus[]);
     setExcludeStatuses(normalizeStatusList(value.exclude_statuses ?? []) as AnnotationStatus[]);
     setIncludeFolderPaths(Array.isArray(value.include_folder_paths) ? value.include_folder_paths.filter((item) => typeof item === "string") : []);
@@ -74,6 +80,8 @@ export function useDatasetDraftState() {
     setDraftName,
     includeLabeledOnly,
     setIncludeLabeledOnly,
+    includeNegativeImages,
+    setIncludeNegativeImages,
     includeStatuses,
     setIncludeStatuses,
     excludeStatuses,

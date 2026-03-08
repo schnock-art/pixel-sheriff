@@ -22,18 +22,11 @@ def _utc_now_iso() -> str:
 
 def _load_schema() -> dict[str, Any]:
     resolved = Path(__file__).resolve()
-    repo_root_candidate: Path | None = None
-    try:
-        repo_root_candidate = resolved.parents[5] / "ModelConfig_schema.json"
-    except IndexError:
-        repo_root_candidate = None
-
     candidates = [
+        resolved.parents[5] / "packages" / "contracts" / "schemas" / "model-config-1.0.schema.json",
         Path.cwd() / "src" / "sheriff_api" / "schemas" / "model_config_schema.json",
         resolved.parents[1] / "schemas" / "model_config_schema.json",
     ]
-    if repo_root_candidate is not None:
-        candidates.append(repo_root_candidate)
     for candidate in candidates:
         if not candidate.exists():
             continue

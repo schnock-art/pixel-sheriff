@@ -49,6 +49,27 @@ services:
     volumes:
       - ./data:/app/data
 
+  api-test:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile.test
+    environment:
+      DB_HOST: ${DB_HOST:-db}
+      DB_PORT: ${DB_PORT:-5432}
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASS: ${DB_PASS:-postgres}
+      DB_NAME: ${TEST_DB_NAME:-pixel_sheriff_test}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      JOB_QUEUE_KEY: ${JOB_QUEUE_KEY:-pixel_sheriff:test_jobs:v1}
+      STORAGE_ROOT: ${TEST_STORAGE_ROOT:-/tmp/pixel_sheriff_test_data}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      TRAINER_INFERENCE_BASE_URL: ${TRAINER_INFERENCE_BASE_URL:-http://trainer:8020}
+    depends_on:
+      - db
+      - redis
+    profiles:
+      - test
+
   trainer:
     build:
       context: .

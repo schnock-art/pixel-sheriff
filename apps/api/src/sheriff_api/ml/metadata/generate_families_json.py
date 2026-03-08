@@ -9,7 +9,7 @@ from sheriff_api.ml.registry import FAMILY_BACKBONES, FAMILY_TASK_MAP
 
 
 def _default_output_path() -> Path:
-    return Path(__file__).resolve().parents[6] / "apps" / "web" / "src" / "lib" / "metadata" / "families.v1.json"
+    return Path(__file__).resolve().parents[6] / "packages" / "contracts" / "metadata" / "families.v1.json"
 
 
 def build_families_payload() -> dict[str, Any]:

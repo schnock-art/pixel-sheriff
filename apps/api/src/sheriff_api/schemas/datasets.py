@@ -56,6 +56,8 @@ class DatasetPreviewRequest(BaseModel):
 class DatasetPreviewResponse(BaseModel):
     asset_ids: list[str] = Field(default_factory=list)
     sample_asset_ids: list[str] = Field(default_factory=list)
+    sample_assets: list["DatasetVersionAssetItem"] = Field(default_factory=list)
+    class_names: dict[str, str] = Field(default_factory=dict)
     counts: dict[str, Any] = Field(default_factory=dict)
     warnings: list[str] = Field(default_factory=list)
 

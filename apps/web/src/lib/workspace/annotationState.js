@@ -231,8 +231,9 @@ function resolvePendingAnnotation(draftState, committedState) {
 
   const selectionEqual = areSelectionStatesEqual(normalizedDraftState, normalizedCommittedState);
   const geometryEqual = areGeometryStatesEqual(normalizedDraftState.objects, normalizedCommittedState.objects);
-  const imageBasisEqual = areImageBasisEqual(normalizedDraftState.imageBasis, normalizedCommittedState.imageBasis);
-  if (selectionEqual && geometryEqual && imageBasisEqual) {
+  // imageBasis is auxiliary metadata that updates automatically when the image loads.
+  // It must not drive the dirty/staged state on its own — only label/object changes matter.
+  if (selectionEqual && geometryEqual) {
     return null;
   }
 

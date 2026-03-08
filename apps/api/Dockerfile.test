@@ -1,0 +1,19 @@
+# syntax=docker/dockerfile:1.7
+FROM python:3.11-slim
+WORKDIR /app
+
+COPY apps/api/pyproject.toml /app/apps/api/pyproject.toml
+COPY apps/api/src /app/apps/api/src
+COPY apps/api/tests /app/apps/api/tests
+COPY apps/web/src/lib/metadata /app/apps/web/src/lib/metadata
+COPY apps/web/src/lib/schemas /app/apps/web/src/lib/schemas
+COPY apps/web/src/schemas /app/apps/web/src/schemas
+COPY packages/pixel_sheriff_ml /app/packages/pixel_sheriff_ml
+COPY packages/contracts /app/packages/contracts
+
+RUN --mount=type=cache,target=/root/.cache/pip \
+  pip install /app/packages/pixel_sheriff_ml \
+  && pip install /app/apps/api[dev]
+
+WORKDIR /app/apps/api
+CMD ["python", "-m", "pytest", "-q"]

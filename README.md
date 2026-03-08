@@ -102,6 +102,20 @@ make test-api-focused
 make test-api-safe
 ```
 
+Direct helpers:
+
+```bash
+./scripts/run_web_tests.sh
+./scripts/run_api_tests.sh
+```
+
+Contract sync:
+
+```bash
+make contracts-sync
+make contracts-check
+```
+
 ## Notes on Efficient Rebuilds
 
 - Use `make up-web-api` for normal UI/API code changes.
@@ -114,3 +128,32 @@ make test-api-safe
 - Architecture: `docu/Architecture.md`
 - Changelog: `docu/CHANGELOG.md`
 - Implementation status: `docu/IMPLEMENTATION_TASKS.md`
+
+## Frontend Structure Notes
+
+- Dataset route orchestration lives in `apps/web/src/lib/hooks/useDatasetPageState.ts`, with rendering split across `apps/web/src/components/workspace/dataset/*`.
+- Labeling workspace orchestration stays in `apps/web/src/components/workspace/ProjectAssetsWorkspace.tsx`, with task/bootstrap, suggestion state, and tree navigation split into dedicated hooks under `apps/web/src/lib/hooks/`.
+- Web API access is now split under `apps/web/src/lib/api/`:
+  - `client.js` for fetch/error/URI primitives
+  - `types.ts` for shared request/response types
+  - domain modules such as `datasets.ts`, `experiments.ts`, `deployments.ts`, `models.ts`
+  - `apps/web/src/lib/api.ts` remains a compatibility barrel for existing imports
+- When changing frontend structure, run both `./scripts/run_web_tests.sh` and `cd apps/web && npx tsc --noEmit`.
+
+## Contract Artifacts
+
+- Canonical shared schemas and generated metadata live under `packages/contracts`.
+- App-local copies in `apps/api` and `apps/web` are synchronized from that directory for runtime compatibility.
+- Update generated metadata and sync targets with `make contracts-sync`.
+- Verify there is no artifact drift with `make contracts-check`.
+
+## Test Environment Notes
+
+- In WSL, prefer `./scripts/run_web_tests.sh` or `make test-web`; the wrapper avoids the Windows `npm` shim and uses `nvm` when needed.
+- In this repo, API tests are most reliable through `./scripts/run_api_tests.sh`, which runs them against the Docker-backed Postgres test environment and rebuilds the `api-test` image so code/tests are current.
+- For cross-boundary refactor checks, prefer `make verify-cross-boundary`.
+- If `make` is unavailable in the current shell, run the underlying checks directly:
+  - `python3 scripts/sync_contract_artifacts.py --check`
+  - `./scripts/typecheck_web.sh`
+  - `./scripts/run_web_tests.sh tests/apiClient.test.js`
+  - `./scripts/run_api_tests.sh -q tests/test_cross_boundary_contracts.py`

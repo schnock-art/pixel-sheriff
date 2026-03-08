@@ -24,6 +24,21 @@ Primary workflow:
 Current frontend workspace decomposition note:
 - `ProjectAssetsWorkspace` now acts as a composition/orchestration container.
 - Sidebar/footer/import-modal/status-toast rendering are extracted into focused components under `apps/web/src/components/workspace/project-assets/`.
+- Dataset-version route composition is split across:
+  - `apps/web/src/app/projects/[projectId]/dataset/page.tsx`
+  - `apps/web/src/lib/hooks/useDatasetPageState.ts`
+  - `apps/web/src/components/workspace/dataset/*`
+  - `apps/web/src/lib/workspace/datasetPage.*`
+- Labeling workspace concern-specific orchestration is split across:
+  - `apps/web/src/lib/hooks/useWorkspaceTaskState.ts`
+  - `apps/web/src/lib/hooks/useWorkspaceSuggestions.ts`
+  - `apps/web/src/lib/hooks/useProjectAssetsTreeState.ts`
+  - `apps/web/src/components/workspace/project-assets/ProjectAssetsTaskModal.tsx`
+- Web API client access is split across:
+  - `apps/web/src/lib/api/client.js` for request primitives and `ApiError`
+  - `apps/web/src/lib/api/types.ts` for shared request/response typing
+  - domain modules under `apps/web/src/lib/api/*.ts`
+  - `apps/web/src/lib/api.ts` as a compatibility barrel
 - Workspace-specific local-storage settings, hotkey handling, and view-model derivations are extracted into dedicated hooks/helpers under `apps/web/src/lib/hooks/*` and `apps/web/src/lib/workspace/projectAssetsDerived.*`.
 
 ## 2. Runtime Topology
@@ -196,9 +211,9 @@ Backbone metadata registry:
 Web-facing generated metadata:
 
 - generated JSON file:
-  - `apps/web/src/lib/metadata/backbones.v1.json`
+  - `packages/contracts/metadata/backbones.v1.json`
 - generator entrypoint:
-  - `python -m sheriff_api.ml.metadata.generate_registry_json --out <path>`
+  - `make contracts-sync`
   - file: `apps/api/src/sheriff_api/ml/metadata/generate_registry_json.py`
 
 Current integration scope:
@@ -435,9 +450,22 @@ Custom hooks:
 - `useTasks`: task list/create for active project
 - `useAssets`: assets + annotations for active project + task
 - `useLabels`: categories for active project + task
+- `useDatasetPageState`: dataset-version route loading/mutation orchestration
 - `useImportWorkflow`: import dialog, import progress, validation state, and remembered defaults/folder-option loading
 - `useDeleteWorkflow`: single/bulk/folder/project delete flows
 - `useAnnotationWorkflow`: staged vs direct submit, selection state, and submit gating
+- `useWorkspaceTaskState`: active-task selection, task bootstrap, create-task modal state, and task-lock lookup
+- `useWorkspaceSuggestions`: deployment loading and suggestion/MAL state
+- `useProjectAssetsTreeState`: tree visibility, folder scope, sidebar filters, and asset index navigation
+
+Web API modules (`apps/web/src/lib/api/*`):
+
+- `client.js`: `ApiError`, fetch helpers, no-content handling, URI resolution
+- `types.ts`: shared request/response contracts used by the web app
+- `projects.ts`, `tasks.ts`, `categories.ts`, `assets.ts`, `annotations.ts`: project labeling domain clients
+- `datasets.ts`, `models.ts`, `experiments.ts`, `deployments.ts`: dataset/model/training/deployment domain clients
+- `legacy-exports.ts`: retained legacy export endpoints
+- `paths.js`: query/path builders shared by dataset and experiment clients
 
 Local persisted setting:
 
@@ -447,11 +475,12 @@ Schema validation:
 
 - AJV (`ajv` + `ajv-formats`) is the standard web validation layer for JSON Schema checks
 - `apps/web/src/lib/schema/validator.ts` provides reusable schema compilation + AJV error normalization
-- `apps/web/src/schemas/model-config-1.0.schema.json` mirrors backend `ModelConfig v1.0` for client-side draft validation
+- `packages/contracts/schemas/model-config-1.0.schema.json` is the canonical `ModelConfig v1.0` schema; synchronized copies remain under `apps/api` and `apps/web` for runtime validation
 
 Workspace pure helpers (`apps/web/src/lib/workspace/*`):
 
 - `tree.*`: relative-path normalization, folder tree construction, folder chain helpers
+- `datasetPage.*`: dataset-version helper parsing, folder/status selection logic, and summary/class-name derivations
 - `pagination.*`: width-aware chip capacity and page-token window generation
 - `annotationState.*`: draft vs committed selection-state comparison and submit eligibility rules
 - `hotkeys.*`: keyboard shortcut parsing/routing for navigation and label selection
@@ -469,10 +498,26 @@ Workspace pure helpers (`apps/web/src/lib/workspace/*`):
 
 Workspace container components (`apps/web/src/components/workspace/*`):
 
-- `ProjectAssetsWorkspace.tsx`: datasets UI/workflow integration
+- `ProjectAssetsWorkspace.tsx`: labeling workspace composition and top-level wiring
 - `ProjectNavigationContext.tsx`: unsaved-draft guard context and guarded navigation wrapper
 - `ProjectCreateModal.tsx`: project creation modal used in shell and empty state
 - `ModelBuilderSkeleton.tsx`: builder layout for model routes (stepper + editable center panel + summary + save-state actions)
+
+Dataset workspace components (`apps/web/src/components/workspace/dataset/*`):
+
+- `DatasetVersionsPanel.tsx`: saved-version selection and export actions
+- `DatasetDraftPanel.tsx`: dataset draft form and include/exclude controls
+- `DatasetAssetsPanel.tsx`: browse/preview asset list-grid rendering
+- `DatasetSummaryPanel.tsx`: saved/draft summary rendering
+- `DatasetFilterDropdowns.tsx`: folder/status multi-select controls
+
+Labeling workspace leaf components (`apps/web/src/components/workspace/project-assets/*`):
+
+- `ProjectAssetsTreeSidebar.tsx`: tree, scope, sidebar filters, and delete actions
+- `ProjectAssetsFooterActions.tsx`: footer action cluster
+- `ProjectAssetsImportModal.tsx`: import dialog
+- `ProjectAssetsStatusOverlay.tsx`: status toast + import failure display
+- `ProjectAssetsTaskModal.tsx`: create-task modal
 
 ### Implemented UX Behaviors
 
@@ -625,6 +670,11 @@ Supported statuses:
   - analytics structure + `max_points`
   - evaluation `attempt` inclusion and `evaluation_not_found`
   - samples mode/filter behavior with `attempt` inclusion
+- API coverage includes cross-boundary contract/regression checks for:
+  - dataset-version responses validated against the web dataset schema
+  - model-config responses validated against the web model-config schema
+  - dataset preview -> dataset version create -> model draft flow
+  - task-aware labeling -> active dataset -> model/experiment alignment
 - Trainer coverage includes classification evaluation artifact persistence:
   - per-attempt + latest mirror evaluation/predictions files
   - `predictions.meta.json` contract checks
@@ -634,6 +684,7 @@ Supported statuses:
   - run selection, summary and scatter shaping
   - confusion normalization (`none`, `by_true`, `by_pred`) and zero-sum handling
   - prediction filtering helpers for explorer/drill-down
+- Web/API seam verification should be run with `make verify-cross-boundary` or the underlying wrapper commands when `make` is unavailable.
 - Web coverage includes stale-submit helper regressions for:
   - annotation submit `404` detection by route/status
   - staged pending-entry pruning for missing asset IDs

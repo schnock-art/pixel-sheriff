@@ -17,7 +17,9 @@ PYTHON          := apps/api/.venv/Scripts/python
 	build-trainer-base build-trainer build-trainer-bootstrap up-trainer \
 	build-all up-all \
 	test-web test-api-focused test-api-safe \
-	infra create-local-db dev-api dev-web
+	typecheck-web verify-cross-boundary \
+	infra create-local-db dev-api dev-web \
+	contracts-sync contracts-check
 
 help:
 	@echo "Common shortcuts:"
@@ -36,6 +38,8 @@ help:
 	@echo "  make test-web            # run web tests"
 	@echo "  make test-api-focused    # run focused API dataset tests"
 	@echo "  make test-api-safe       # same tests + explicit DB safety guard"
+	@echo "  make typecheck-web       # run web TypeScript check"
+	@echo "  make verify-cross-boundary # schema drift + web typecheck + seam tests"
 	@echo ""
 	@echo "Local dev (no Docker for app services):"
 	@echo "  make infra               # start only db + redis"
@@ -81,19 +85,20 @@ up-all:
 	docker compose up -d
 
 test-web:
-	cd apps/web && npm test -- tests/datasetPage.test.js
+	./scripts/run_web_tests.sh tests/datasetPage.test.js
 
 test-api-focused:
-	DATABASE_URL=$(TEST_DATABASE_URL) STORAGE_ROOT=$(TEST_STORAGE_ROOT) $(PYTHON) -m pytest -s apps/api/tests/test_api.py -k "dataset_preview_filters_respect_exclude_statuses_and_exclude_folder_precedence or dataset_preview_include_folder_empty_means_no_restriction or dataset_saved_split_membership_comes_from_stored_split_map"
+	./scripts/run_api_tests.sh -q tests/test_api.py -k "dataset_preview_filters_respect_exclude_statuses_and_exclude_folder_precedence or dataset_preview_include_folder_empty_means_no_restriction or dataset_saved_split_membership_comes_from_stored_split_map"
 
 test-api-safe:
-	@echo "DATABASE_URL=$(TEST_DATABASE_URL)"
-	@echo "STORAGE_ROOT=$(TEST_STORAGE_ROOT)"
-	@if [[ "$(TEST_DATABASE_URL)" =~ /pixel_sheriff($$|[/?#]) ]]; then \
-		echo "Refusing to run tests against main database URL: $(TEST_DATABASE_URL)"; \
-		exit 1; \
-	fi
-	DATABASE_URL=$(TEST_DATABASE_URL) STORAGE_ROOT=$(TEST_STORAGE_ROOT) $(PYTHON) -m pytest -s apps/api/tests/test_api.py -k "dataset_preview_filters_respect_exclude_statuses_and_exclude_folder_precedence or dataset_preview_include_folder_empty_means_no_restriction or dataset_saved_split_membership_comes_from_stored_split_map"
+	./scripts/run_api_tests.sh -q tests/test_api.py -k "dataset_preview_filters_respect_exclude_statuses_and_exclude_folder_precedence or dataset_preview_include_folder_empty_means_no_restriction or dataset_saved_split_membership_comes_from_stored_split_map"
+
+typecheck-web:
+	./scripts/typecheck_web.sh
+
+verify-cross-boundary: contracts-check typecheck-web
+	./scripts/run_web_tests.sh tests/apiClient.test.js
+	./scripts/run_api_tests.sh -q tests/test_cross_boundary_contracts.py
 
 infra:
 	docker compose up -d db redis
@@ -112,3 +117,9 @@ dev-web:
 	NEXT_PUBLIC_API_BASE_URL=http://localhost:8000 \
 	INTERNAL_API_BASE_URL=http://localhost:8000 \
 	npm run dev
+
+contracts-sync:
+	python3 scripts/sync_contract_artifacts.py
+
+contracts-check:
+	python3 scripts/sync_contract_artifacts.py --check

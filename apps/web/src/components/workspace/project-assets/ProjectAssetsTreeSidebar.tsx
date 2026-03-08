@@ -1,4 +1,10 @@
+import type { AnnotationStatus } from "../../../lib/api";
 import { type TreeEntry } from "../../../lib/workspace/tree";
+
+interface FilterLabelRow {
+  id: string;
+  name: string;
+}
 
 interface ProjectAssetsTreeSidebarProps {
   selectedTreeFolderPath: string | null;
@@ -14,6 +20,9 @@ interface ProjectAssetsTreeSidebarProps {
   selectedDeleteAssets: Record<string, boolean>;
   currentAssetId: string | null;
   assetReviewStateById: Map<string, { status: "labeled" | "unlabeled"; isDirty: boolean }>;
+  filterStatus: "all" | AnnotationStatus;
+  filterCategoryId: string;
+  filterLabelRows: FilterLabelRow[];
   onCollapseAllFolders: () => void;
   onExpandAllFolders: () => void;
   onSelectFolderScope: (folderPath: string | null) => void;
@@ -26,6 +35,8 @@ interface ProjectAssetsTreeSidebarProps {
   onDeleteFolderPath: (folderPath: string) => void;
   onToggleDeleteSelection: (assetId: string) => void;
   onSelectTreeAsset: (assetId: string, folderPath?: string) => void;
+  onChangeFilterStatus: (status: "all" | AnnotationStatus) => void;
+  onChangeFilterCategoryId: (categoryId: string) => void;
 }
 
 export function ProjectAssetsTreeSidebar({
@@ -42,6 +53,9 @@ export function ProjectAssetsTreeSidebar({
   selectedDeleteAssets,
   currentAssetId,
   assetReviewStateById,
+  filterStatus,
+  filterCategoryId,
+  filterLabelRows,
   onCollapseAllFolders,
   onExpandAllFolders,
   onSelectFolderScope,
@@ -54,6 +68,8 @@ export function ProjectAssetsTreeSidebar({
   onDeleteFolderPath,
   onToggleDeleteSelection,
   onSelectTreeAsset,
+  onChangeFilterStatus,
+  onChangeFilterCategoryId,
 }: ProjectAssetsTreeSidebarProps) {
   return (
     <aside className="workspace-sidebar">
@@ -75,6 +91,35 @@ export function ProjectAssetsTreeSidebar({
               All files
             </button>
           </div>
+        </div>
+        <div className="tree-filter-toolbar">
+          <select
+            value={filterStatus}
+            onChange={(event) => onChangeFilterStatus(event.target.value as "all" | AnnotationStatus)}
+            className="tree-filter-select"
+            aria-label="Filter by status"
+          >
+            <option value="all">All statuses</option>
+            <option value="unlabeled">Unlabeled</option>
+            <option value="labeled">Labeled</option>
+            <option value="skipped">Skipped</option>
+            <option value="needs_review">Needs review</option>
+            <option value="approved">Approved</option>
+          </select>
+          <select
+            value={filterCategoryId}
+            onChange={(event) => onChangeFilterCategoryId(event.target.value)}
+            className="tree-filter-select"
+            aria-label="Filter by class"
+            disabled={filterLabelRows.length === 0}
+          >
+            <option value="all">All classes</option>
+            {filterLabelRows.map((label) => (
+              <option key={label.id} value={label.id}>
+                {label.name}
+              </option>
+            ))}
+          </select>
         </div>
         <div className="tree-delete-toolbar">
           <button

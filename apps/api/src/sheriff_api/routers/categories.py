@@ -22,30 +22,33 @@ def _task_has_dataset_versions(project_id: str, task_id: str) -> bool:
     return isinstance(items, list) and len(items) > 0
 
 
-def _payload_references_category(payload_json: Any, category_id: str) -> bool:
+def _payload_references_category(payload_json: Any, category_id: str, task_kind: str | None = None) -> bool:
     if not isinstance(payload_json, dict):
         return False
 
-    top_level_category_id = payload_json.get("category_id")
-    if isinstance(top_level_category_id, str) and top_level_category_id == category_id:
-        return True
+    is_geometry_task = task_kind in ("bbox", "segmentation")
 
-    top_level_category_ids = payload_json.get("category_ids")
-    if isinstance(top_level_category_ids, list):
-        for value in top_level_category_ids:
-            if isinstance(value, str) and value == category_id:
-                return True
-
-    classification = payload_json.get("classification")
-    if isinstance(classification, dict):
-        primary = classification.get("primary_category_id")
-        if isinstance(primary, str) and primary == category_id:
+    if not is_geometry_task:
+        top_level_category_id = payload_json.get("category_id")
+        if isinstance(top_level_category_id, str) and top_level_category_id == category_id:
             return True
-        category_ids = classification.get("category_ids")
-        if isinstance(category_ids, list):
-            for value in category_ids:
+
+        top_level_category_ids = payload_json.get("category_ids")
+        if isinstance(top_level_category_ids, list):
+            for value in top_level_category_ids:
                 if isinstance(value, str) and value == category_id:
                     return True
+
+        classification = payload_json.get("classification")
+        if isinstance(classification, dict):
+            primary = classification.get("primary_category_id")
+            if isinstance(primary, str) and primary == category_id:
+                return True
+            category_ids = classification.get("category_ids")
+            if isinstance(category_ids, list):
+                for value in category_ids:
+                    if isinstance(value, str) and value == category_id:
+                        return True
 
     objects = payload_json.get("objects")
     if isinstance(objects, list):
@@ -145,6 +148,9 @@ async def delete_category(category_id: str, db: AsyncSession = Depends(get_db)) 
             details={"project_id": category.project_id, "task_id": category.task_id, "category_id": category_id},
         )
 
+    task = await db.get(Task, category.task_id)
+    task_kind = task.kind if task is not None else None
+
     annotations = list(
         (
             await db.execute(
@@ -155,7 +161,7 @@ async def delete_category(category_id: str, db: AsyncSession = Depends(get_db)) 
             )
         ).scalars().all()
     )
-    annotation_refs = sum(1 for payload_json in annotations if _payload_references_category(payload_json, category_id))
+    annotation_refs = sum(1 for payload_json in annotations if _payload_references_category(payload_json, category_id, task_kind))
     if annotation_refs > 0:
         raise api_error(
             status_code=409,

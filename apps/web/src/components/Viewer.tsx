@@ -233,10 +233,15 @@ export function Viewer({
     setBboxResizeState(null);
   }, [currentAsset?.id, annotationMode]);
 
+  // Use a ref so this effect only fires when imageBasis actually changes, not when
+  // the callback reference changes. Without this, the effect creates a circular update
+  // loop: onImageBasisChange → stageGeometry → currentObjects changes →
+  // updateCurrentImageBasis recreated → onImageBasisChange changes → effect fires again.
+  const onImageBasisChangeRef = useRef(onImageBasisChange);
+  onImageBasisChangeRef.current = onImageBasisChange;
   useEffect(() => {
-    if (!imageBasis) onImageBasisChange(null);
-    else onImageBasisChange(imageBasis);
-  }, [imageBasis, onImageBasisChange]);
+    onImageBasisChangeRef.current(imageBasis ?? null);
+  }, [imageBasis]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     function measure() {
@@ -329,7 +334,7 @@ export function Viewer({
           (object): object is GeometryBBoxObject => object.id === selectedObjectId && object.kind === "bbox",
         );
         if (selectedObject) {
-          const handleThreshold = viewport ? 10 / viewport.scale : 10;
+          const handleThreshold = viewport ? 12 / viewport.scale : 12;
           const resizeHandle = resolveBBoxHandle(point, selectedObject.bbox, handleThreshold);
           if (resizeHandle) {
             try {
@@ -581,10 +586,10 @@ export function Viewer({
                 <rect
                   key={`${object.id}-${handlePoint.handle}`}
                   className={`geometry-handle geometry-handle-${handlePoint.handle}`}
-                  x={handlePoint.viewport.x - 4}
-                  y={handlePoint.viewport.y - 4}
-                  width={8}
-                  height={8}
+                  x={handlePoint.viewport.x - 5}
+                  y={handlePoint.viewport.y - 5}
+                  width={10}
+                  height={10}
                   rx={2}
                   ry={2}
                 />

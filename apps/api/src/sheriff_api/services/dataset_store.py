@@ -32,9 +32,14 @@ class DatasetStore:
         if isinstance(schema_path, Path):
             return json.loads(schema_path.read_text(encoding="utf-8"))
 
-        resolved_schema_path = Path(__file__).resolve().parents[1] / "schemas_json" / "dataset_version_v2.schema.json"
-        if resolved_schema_path.exists():
-            return json.loads(resolved_schema_path.read_text(encoding="utf-8"))
+        resolved = Path(__file__).resolve()
+        candidates = [
+            resolved.parents[5] / "packages" / "contracts" / "schemas" / "dataset_version_v2.schema.json",
+            resolved.parents[1] / "schemas_json" / "dataset_version_v2.schema.json",
+        ]
+        for candidate in candidates:
+            if candidate.exists():
+                return json.loads(candidate.read_text(encoding="utf-8"))
 
         resource = resources.files("sheriff_api").joinpath("schemas_json/dataset_version_v2.schema.json")
         return json.loads(resource.read_text(encoding="utf-8"))

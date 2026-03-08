@@ -5,6 +5,7 @@ WORKDIR /app
 COPY apps/api/pyproject.toml /app/apps/api/pyproject.toml
 COPY apps/api/src /app/apps/api/src
 COPY packages/pixel_sheriff_ml /app/packages/pixel_sheriff_ml
+COPY packages/contracts /app/packages/contracts
 
 RUN --mount=type=cache,target=/root/.cache/pip \
   pip install /app/packages/pixel_sheriff_ml \

@@ -165,9 +165,6 @@ def build_segmentation_loaders(
         if not img_path.exists():
             skipped += 1
             continue
-        if img_id not in annotations_by_image:
-            skipped += 1
-            continue
         samples.append(SegmentationSample(
             path=img_path,
             asset_id=str(img_info.get("asset_id", img_id)),
@@ -177,7 +174,7 @@ def build_segmentation_loaders(
         ))
 
     if not samples:
-        raise ValueError("No annotated segmentation samples found in coco_instances.json")
+        raise ValueError("No segmentation samples were found in coco_instances.json")
 
     # Split
     manifest_path = dataset_dir / "manifest.json"

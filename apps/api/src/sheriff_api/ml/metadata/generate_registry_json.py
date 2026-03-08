@@ -9,7 +9,7 @@ from sheriff_api.ml.metadata.backbones import BACKBONES
 
 
 def _default_output_path() -> Path:
-    return Path(__file__).resolve().parents[6] / "apps" / "web" / "src" / "lib" / "metadata" / "backbones.v1.json"
+    return Path(__file__).resolve().parents[6] / "packages" / "contracts" / "metadata" / "backbones.v1.json"
 
 
 def build_registry_payload() -> dict[str, Any]:

@@ -371,6 +371,61 @@ Status reflects current repository behavior.
   - [x] colorized bbox/polygon overlays and geometry object list by class
   - [x] add tests for class-color helper determinism/range
 
+### Next Refactor Queue (Recommended Order)
+- [x] P0: Consolidate shared contracts into a single source of truth
+  - [x] move duplicated dataset/model schema artifacts behind `packages/contracts`
+  - [x] define canonical ownership for:
+    - [x] dataset version schema
+    - [x] model config schema
+    - [x] backbone/family metadata artifacts
+  - [x] generate or copy web-consumable artifacts from the canonical source during a repeatable build step
+  - [x] remove direct cross-app writes such as API metadata scripts emitting files into `apps/web/src/lib/metadata/*`
+  - [x] add drift checks/tests so API + web fail fast when contract artifacts diverge
+  - [x] document the contract update workflow in `README.md` or `TECHNICAL_REFERENCE.md`
+- [x] P1: Extract dataset business logic out of `apps/api/src/sheriff_api/routers/datasets.py`
+  - [x] move filter/split/category snapshot logic into focused dataset service modules
+  - [x] keep FastAPI router focused on request parsing, auth/context lookup, and response mapping
+  - [x] isolate reusable units for:
+    - [x] asset row loading
+    - [x] selection/filter evaluation
+    - [x] split planning / stratification fallback
+    - [x] category snapshot + deleted-category placeholder behavior
+    - [x] export manifest/build preparation
+  - [x] preserve current error codes and payload shapes during extraction
+  - [x] add focused unit tests for extracted split/filter helpers instead of relying only on large endpoint regressions
+  - [x] keep existing API regression coverage green for dataset preview/create/export flows
+- [x] P2: Decompose dataset page orchestration in `apps/web/src/app/projects/[projectId]/dataset/page.tsx`
+  - [x] extract page-local parsing/derivation helpers into `apps/web/src/lib/workspace/datasetPage*`
+  - [x] extract dataset-version loading/mutation flow into a dedicated hook
+  - [x] extract folder filter tree/dropdown UI into focused components
+  - [x] extract preview/result panels so rendering branches are isolated from mutation logic
+  - [x] reduce page component responsibility to route params, composition, and high-level state wiring
+  - [x] add tests around extracted helpers/components before removing equivalent inline logic
+  - [x] keep current dataset UX and CSS behavior stable
+- [x] P3: Continue decomposition of `apps/web/src/components/workspace/ProjectAssetsWorkspace.tsx`
+  - [x] split remaining orchestration by concern:
+    - [x] task selection + project/task bootstrap
+    - [x] suggestion/deployment state
+    - [x] tree scope/filter/index navigation
+    - [x] modal state and creation flows
+  - [x] tighten prop shapes between `ProjectAssetsWorkspace` and `project-assets/*` children
+  - [x] replace broad mutable local state clusters with smaller concern-specific hooks where behavior is already well understood
+  - [x] fix current type drift around sidebar filter callbacks and keep `tsc` clean
+  - [x] preserve existing annotation/edit-mode behavior and regression coverage throughout
+- [x] P4: Split `apps/web/src/lib/api.ts` into domain-scoped API modules
+  - [x] separate low-level fetch/error primitives from domain clients
+  - [x] group domain clients by area (`projects`, `tasks`, `datasets`, `models`, `experiments`, `deployments`, `annotations`, `assets`)
+  - [x] centralize shared request/response typing near the contract source where practical
+  - [x] avoid changing endpoint URLs or error semantics during the split
+  - [x] add targeted tests for request helper behavior and representative domain methods
+- [x] P5: Add cross-boundary verification where it increases refactor safety
+  - [x] add contract-level tests that validate web-consumed payloads against API-produced schemas/artifacts
+  - [x] add a small number of end-to-end regression flows for highest-risk seams:
+    - [x] dataset preview -> dataset version create -> model draft source dataset selection
+    - [x] task-aware labeling -> dataset activation -> experiment creation
+  - [x] add CI/typecheck coverage that catches schema drift and TypeScript prop-signature regressions early
+  - [x] keep this block targeted; prefer high-signal seam tests over broad snapshot-heavy suites
+
 ## Deferred (Roadmap-aligned)
 - [ ] Review/QA mode
 - [ ] Video ingestion + frame extraction

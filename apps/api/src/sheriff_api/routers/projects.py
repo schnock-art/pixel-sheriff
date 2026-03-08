@@ -1,3 +1,5 @@
+import uuid
+
 from fastapi import APIRouter, Depends, Response, status
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -48,23 +50,25 @@ def _project_read(project: Project, default_task: Task | None) -> ProjectRead:
 
 @router.post("", response_model=ProjectRead)
 async def create_project(payload: ProjectCreate, db: AsyncSession = Depends(get_db)) -> ProjectRead:
-    project = Project(name=payload.name, task_type=payload.task_type)
-    db.add(project)
-    await db.commit()
-    await db.refresh(project)
-
+    project_id = str(uuid.uuid4())
+    default_task_id = str(uuid.uuid4())
     kind, label_mode = _task_spec_from_project_task_type(payload.task_type)
     default_task = Task(
-        project_id=project.id,
+        id=default_task_id,
+        project_id=project_id,
         name="Default",
         kind=kind,
         label_mode=label_mode,
     )
-    db.add(default_task)
-    await db.commit()
-    await db.refresh(default_task)
+    project = Project(
+        id=project_id,
+        name=payload.name,
+        task_type=payload.task_type,
+        default_task_id=default_task_id,
+    )
 
-    project.default_task_id = default_task.id
+    db.add(project)
+    db.add(default_task)
     await db.commit()
     await db.refresh(project)
     return _project_read(project, default_task)

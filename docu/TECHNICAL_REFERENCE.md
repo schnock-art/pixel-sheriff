@@ -54,9 +54,24 @@ make help
     - `apps/web/src/lib/hooks/useProjectMultiLabelSettings.ts`
     - `apps/web/src/lib/hooks/useWorkspaceHotkeys.ts`
     - `apps/web/src/lib/workspace/projectAssetsDerived.*`
+  - dataset-version route was reduced to composition-only wiring:
+    - `apps/web/src/app/projects/[projectId]/dataset/page.tsx`
+    - `apps/web/src/lib/hooks/useDatasetPageState.ts`
+    - `apps/web/src/components/workspace/dataset/*`
+    - `apps/web/src/lib/workspace/datasetPage.*`
+  - labeling workspace orchestration was further decomposed by concern:
+    - `apps/web/src/lib/hooks/useWorkspaceTaskState.ts`
+    - `apps/web/src/lib/hooks/useWorkspaceSuggestions.ts`
+    - `apps/web/src/lib/hooks/useProjectAssetsTreeState.ts`
+    - `apps/web/src/components/workspace/project-assets/ProjectAssetsTaskModal.tsx`
   - project shell layout now handles project selector, top tabs, and project status bar
   - annotation, import, and delete workflows remain in dedicated hooks
   - tree/pagination/annotation-state logic moved into pure workspace helpers with unit tests
+- Web API client internals were decomposed:
+  - `apps/web/src/lib/api/client.js` now holds fetch/error/URI primitives
+  - `apps/web/src/lib/api/types.ts` now holds shared request/response typing
+  - domain modules now live under `apps/web/src/lib/api/` (`projects`, `tasks`, `categories`, `assets`, `annotations`, `datasets`, `models`, `experiments`, `deployments`)
+  - `apps/web/src/lib/api.ts` remains a barrel so existing imports stay stable during the split
 - Review-state visibility improved with explicit staged/dirty indicators in tree rows and pagination chips.
 - Import dialog UX was upgraded with inline validation hints and remembered defaults for mode/project/folder destination.
 - Testing coverage expanded with integration/regression suites for:
@@ -120,7 +135,7 @@ make help
 - Backend ML model-building layer (v0) is now implemented under `apps/api/src/sheriff_api/ml`:
   - extensible `ModelFactory` + family adapter registry
   - backbone metadata registry (`resnet18/34/50/101`) + verification utilities
-  - generated web metadata file at `apps/web/src/lib/metadata/backbones.v1.json`
+  - generated canonical metadata file at `packages/contracts/metadata/backbones.v1.json`
   - pytest coverage for metadata verification, registry generation, and classifier build behavior
 - Tests-first stabilization pass implemented:
   - stale submit context regressions added (API + web helper tests)
@@ -410,18 +425,34 @@ Also, trainer Dockerfiles now share a named BuildKit pip cache (`id=pixel-sherif
   - `docker compose cp apps/api/tests api:/app/tests`
   - `docker compose exec api python3 -m pytest /app/tests -q`
   - note: API container image installs runtime deps only; install pytest/httpx in-container if needed before running this command
+- Cross-boundary verification:
+  - `make verify-cross-boundary`
+  - if `make` is unavailable, run:
+    - `python3 scripts/sync_contract_artifacts.py --check`
+    - `./scripts/typecheck_web.sh`
+    - `./scripts/run_web_tests.sh tests/apiClient.test.js`
+    - `./scripts/run_api_tests.sh -q tests/test_cross_boundary_contracts.py`
+- Environment note:
+  - in this repo/environment, host-side direct API `pytest` can be unreliable because local async DB drivers may stall
+  - prefer `./scripts/run_api_tests.sh` or `make test-api-focused` / `make test-api-safe` so tests run against the Docker-backed Postgres test path
+  - `./scripts/run_api_tests.sh` rebuilds the `api-test` image on invocation so copied source/tests stay current
+  - for frontend structure refactors, run both `./scripts/run_web_tests.sh` and `cd apps/web && npx tsc --noEmit`
+  - for web API client changes, add focused helper coverage in `apps/web/tests/apiClient.test.js`
+  - for cross-boundary contract/regression coverage, keep `apps/api/tests/test_cross_boundary_contracts.py` green
 - Manual QA checklist for experiment SSE flow:
   - `docu/experiments_sse_manual_qa.md`
 
 ## ML Metadata Registry
 
 - Backend ML metadata registry lives in `apps/api/src/sheriff_api/ml/metadata/backbones.py`.
-- Web-consumable backbone registry JSON is generated at `apps/web/src/lib/metadata/backbones.v1.json`.
+- Canonical shared contract artifacts live in `packages/contracts`.
+- Web-consumable runtime copies are synchronized from `packages/contracts/metadata/*.json`.
 - API optional dependency group for ML runtime:
   - `cd apps/api && pip install -e ".[ml]"`
-- Regenerate from repo root:
-  - `cd apps/api`
-  - `python -m sheriff_api.ml.metadata.generate_registry_json --out ../web/src/lib/metadata/backbones.v1.json`
+- Regenerate + sync from repo root:
+  - `make contracts-sync`
+- Verify drift from repo root:
+  - `make contracts-check`
 - Add new backbones/families by:
   - extending `BACKBONES` metadata in backend
   - implementing a new adapter + family registry entry

@@ -2284,6 +2284,67 @@ async def test_dataset_preview_include_folder_empty_means_no_restriction(client:
 
 
 @pytest.mark.asyncio
+async def test_dataset_preview_returns_sample_asset_metadata_and_class_names(client: AsyncClient) -> None:
+    project = (await client.post("/api/v1/projects", json={"name": "dataset-preview-samples"})).json()
+    project_id = project["id"]
+    task_id = project["default_task_id"]
+
+    category = await client.post(
+        f"/api/v1/projects/{project_id}/categories",
+        json={"task_id": task_id, "name": "flower"},
+    )
+    assert category.status_code == 200
+    category_id = category.json()["id"]
+
+    upload = await client.post(
+        f"/api/v1/projects/{project_id}/assets/upload",
+        data={"relative_path": "flowers/rose.jpg"},
+        files={"file": ("rose.jpg", b"fake-image-bytes", "image/jpeg")},
+    )
+    assert upload.status_code == 200
+    asset_id = upload.json()["id"]
+
+    annotation = await client.post(
+        f"/api/v1/projects/{project_id}/annotations",
+        json={
+            "task_id": task_id,
+            "asset_id": asset_id,
+            "status": "approved",
+            "payload_json": {
+                "category_id": category_id,
+                "category_ids": [category_id],
+                "classification": {"category_ids": [category_id], "primary_category_id": category_id},
+            },
+        },
+    )
+    assert annotation.status_code == 200
+
+    preview = await client.post(
+        f"/api/v1/projects/{project_id}/datasets/versions/preview",
+        json={
+            "task_id": task_id,
+            "selection": {"mode": "filter_snapshot"},
+            "split": {
+                "seed": 1337,
+                "ratios": {"train": 1.0, "val": 0.0, "test": 0.0},
+                "stratify": {"enabled": True, "by": "label_primary", "strict_stratify": False},
+            },
+        },
+    )
+    assert preview.status_code == 200
+    payload = preview.json()
+
+    assert payload["class_names"][category_id] == "flower"
+    assert payload["sample_asset_ids"] == [asset_id]
+    assert len(payload["sample_assets"]) == 1
+    assert payload["sample_assets"][0]["asset_id"] == asset_id
+    assert payload["sample_assets"][0]["relative_path"] == "flowers/rose.jpg"
+    assert payload["sample_assets"][0]["status"] == "approved"
+    assert payload["sample_assets"][0]["split"] == "train"
+    assert payload["sample_assets"][0]["label_summary"]["primary_category_id"] == category_id
+
+
+@pytest.mark.asyncio
 async def test_dataset_saved_split_membership_comes_from_stored_split_map(client: AsyncClient) -> None:
     project = (await client.post("/api/v1/projects", json={"name": "dataset-split-membership"})).json()
     project_id = project["id"]

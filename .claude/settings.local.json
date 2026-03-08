@@ -1,0 +1,34 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep:*)",
+      "Bash(make infra:*)",
+      "Bash(docker compose:*)",
+      "Bash(make create-local-db:*)",
+      "Bash(python3:*)",
+      "Bash(py:*)",
+      "Bash(.venv/Scripts/pip install:*)",
+      "Bash(make test-api-focused:*)",
+      "Bash(DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5433/pixel_sheriff_test STORAGE_ROOT=/tmp/pixel_sheriff_test_data apps/api/.venv/Scripts/python:*)",
+      "Bash(python:*)",
+      "Bash(make test-web:*)",
+      "Bash(make test-api-safe:*)",
+      "Bash(curl:*)",
+      "mcp__plugin_playwright_playwright__browser_navigate",
+      "mcp__plugin_playwright_playwright__browser_wait_for",
+      "mcp__plugin_playwright_playwright__browser_snapshot",
+      "mcp__plugin_playwright_playwright__browser_take_screenshot",
+      "Bash(docker ps:*)",
+      "Bash(npx tsc:*)",
+      "Bash(node_modules/.bin/tsc:*)",
+      "Bash(npm run:*)",
+      "Bash(node_modules/.bin/next build:*)",
+      "Bash(npm test:*)",
+      "Bash(apps/api/.venv/Scripts/python:*)",
+      "Bash(C:/Users/jange/Scripts/pixel-sheriff/apps/api/.venv/Scripts/python:*)",
+      "Bash(./node_modules/.bin/tsc:*)",
+      "Bash(node:*)",
+      "Bash(ls:*)"
+    ]
+  }
+}
