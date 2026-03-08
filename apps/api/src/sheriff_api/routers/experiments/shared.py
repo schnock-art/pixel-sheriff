@@ -12,6 +12,7 @@ from sheriff_api.config import get_settings
 from sheriff_api.db.models import Annotation, Asset, Project, Task, TaskKind, TaskLabelMode, TaskType
 from sheriff_api.errors import api_error
 from sheriff_api.schemas.experiments import ExperimentSampleItem, ProjectExperimentRecord, ProjectExperimentSummary, TrainingConfigV0
+from sheriff_api.services.deployment_store import DeploymentStore
 from sheriff_api.services.dataset_store import DatasetStore
 from sheriff_api.services.experiment_store import ExperimentStore
 from sheriff_api.services.exporter_coco import ExportValidationError, build_export_result
@@ -35,6 +36,7 @@ settings = get_settings()
 model_store: ProjectModelStore = create_project_model_store(settings.storage_root)
 dataset_store = DatasetStore(settings.storage_root)
 experiment_store = ExperimentStore(settings.storage_root)
+deployment_store = DeploymentStore(settings.storage_root)
 storage = LocalStorage(settings.storage_root)
 train_queue = TrainQueue()
 

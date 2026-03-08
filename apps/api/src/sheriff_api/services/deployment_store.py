@@ -68,6 +68,28 @@ class DeploymentStore:
                 return item
         return None
 
+    def list_referencing_experiment(
+        self,
+        project_id: str,
+        experiment_id: str,
+        *,
+        include_archived: bool = False,
+    ) -> list[dict[str, Any]]:
+        doc = self._read_doc(project_id)
+        matches: list[dict[str, Any]] = []
+        for item in doc["items"]:
+            if not isinstance(item, dict):
+                continue
+            if not include_archived and str(item.get("status") or "").strip().lower() == "archived":
+                continue
+            source = item.get("source")
+            if not isinstance(source, dict):
+                continue
+            if str(source.get("experiment_id") or "") != experiment_id:
+                continue
+            matches.append(item)
+        return matches
+
     def create(
         self,
         *,

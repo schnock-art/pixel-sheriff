@@ -110,7 +110,7 @@ export default function ModelsPage({ params }: ModelsPageProps) {
       title="Models"
       description="Create architecture drafts tied to dataset versions, review model readiness, and move into experiments with a clearer training pipeline."
       actions={
-        <Link className="primary-button" href={createHref}>
+        <Link className="primary-button" href={createHref} data-testid="new-model-button">
           + New Model
         </Link>
       }
@@ -118,13 +118,13 @@ export default function ModelsPage({ params }: ModelsPageProps) {
       {errorMessage ? <p className="project-field-error">{errorMessage}</p> : null}
 
       {isLoading ? (
-        <div className="placeholder-card">
+        <div className="placeholder-card" data-testid="models-loading">
           <p>Loading models...</p>
         </div>
       ) : null}
 
       {!isLoading && rows.length === 0 ? (
-        <div className="placeholder-card">
+        <div className="placeholder-card" data-testid="models-empty-state">
           <h3>No models yet</h3>
           <p>Create a model from a dataset version to configure architecture, launch experiments, and prepare deployment artifacts.</p>
         </div>

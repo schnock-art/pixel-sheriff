@@ -59,7 +59,7 @@ function buildTreeEntries(assets) {
       }
     }
 
-    cursor.files.push({ id: asset.id, name: filename });
+    cursor.files.push({ id: asset.id, name: filename, path: rel });
   }
 
   const result = [];
@@ -91,7 +91,7 @@ function buildTreeEntries(assets) {
         name: file.name,
         depth,
         kind: "file",
-        path: file.name,
+        path: file.path,
         assetId: file.id,
         folderPath: node.path,
       });

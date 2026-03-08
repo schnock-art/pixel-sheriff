@@ -20,8 +20,8 @@ function formatDate(value: string): string {
 
 export function ModelTable({ rows }: { rows: ModelTableRowView[] }) {
   return (
-    <div className="models-table-wrap polished">
-      <table className="models-table">
+    <div className="models-table-wrap polished" data-testid="models-table-wrap">
+      <table className="models-table" data-testid="models-table">
         <thead>
           <tr>
             <th>Name</th>
@@ -35,7 +35,7 @@ export function ModelTable({ rows }: { rows: ModelTableRowView[] }) {
         </thead>
         <tbody>
           {rows.map((row) => (
-            <tr key={row.id}>
+            <tr key={row.id} data-testid="model-row" data-model-id={row.id}>
               <td>
                 <Link href={row.href}>{row.name}</Link>
               </td>

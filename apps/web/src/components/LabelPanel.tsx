@@ -167,7 +167,7 @@ export function LabelPanel({
     .map((label) => label.name);
 
   return (
-    <aside className="labels-panel" aria-label="Label tools">
+    <aside className="labels-panel" aria-label="Label tools" data-testid="label-panel">
       <div className="label-tabs">
         <button
           type="button"
@@ -267,7 +267,7 @@ export function LabelPanel({
           {geometryObjects.length === 0 ? (
             <p className="labels-empty">No objects yet on this image.</p>
           ) : (
-            <ul className="geometry-object-list">
+            <ul className="geometry-object-list" data-testid="geometry-object-list">
               {geometryObjects.map((object, index) => {
                 const isSelected = selectedObjectId === object.id;
                 const isHovered = hoveredObjectId === object.id;
@@ -289,6 +289,9 @@ export function LabelPanel({
                           "--geometry-item-text": classColor.chipText,
                         } as CSSProperties
                       }
+                      data-testid="geometry-object-item"
+                      data-object-id={object.id}
+                      data-category-id={object.categoryId}
                     >
                       <span className="geometry-object-index">{index + 1}</span>
                       <span>{`${index + 1} ${object.categoryName}`}</span>
@@ -372,7 +375,7 @@ export function LabelPanel({
               Assigned: {selectedLabelNames.length > 0 ? selectedLabelNames.join(", ") : "none"}
             </p>
           ) : null}
-          <ol className="label-list">
+          <ol className="label-list" data-testid="label-list">
             {labels.map((label, index) => {
               const classColor = getClassColor(label.id);
               const isActive = selectedLabelIds.includes(label.id);
@@ -390,6 +393,8 @@ export function LabelPanel({
                         "--class-chip-text": classColor.chipText,
                       } as CSSProperties
                     }
+                    data-testid="label-chip"
+                    data-category-id={label.id}
                   >
                     <span className="label-index">{index + 1}</span>
                     <span>{label.name}</span>
@@ -448,7 +453,13 @@ export function LabelPanel({
         <button type="button" className="ghost-button" onClick={onToggleEditMode}>
           {editMode ? "Exit Edit" : "Edit"}
         </button>
-        <button type="button" className="primary-button" onClick={onSubmit} disabled={isSaving || !canSubmit}>
+        <button
+          type="button"
+          className="primary-button"
+          onClick={onSubmit}
+          disabled={isSaving || !canSubmit}
+          data-testid="annotation-submit-button"
+        >
           {isSaving ? "Saving..." : `Submit${pendingCount > 0 ? ` (${pendingCount})` : ""}`}
         </button>
       </div>

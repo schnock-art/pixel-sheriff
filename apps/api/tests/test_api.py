@@ -1485,6 +1485,78 @@ async def _create_project_model(client: AsyncClient, *, project_name: str) -> tu
     return project_id, created.json()["id"]
 
 
+async def _create_classification_project_model(client: AsyncClient, *, project_name: str) -> tuple[str, str, str]:
+    project_id, model_id, task_id, _category_ids = await _create_classification_project_model_with_categories(
+        client,
+        project_name=project_name,
+        category_names=["class-a"],
+    )
+    return project_id, model_id, task_id
+
+
+async def _create_classification_project_model_with_categories(
+    client: AsyncClient,
+    *,
+    project_name: str,
+    category_names: list[str],
+) -> tuple[str, str, str, list[str]]:
+    project = (await client.post("/api/v1/projects", json={"name": project_name, "task_type": "classification_single"})).json()
+    project_id = project["id"]
+    task_id = project["default_task_id"]
+
+    category_ids: list[str] = []
+    for index, name in enumerate(category_names):
+        category_response = await client.post(
+            f"/api/v1/projects/{project_id}/categories",
+            json={"task_id": task_id, "name": name, "display_order": index},
+        )
+        assert category_response.status_code == 200
+        category_ids.append(category_response.json()["id"])
+
+    upload = await client.post(
+        f"/api/v1/projects/{project_id}/assets/upload",
+        files={"file": ("sample.jpg", b"fake-image-bytes", "image/jpeg")},
+    )
+    assert upload.status_code == 200
+    asset = upload.json()
+
+    annotation = await client.post(
+        f"/api/v1/projects/{project_id}/annotations",
+        json={
+            "asset_id": asset["id"],
+            "task_id": task_id,
+            "status": "approved",
+            "payload_json": {
+                "version": "2.0",
+                "category_ids": [category_ids[0]],
+                "classification": {"category_ids": [category_ids[0]], "primary_category_id": category_ids[0]},
+                "image_basis": {"width": 100, "height": 80},
+            },
+        },
+    )
+    assert annotation.status_code == 200
+
+    created_dataset = await client.post(
+        f"/api/v1/projects/{project_id}/datasets/versions",
+        json={
+            "name": "classification-v1",
+            "task_id": task_id,
+            "selection": {"mode": "filter_snapshot", "filters": {"include_labeled_only": True}},
+            "split": {
+                "seed": 42,
+                "ratios": {"train": 1.0, "val": 0.0, "test": 0.0},
+                "stratify": {"enabled": False, "by": "label_primary"},
+            },
+            "set_active": True,
+        },
+    )
+    assert created_dataset.status_code == 200
+
+    created_model = await client.post(f"/api/v1/projects/{project_id}/models", json={})
+    assert created_model.status_code == 200
+    return project_id, created_model.json()["id"], task_id, category_ids
+
+
 def _seed_experiment_run_artifacts(
     *,
     project_id: str,
@@ -1992,7 +2064,7 @@ async def test_experiment_onnx_endpoint_returns_not_found_when_missing(client: A
 
 @pytest.mark.asyncio
 async def test_create_deployment_resolves_onnx_and_persists_model_key(client: AsyncClient) -> None:
-    project_id, model_id = await _create_project_model(client, project_name="deploy-create")
+    project_id, model_id, _task_id = await _create_classification_project_model(client, project_name="deploy-create")
     created = await client.post(
         f"/api/v1/projects/{project_id}/experiments",
         json={"model_id": model_id, "name": "deploy-exp"},
@@ -2038,12 +2110,11 @@ async def test_predict_without_active_returns_no_active_deployment(client: Async
 
 @pytest.mark.asyncio
 async def test_predict_maps_inference_predictions_with_class_ids(client: AsyncClient) -> None:
-    project_id, model_id = await _create_project_model(client, project_name="predict-mapped")
-    cat_a = await client.post(f"/api/v1/projects/{project_id}/categories", json={"name": "rock", "display_order": 0})
-    cat_b = await client.post(f"/api/v1/projects/{project_id}/categories", json={"name": "paper", "display_order": 1})
-    assert cat_a.status_code == 200
-    assert cat_b.status_code == 200
-    class_ids = [cat_a.json()["id"], cat_b.json()["id"]]
+    project_id, model_id, _task_id, class_ids = await _create_classification_project_model_with_categories(
+        client,
+        project_name="predict-mapped",
+        category_names=["rock", "paper"],
+    )
     upload = await client.post(
         f"/api/v1/projects/{project_id}/assets/upload",
         files={"file": ("sample.jpg", b"fake-image-bytes", "image/jpeg")},
@@ -2100,9 +2171,11 @@ async def test_predict_maps_inference_predictions_with_class_ids(client: AsyncCl
 
 @pytest.mark.asyncio
 async def test_predict_returns_output_dim_mismatch(client: AsyncClient) -> None:
-    project_id, model_id = await _create_project_model(client, project_name="predict-dim-mismatch")
-    category = await client.post(f"/api/v1/projects/{project_id}/categories", json={"name": "only", "display_order": 0})
-    assert category.status_code == 200
+    project_id, model_id, _task_id, category_ids = await _create_classification_project_model_with_categories(
+        client,
+        project_name="predict-dim-mismatch",
+        category_names=["only"],
+    )
     upload = await client.post(
         f"/api/v1/projects/{project_id}/assets/upload",
         files={"file": ("sample.jpg", b"fake-image-bytes", "image/jpeg")},
@@ -2121,7 +2194,7 @@ async def test_predict_returns_output_dim_mismatch(client: AsyncClient) -> None:
     settings = get_settings()
     metadata_path = Path(settings.storage_root) / "experiments" / project_id / experiment_id / "runs" / "1" / "onnx" / "onnx.metadata.json"
     metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-    metadata["class_ids"] = [category.json()["id"]]
+    metadata["class_ids"] = category_ids
     metadata_path.write_text(json.dumps(metadata, indent=2, sort_keys=True), encoding="utf-8")
 
     deployed = await client.post(

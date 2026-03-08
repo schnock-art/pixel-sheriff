@@ -68,6 +68,7 @@ export default function DatasetPage({ params }: DatasetPageProps) {
             className={`primary-button${state.browser.selectedDatasetVersionId ? "" : " disabled-link"}`}
             href={state.browser.selectedDatasetVersionId ? trainModelHref : "#"}
             aria-disabled={!state.browser.selectedDatasetVersionId}
+            data-testid="dataset-train-model-button"
             onClick={(event) => {
               if (!state.browser.selectedDatasetVersionId) event.preventDefault();
             }}

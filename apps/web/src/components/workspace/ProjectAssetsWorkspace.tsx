@@ -669,13 +669,19 @@ export default function ProjectAssetsWorkspace() {
         title="Labeling"
         description={`Manage imported assets, annotate images, and move cleanly into dataset creation. Current scope: ${headerTitle}`}
         actions={
-          <button type="button" className="primary-button" onClick={handleCreateDataset} disabled={!selectedProjectId}>
+          <button
+            type="button"
+            className="primary-button"
+            onClick={handleCreateDataset}
+            disabled={!selectedProjectId}
+            data-testid="create-dataset-button"
+          >
             Create Dataset
           </button>
         }
       >
-        <div className="labeling-workspace-shell">
-          <div className="labeling-workspace-grid">
+        <div className="labeling-workspace-shell" data-testid="labeling-workspace">
+          <div className="labeling-workspace-grid" data-testid="labeling-workspace-grid">
           <AssetBrowser
             selectedTreeFolderPath={treeState.selectedTreeFolderPath}
             bulkDeleteMode={bulkDeleteMode}
@@ -712,7 +718,7 @@ export default function ProjectAssetsWorkspace() {
             onChangeFilterCategoryId={treeState.setFilterCategoryId}
           />
 
-          <div className="labeling-canvas-column">
+          <div className="labeling-canvas-column" data-testid="labeling-canvas-column">
             <CanvasToolbar
               annotationMode={annotationMode}
               activeTool={canvasTool}

@@ -22,7 +22,7 @@ export function AssetFilmstrip({
   onNext,
 }: AssetFilmstripProps) {
   return (
-    <section className="asset-filmstrip" aria-label="Image navigator">
+    <section className="asset-filmstrip" aria-label="Image navigator" data-testid="asset-filmstrip">
       <div className="asset-filmstrip-top">
         <Pagination
           total={Math.max(assetRows.length, 1)}
@@ -49,6 +49,8 @@ export function AssetFilmstrip({
               pageDirtyFlags[index] ? " is-dirty" : ""
             }`}
             onClick={() => onSelectIndex(index)}
+            data-testid="filmstrip-item"
+            data-demo-asset-id={asset.id}
           >
             <span className={`asset-filmstrip-status is-${pageStatuses[index] ?? "unlabeled"}`} />
             <span className="asset-filmstrip-index">{index + 1}</span>

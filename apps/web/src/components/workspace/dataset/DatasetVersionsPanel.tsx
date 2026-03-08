@@ -23,7 +23,7 @@ export function DatasetVersionsPanel({
   onExport: () => void;
 }) {
   return (
-    <section className="placeholder-card">
+    <section className="placeholder-card" data-testid="dataset-versions-panel">
       <h3>Versions</h3>
       <div style={{ display: "grid", gap: 8 }}>
         {isLoadingVersions ? <p>Loading versions...</p> : null}
@@ -43,6 +43,8 @@ export function DatasetVersionsPanel({
               className={isSelected ? "ghost-button active-toggle" : "ghost-button"}
               onClick={() => onSelectVersion(id)}
               style={{ justifyContent: "space-between", display: "flex", alignItems: "center" }}
+              data-testid="dataset-version-item"
+              data-dataset-version-id={id}
             >
               <span>
                 {name}
@@ -55,10 +57,21 @@ export function DatasetVersionsPanel({
       </div>
       {selectedDatasetVersionId ? (
         <div style={{ marginTop: 12, display: "grid", gap: 8 }}>
-          <button type="button" className="ghost-button" onClick={() => onSetActive(selectedDatasetVersionId)}>
+          <button
+            type="button"
+            className="ghost-button"
+            onClick={() => onSetActive(selectedDatasetVersionId)}
+            data-testid="dataset-set-active-button"
+          >
             Set Active
           </button>
-          <button type="button" className="primary-button" disabled={isExporting} onClick={onExport}>
+          <button
+            type="button"
+            className="primary-button"
+            disabled={isExporting}
+            onClick={onExport}
+            data-testid="dataset-export-button"
+          >
             {isExporting ? "Exporting..." : "Export Dataset Zip"}
           </button>
         </div>

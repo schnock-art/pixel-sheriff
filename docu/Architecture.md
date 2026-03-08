@@ -91,6 +91,7 @@ Defined in `apps/api/src/sheriff_api/db/models.py`:
   - `experiments/{project_id}/records.json`
   - `experiments/{project_id}/{experiment_id}/config.json`
   - `experiments/{project_id}/{experiment_id}/status.json`
+  - delete uses a temporary `.trash/` move under `experiments/{project_id}/` before record rewrite + final artifact removal
   - latest evaluation mirrors at experiment root:
     - `evaluation.json`
     - `predictions.jsonl`
@@ -467,7 +468,7 @@ App-router entry and project shell:
 - `apps/web/src/app/projects/[projectId]/models/[modelId]/page.tsx` renders editable Model Builder controls with draft/save state, AJV validation, and live summary updates
 - `apps/web/src/app/projects/[projectId]/experiments/page.tsx` renders experiment list plus analytics dashboard (summary cards, multi-run chart, hyperparameter scatter)
 - `apps/web/src/app/projects/[projectId]/experiments/new/page.tsx` creates experiment drafts (auto when `modelId` query is provided)
-- `apps/web/src/app/projects/[projectId]/experiments/[experimentId]/page.tsx` renders train workspace with editable params/checkpoints/live chart/SSE plus deep dashboard (confusion matrix, per-class metrics, prediction explorer)
+- `apps/web/src/app/projects/[projectId]/experiments/[experimentId]/page.tsx` renders train workspace with editable params/checkpoints/live chart/SSE plus deep dashboard (confusion matrix, per-class metrics, prediction explorer) and a detail-page `Danger Zone` delete action
 
 UI structure:
 
@@ -628,8 +629,10 @@ Labeling workspace leaf components (`apps/web/src/components/workspace/project-a
   - experiment detail header includes `Back to Experiments` navigation to project experiments list
   - `Start Training` enqueues worker job and transitions `queued -> running -> terminal`
   - `Cancel` supports queued cancel and running cancel-request semantics
+  - `Delete` is available only for `draft` / `failed` / `canceled` / `completed`; queued/running runs stay protected and non-archived deployment references block deletion
   - trainer pipelines poll `cancel_requested` between batches, so long detection/segmentation epochs no longer need to finish before cancellation takes effect
   - checkpoints tracked as `best_metric`, `best_loss`, `latest` with selection placeholder (`Pick`)
+  - after a successful run, duplicate completed-run checkpoint files for the same epoch are compacted so metadata rows may share one artifact URI (`best_metric` > `best_loss` > `latest`)
   - metrics chart supports axis/ticks, legend, series toggles, crosshair hover, and per-epoch tooltip values
   - metrics panel shows last epoch duration + ETA + estimated finish clock time
   - experiment detail dashboard (classification) includes:

@@ -114,13 +114,18 @@ make help
   - project-scoped experiments list + create + detail routes
   - model detail `Train Model` CTA supports `Continue` or `New run`
   - training config draft save/edit in `draft`/`failed` states
-  - `start`/`cancel` lifecycle APIs
+  - `start`/`cancel`/`delete` lifecycle APIs
   - queued cancel is immediate; running cancel is cooperative and polled between training batches so long epochs do not trap the run in `running` until epoch end
+  - delete is allowed for `draft` / `failed` / `canceled` / `completed`
+  - delete is blocked for `queued` / `running`
+  - delete is also blocked while any non-archived deployment still references the experiment
+  - delete removes the full experiment artifact tree (runs, logs, checkpoints, evaluation, predictions, ONNX) plus the experiment record
   - Redis-queued trainer worker execution with persisted metrics/checkpoints
   - run-attempt isolation under `runs/{attempt}` to avoid metric/event/checkpoint mixing across restarts
   - live SSE stream consumed by web chart UI
   - chart includes axes, legend, toggles, and hover value tooltip
   - experiment dataset export now preserves saved dataset-version split membership (`train`/`val`/`test`) from stored `splits.items`
+  - completed-run checkpoint metadata still exposes `best_metric`, `best_loss`, and `latest`, but duplicate final-epoch files are compacted onto one canonical artifact (`best_metric` > `best_loss` > `latest`)
 - Classification + detection experiment analytics and dashboards:
   - trainer now writes attempt-scoped classification evaluation artifacts:
     - `experiments/{project_id}/{experiment_id}/runs/{attempt}/evaluation.json`
@@ -229,6 +234,7 @@ make help
     - `prefetch_factor`, `cache_resized_images`, `max_cached_images`
   - save gating based on light config validation
   - checkpoint panel (`best_metric`, `best_loss`, `latest`) with selection placeholder action
+  - delete `Danger Zone` action on detail page only
   - metrics chart with axis/ticks/legend/toggles
   - live timing row (`Last epoch time`, `ETA`, estimated finish clock time)
   - hover crosshair + tooltip values per epoch
@@ -476,9 +482,10 @@ Also, trainer Dockerfiles now share a named BuildKit pip cache (`id=pixel-sherif
     - `./scripts/run_web_tests.sh tests/apiClient.test.js`
     - `./scripts/run_api_tests.sh -q tests/test_cross_boundary_contracts.py`
 - Environment note:
-  - in this repo/environment, host-side direct API `pytest` can be unreliable because local async DB drivers may stall
-  - prefer `./scripts/run_api_tests.sh` or `make test-api-focused` / `make test-api-safe` so tests run against the Docker-backed Postgres test path
-  - `./scripts/run_api_tests.sh` rebuilds the `api-test` image on invocation so copied source/tests stay current
+  - `./scripts/run_api_tests.sh` prefers the Docker-backed Postgres path when Docker Compose is available
+  - when Docker Compose is unavailable, the script falls back to local `apps/api` pytest execution with the SQLite test fixture path
+  - `make test-api-focused` / `make test-api-safe` invoke the same script through `bash` so they remain usable on Windows setups where direct shebang launch fails
+  - in Docker mode, `./scripts/run_api_tests.sh` rebuilds the `api-test` image on invocation so copied source/tests stay current
   - for frontend structure refactors, run both `./scripts/run_web_tests.sh` and `cd apps/web && npx tsc --noEmit`
   - for web API client changes, add focused helper coverage in `apps/web/tests/apiClient.test.js`
   - for cross-boundary contract/regression coverage, keep `apps/api/tests/test_cross_boundary_contracts.py` green

@@ -7,7 +7,7 @@ from httpx import AsyncClient
 import pytest
 
 from sheriff_api.config import get_settings
-from test_api import _create_project_model, _seed_experiment_run_artifacts, assert_api_error
+from test_api import _create_classification_project_model, _create_project_model, _seed_experiment_run_artifacts, assert_api_error
 
 
 def _parse_sse_events(raw_text: str) -> list[dict]:
@@ -185,11 +185,15 @@ async def test_experiment_samples_empty_message_and_not_found_branches(client: A
 
 @pytest.mark.asyncio
 async def test_experiment_export_preserves_saved_dataset_split_membership(client: AsyncClient) -> None:
-    project_id, model_id = await _create_project_model(client, project_name="exp-saved-split-export")
+    project_id, _seed_model_id = await _create_project_model(client, project_name="exp-saved-split-export")
 
-    categories = await client.get(f"/api/v1/projects/{project_id}/categories")
+    project = await client.get(f"/api/v1/projects/{project_id}")
+    assert project.status_code == 200
+    task_id = project.json()["default_task_id"]
+
+    categories = await client.get(f"/api/v1/projects/{project_id}/categories", params={"task_id": task_id})
     assert categories.status_code == 200
-    category_id = categories.json()["items"][0]["id"]
+    category_id = categories.json()[0]["id"]
 
     for index in range(11):
         uploaded = await client.post(
@@ -203,6 +207,7 @@ async def test_experiment_export_preserves_saved_dataset_split_membership(client
             f"/api/v1/projects/{project_id}/annotations",
             json={
                 "asset_id": asset_id,
+                "task_id": task_id,
                 "status": "approved",
                 "payload_json": {
                     "version": "2.0",
@@ -218,7 +223,7 @@ async def test_experiment_export_preserves_saved_dataset_split_membership(client
         f"/api/v1/projects/{project_id}/datasets/versions",
         json={
             "name": "split-v1",
-            "task": "bbox",
+            "task_id": task_id,
             "selection": {"mode": "filter_snapshot", "filters": {"include_labeled_only": False}},
             "split": {
                 "seed": 1337,
@@ -231,6 +236,13 @@ async def test_experiment_export_preserves_saved_dataset_split_membership(client
     created_payload = created_dataset.json()
     dataset_version = created_payload["version"]
     dataset_version_id = dataset_version["dataset_version_id"]
+
+    created_model = await client.post(
+        f"/api/v1/projects/{project_id}/models",
+        json={"dataset_version_id": dataset_version_id},
+    )
+    assert created_model.status_code == 200
+    model_id = created_model.json()["id"]
 
     expected_by_split: dict[str, list[str]] = {"train": [], "val": [], "test": []}
     for row in dataset_version["splits"]["items"]:
@@ -268,3 +280,173 @@ async def test_experiment_export_preserves_saved_dataset_split_membership(client
 
     for split_name in ["train", "val", "test"]:
         assert sorted(manifest["splits"][split_name]["asset_ids"]) == sorted(expected_by_split[split_name])
+
+
+@pytest.mark.asyncio
+async def test_delete_completed_experiment_removes_record_and_directory(client: AsyncClient) -> None:
+    project_id, model_id = await _create_project_model(client, project_name="exp-delete-completed")
+    created = await client.post(
+        f"/api/v1/projects/{project_id}/experiments",
+        json={"model_id": model_id, "name": "delete-completed"},
+    )
+    assert created.status_code == 200
+    experiment_id = created.json()["id"]
+
+    _seed_experiment_run_artifacts(project_id=project_id, experiment_id=experiment_id, attempt=1, include_onnx=True)
+
+    import sheriff_api.routers.experiments as experiments_router
+
+    experiments_router.experiment_store.set_status(project_id=project_id, experiment_id=experiment_id, status="completed")
+
+    settings = get_settings()
+    experiment_dir = Path(settings.storage_root) / "experiments" / project_id / experiment_id
+    assert experiment_dir.exists()
+
+    deleted = await client.delete(f"/api/v1/projects/{project_id}/experiments/{experiment_id}")
+    assert deleted.status_code == 204
+    assert experiment_dir.exists() is False
+
+    detail = await client.get(f"/api/v1/projects/{project_id}/experiments/{experiment_id}")
+    assert_api_error(detail, status_code=404, code="experiment_not_found", message="Experiment not found in project")
+
+
+@pytest.mark.asyncio
+async def test_delete_draft_experiment_removes_config_and_status_files(client: AsyncClient) -> None:
+    project_id, model_id = await _create_project_model(client, project_name="exp-delete-draft")
+    created = await client.post(
+        f"/api/v1/projects/{project_id}/experiments",
+        json={"model_id": model_id, "name": "delete-draft"},
+    )
+    assert created.status_code == 200
+    experiment_id = created.json()["id"]
+
+    settings = get_settings()
+    experiment_dir = Path(settings.storage_root) / "experiments" / project_id / experiment_id
+    assert (experiment_dir / "config.json").exists()
+    assert (experiment_dir / "status.json").exists()
+
+    deleted = await client.delete(f"/api/v1/projects/{project_id}/experiments/{experiment_id}")
+    assert deleted.status_code == 204
+    assert experiment_dir.exists() is False
+
+
+@pytest.mark.asyncio
+async def test_delete_queued_experiment_returns_state_invalid(client: AsyncClient) -> None:
+    project_id, model_id = await _create_project_model(client, project_name="exp-delete-queued")
+    created = await client.post(
+        f"/api/v1/projects/{project_id}/experiments",
+        json={"model_id": model_id, "name": "delete-queued"},
+    )
+    assert created.status_code == 200
+    experiment_id = created.json()["id"]
+
+    import sheriff_api.routers.experiments as experiments_router
+
+    experiments_router.experiment_store.set_status(project_id=project_id, experiment_id=experiment_id, status="queued")
+
+    deleted = await client.delete(f"/api/v1/projects/{project_id}/experiments/{experiment_id}")
+    assert_api_error(
+        deleted,
+        status_code=409,
+        code="experiment_state_invalid",
+        message="Queued or running experiments must be canceled before deletion",
+    )
+
+
+@pytest.mark.asyncio
+async def test_delete_running_experiment_returns_state_invalid(client: AsyncClient) -> None:
+    project_id, model_id = await _create_project_model(client, project_name="exp-delete-running")
+    created = await client.post(
+        f"/api/v1/projects/{project_id}/experiments",
+        json={"model_id": model_id, "name": "delete-running"},
+    )
+    assert created.status_code == 200
+    experiment_id = created.json()["id"]
+
+    import sheriff_api.routers.experiments as experiments_router
+
+    experiments_router.experiment_store.set_status(project_id=project_id, experiment_id=experiment_id, status="running")
+
+    deleted = await client.delete(f"/api/v1/projects/{project_id}/experiments/{experiment_id}")
+    assert_api_error(
+        deleted,
+        status_code=409,
+        code="experiment_state_invalid",
+        message="Queued or running experiments must be canceled before deletion",
+    )
+
+
+@pytest.mark.asyncio
+async def test_delete_experiment_blocked_by_available_deployment(client: AsyncClient) -> None:
+    project_id, model_id, _task_id = await _create_classification_project_model(
+        client, project_name="exp-delete-deployment-block"
+    )
+    created = await client.post(
+        f"/api/v1/projects/{project_id}/experiments",
+        json={"model_id": model_id, "name": "delete-blocked"},
+    )
+    assert created.status_code == 200
+    experiment_id = created.json()["id"]
+
+    _seed_experiment_run_artifacts(project_id=project_id, experiment_id=experiment_id, attempt=1, include_onnx=True)
+
+    deployment = await client.post(
+        f"/api/v1/projects/{project_id}/deployments",
+        json={
+            "name": "delete-blocker",
+            "task": "classification",
+            "device_preference": "auto",
+            "source": {"experiment_id": experiment_id, "attempt": 1, "checkpoint_kind": "best_metric"},
+            "is_active": False,
+        },
+    )
+    assert deployment.status_code == 200
+
+    deleted = await client.delete(f"/api/v1/projects/{project_id}/experiments/{experiment_id}")
+    payload = assert_api_error(
+        deleted,
+        status_code=409,
+        code="experiment_in_use",
+        message="Experiment is referenced by active deployments",
+    )
+    blockers = payload["error"]["details"]["deployments"]
+    assert isinstance(blockers, list)
+    assert blockers[0]["name"] == "delete-blocker"
+    assert blockers[0]["status"] == "available"
+
+
+@pytest.mark.asyncio
+async def test_delete_experiment_ignores_archived_deployments(client: AsyncClient) -> None:
+    project_id, model_id, _task_id = await _create_classification_project_model(
+        client, project_name="exp-delete-archived-deployment"
+    )
+    created = await client.post(
+        f"/api/v1/projects/{project_id}/experiments",
+        json={"model_id": model_id, "name": "delete-archived-ok"},
+    )
+    assert created.status_code == 200
+    experiment_id = created.json()["id"]
+
+    _seed_experiment_run_artifacts(project_id=project_id, experiment_id=experiment_id, attempt=1, include_onnx=True)
+
+    deployment = await client.post(
+        f"/api/v1/projects/{project_id}/deployments",
+        json={
+            "name": "delete-archived",
+            "task": "classification",
+            "device_preference": "auto",
+            "source": {"experiment_id": experiment_id, "attempt": 1, "checkpoint_kind": "best_metric"},
+            "is_active": False,
+        },
+    )
+    assert deployment.status_code == 200
+    deployment_id = deployment.json()["deployment"]["deployment_id"]
+
+    archived = await client.patch(
+        f"/api/v1/projects/{project_id}/deployments/{deployment_id}",
+        json={"status": "archived"},
+    )
+    assert archived.status_code == 200
+
+    deleted = await client.delete(f"/api/v1/projects/{project_id}/experiments/{experiment_id}")
+    assert deleted.status_code == 204

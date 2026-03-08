@@ -1,4 +1,4 @@
-import { apiGet, apiPost, getApiBase, requestJson } from "./client";
+import { apiGet, apiPost, getApiBase, requestJson, requestNoContent } from "./client";
 import {
   buildExperimentAnalyticsPath,
   buildExperimentEventsUrl,
@@ -96,6 +96,12 @@ export function startExperiment(projectId: string, experimentId: string): Promis
 
 export function cancelExperiment(projectId: string, experimentId: string): Promise<ExperimentActionResponse> {
   return apiPost<ExperimentActionResponse, Record<string, never>>(`/projects/${projectId}/experiments/${experimentId}/cancel`, {});
+}
+
+export function deleteExperiment(projectId: string, experimentId: string): Promise<void> {
+  return requestNoContent(`/projects/${projectId}/experiments/${experimentId}`, {
+    method: "DELETE",
+  });
 }
 
 export function streamExperimentEvents(

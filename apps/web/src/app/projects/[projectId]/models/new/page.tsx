@@ -134,14 +134,14 @@ export default function NewModelPage({ params }: NewModelPageProps) {
         ) : datasetVersionOptions.length === 0 ? (
           <p>No dataset versions found. Create a dataset version before adding a model.</p>
         ) : (
-          <form className="model-entry-form" onSubmit={(event) => void handleSubmit(event)}>
+          <form className="model-entry-form" onSubmit={(event) => void handleSubmit(event)} data-testid="new-model-form">
             <div className="model-entry-intro">
               <h3>Model source</h3>
               <p>Select the dataset version you want this model to track. The next screen opens the full builder with architecture and export settings.</p>
             </div>
             <label className="project-field">
               <span>Task</span>
-              <select value={selectedTask} onChange={(event) => handleTaskChange(event.target.value)}>
+              <select data-testid="new-model-task-select" value={selectedTask} onChange={(event) => handleTaskChange(event.target.value)}>
                 {taskOptions.map((task) => (
                   <option key={task.taskId} value={task.taskId}>
                     {task.taskLabel}
@@ -152,6 +152,7 @@ export default function NewModelPage({ params }: NewModelPageProps) {
             <label className="project-field">
               <span>Dataset Version</span>
               <select
+                data-testid="new-model-version-select"
                 value={selectedVersionId}
                 onChange={(event) => setSelectedVersionId(event.target.value)}
                 disabled={filteredVersions.length === 0}
@@ -166,7 +167,7 @@ export default function NewModelPage({ params }: NewModelPageProps) {
             </label>
             {errorMessage ? <p className="project-field-error">{errorMessage}</p> : null}
             <div className="project-modal-actions">
-              <button type="submit" className="primary-button" disabled={!selectedVersionId || isCreating}>
+              <button type="submit" className="primary-button" disabled={!selectedVersionId || isCreating} data-testid="new-model-submit">
                 {isCreating ? "Creating..." : "Continue to Builder"}
               </button>
             </div>

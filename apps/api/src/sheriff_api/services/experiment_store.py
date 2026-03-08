@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 import uuid
+import shutil
 
 from sheriff_api.services.storage import LocalStorage
 
@@ -804,3 +805,28 @@ class ExperimentStore:
             self._storage.delete_tree(f"experiments/{project_id}")
         except ValueError:
             return
+
+    def delete(self, *, project_id: str, experiment_id: str) -> bool:
+        records = self._read_records(project_id)
+        next_records = [row for row in records if str(row.get("id")) != experiment_id]
+        if len(next_records) == len(records):
+            return False
+
+        experiment_dir = self._experiment_dir(project_id, experiment_id)
+        trashed_dir: Path | None = None
+        if experiment_dir.exists():
+            trash_root = self._storage.resolve(f"experiments/{project_id}/.trash")
+            trash_root.mkdir(parents=True, exist_ok=True)
+            trashed_dir = trash_root / f"{experiment_id}-{uuid.uuid4()}"
+            experiment_dir.rename(trashed_dir)
+
+        try:
+            self._write_records(project_id, next_records)
+        except Exception:
+            if trashed_dir is not None and trashed_dir.exists() and not experiment_dir.exists():
+                trashed_dir.rename(experiment_dir)
+            raise
+
+        if trashed_dir is not None and trashed_dir.exists():
+            shutil.rmtree(trashed_dir, ignore_errors=False)
+        return True

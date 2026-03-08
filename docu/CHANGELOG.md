@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- Experiment storage reduction + test-path fallback:
+  - API now supports `DELETE /api/v1/projects/{project_id}/experiments/{experiment_id}`
+  - delete is blocked for `queued` / `running` experiments and for experiments referenced by non-archived deployments (`experiment_in_use`)
+  - experiment detail page now exposes a `Danger Zone` delete action that removes runs, logs, checkpoints, evaluation, predictions, and ONNX artifacts
+  - completed-run checkpoint compaction now deduplicates same-epoch final artifacts across `best_metric`, `best_loss`, and `latest` while preserving checkpoint rows
+  - `scripts/run_api_tests.sh` now falls back to local `apps/api` pytest when Docker Compose is unavailable
+  - `make test-api-focused` / `make test-api-safe` now invoke the API test script through `bash` for better Windows compatibility
 - Frontend workflow shell refresh:
   - project pages now share a reusable ribbon with global project/task selectors and live stats chips
   - labeling workspace now uses asset browser + canvas + annotation panel + bottom filmstrip layout

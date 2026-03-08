@@ -573,7 +573,7 @@ export function Viewer({
         viewport: toViewportCoords(handlePoint.x, handlePoint.y, viewport!),
       }));
       return (
-        <g key={object.id} className={className}>
+        <g key={object.id} className={className} data-testid="geometry-object" data-object-id={object.id}>
           <rect x={topLeft.x} y={topLeft.y} width={width} height={height} style={overlayStyle} />
           {annotationMode === "bbox" && isSelected
             ? handles.map((handlePoint) => (
@@ -600,7 +600,7 @@ export function Viewer({
         points.push(`${point.x},${point.y}`);
       }
       return (
-        <g key={`${object.id}-${index}`} className={className}>
+        <g key={`${object.id}-${index}`} className={className} data-testid="geometry-object" data-object-id={object.id}>
           <polygon points={points.join(" ")} style={overlayStyle} />
         </g>
       );
@@ -645,13 +645,20 @@ export function Viewer({
   }
 
   return (
-    <section className="viewer-panel" aria-label="Image viewer">
-      <div className={hasImage ? "viewer-canvas has-image" : "viewer-canvas"} role="img" aria-label="Image annotation canvas" ref={canvasRef}>
+    <section className="viewer-panel" aria-label="Image viewer" data-testid="viewer-panel">
+      <div
+        className={hasImage ? "viewer-canvas has-image" : "viewer-canvas"}
+        role="img"
+        aria-label="Image annotation canvas"
+        ref={canvasRef}
+        data-testid="viewer-canvas"
+      >
         {currentAsset?.uri ? (
           <img
             src={currentAsset.uri}
             alt={`Asset ${currentAsset.id}`}
             className="viewer-image"
+            data-testid="viewer-image"
             draggable={false}
             onLoad={(event) => {
               setImageLoadError(false);
@@ -666,6 +673,7 @@ export function Viewer({
         {hasImage && viewport ? (
           <svg
             className={annotationMode === "labels" ? "viewer-geometry-overlay is-readonly" : "viewer-geometry-overlay"}
+            data-testid="viewer-geometry-overlay"
             onPointerDown={handlePointerDown}
             onPointerMove={handlePointerMove}
             onPointerUp={handlePointerUp}

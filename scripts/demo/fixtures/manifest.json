@@ -1,0 +1,145 @@
+{
+  "project": {
+    "name": "README Demo",
+    "task_type": "bbox"
+  },
+  "dataset": {
+    "name": "README Demo Dataset v1",
+    "split": {
+      "seed": 1337,
+      "ratios": {
+        "train": 0.75,
+        "val": 0.125,
+        "test": 0.125
+      },
+      "stratify": {
+        "enabled": false,
+        "by": "label_primary",
+        "strict_stratify": false
+      }
+    }
+  },
+  "model": {
+    "name": "README Detector"
+  },
+  "hero": {
+    "asset_relative_path": "yard/loading-bay.png"
+  },
+  "categories": [
+    {
+      "name": "Vehicle",
+      "display_order": 0
+    },
+    {
+      "name": "Pallet",
+      "display_order": 1
+    }
+  ],
+  "assets": [
+    {
+      "file": "images/yard-overview.png",
+      "relative_path": "yard/yard-overview.png",
+      "mime_type": "image/png",
+      "width": 1280,
+      "height": 800,
+      "status": "approved",
+      "annotation": {
+        "category": "Vehicle",
+        "object_id": "bbox-yard-overview",
+        "bbox": [180, 320, 360, 180]
+      }
+    },
+    {
+      "file": "images/loading-bay.png",
+      "relative_path": "yard/loading-bay.png",
+      "mime_type": "image/png",
+      "width": 1280,
+      "height": 800,
+      "status": "approved",
+      "annotation": {
+        "category": "Vehicle",
+        "object_id": "bbox-loading-bay",
+        "bbox": [420, 260, 330, 190]
+      }
+    },
+    {
+      "file": "images/truck-closeup.png",
+      "relative_path": "yard/truck-closeup.png",
+      "mime_type": "image/png",
+      "width": 1280,
+      "height": 800,
+      "status": "approved",
+      "annotation": {
+        "category": "Vehicle",
+        "object_id": "bbox-truck-closeup",
+        "bbox": [300, 250, 420, 230]
+      }
+    },
+    {
+      "file": "images/inspection-station.png",
+      "relative_path": "inspection/inspection-station.png",
+      "mime_type": "image/png",
+      "width": 1280,
+      "height": 800,
+      "status": "approved",
+      "annotation": {
+        "category": "Pallet",
+        "object_id": "bbox-inspection-station",
+        "bbox": [520, 310, 250, 190]
+      }
+    },
+    {
+      "file": "images/checkpoint-lane.png",
+      "relative_path": "inspection/checkpoint-lane.png",
+      "mime_type": "image/png",
+      "width": 1280,
+      "height": 800,
+      "status": "approved",
+      "annotation": {
+        "category": "Vehicle",
+        "object_id": "bbox-checkpoint-lane",
+        "bbox": [620, 280, 320, 210]
+      }
+    },
+    {
+      "file": "images/pallet-racks.png",
+      "relative_path": "storage/pallet-racks.png",
+      "mime_type": "image/png",
+      "width": 1280,
+      "height": 800,
+      "status": "approved",
+      "annotation": {
+        "category": "Pallet",
+        "object_id": "bbox-pallet-racks",
+        "bbox": [220, 220, 280, 360]
+      }
+    },
+    {
+      "file": "images/forklift-aisle.png",
+      "relative_path": "storage/forklift-aisle.png",
+      "mime_type": "image/png",
+      "width": 1280,
+      "height": 800,
+      "status": "approved",
+      "annotation": {
+        "category": "Vehicle",
+        "object_id": "bbox-forklift-aisle",
+        "bbox": [420, 260, 280, 230]
+      }
+    },
+    {
+      "file": "images/dispatch-corner.png",
+      "relative_path": "storage/dispatch-corner.png",
+      "mime_type": "image/png",
+      "width": 1280,
+      "height": 800,
+      "status": "approved",
+      "annotation": {
+        "category": "Pallet",
+        "object_id": "bbox-dispatch-corner",
+        "bbox": [710, 300, 250, 220]
+      }
+    }
+  ]
+}
+

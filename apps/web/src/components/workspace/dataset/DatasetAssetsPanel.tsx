@@ -107,7 +107,7 @@ export function DatasetAssetsPanel({
   const savedItems = assetsPayload?.items ?? [];
 
   return (
-    <>
+    <section data-testid="dataset-assets-panel">
       <h3 style={{ marginTop: 16 }}>{mode === "draft" ? "Sample Assets (Preview)" : "Assets"}</h3>
       <div style={{ display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
         <select value={splitFilter} onChange={(event) => onSplitFilterChange(event.target.value as "all" | "train" | "val" | "test")}>
@@ -182,6 +182,6 @@ export function DatasetAssetsPanel({
           ) : null}
         </>
       )}
-    </>
+    </section>
   );
 }

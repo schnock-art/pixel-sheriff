@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sheriff_api.db.session import get_db
@@ -17,6 +17,7 @@ from .shared import (
     as_experiment_summary,
     collect_config_issues,
     deep_merge,
+    deployment_store,
     default_training_config,
     ensure_model_matches_dataset_version,
     experiment_store,
@@ -219,3 +220,58 @@ async def update_project_experiment(
             details={"project_id": project_id, "experiment_id": experiment_id},
         )
     return as_experiment_record(updated)
+
+
+@router.delete("/projects/{project_id}/experiments/{experiment_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_project_experiment(
+    project_id: str,
+    experiment_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    await require_project(db, project_id)
+    current = experiment_store.get(project_id, experiment_id)
+    if current is None:
+        raise api_error(
+            status_code=404,
+            code="experiment_not_found",
+            message="Experiment not found in project",
+            details={"project_id": project_id, "experiment_id": experiment_id},
+        )
+
+    status_value = str(current.get("status", "draft"))
+    if status_value in {"queued", "running"}:
+        raise api_error(
+            status_code=409,
+            code="experiment_state_invalid",
+            message="Queued or running experiments must be canceled before deletion",
+            details={"experiment_id": experiment_id, "status": status_value},
+        )
+
+    blockers = deployment_store.list_referencing_experiment(project_id, experiment_id)
+    if blockers:
+        raise api_error(
+            status_code=409,
+            code="experiment_in_use",
+            message="Experiment is referenced by active deployments",
+            details={
+                "experiment_id": experiment_id,
+                "deployments": [
+                    {
+                        "deployment_id": str(item.get("deployment_id") or ""),
+                        "name": str(item.get("name") or ""),
+                        "status": str(item.get("status") or ""),
+                    }
+                    for item in blockers
+                ],
+            },
+        )
+
+    deleted = experiment_store.delete(project_id=project_id, experiment_id=experiment_id)
+    if not deleted:
+        raise api_error(
+            status_code=404,
+            code="experiment_not_found",
+            message="Experiment not found in project",
+            details={"project_id": project_id, "experiment_id": experiment_id},
+        )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

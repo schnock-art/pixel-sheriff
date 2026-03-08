@@ -38,7 +38,7 @@ export function ProjectRibbon() {
   );
 
   return (
-    <header className="project-ribbon">
+    <header className="project-ribbon" data-testid="project-ribbon">
       <div className="project-ribbon-main">
         <div className="project-ribbon-brand">
           <p className="project-ribbon-kicker">Pixel Sheriff</p>
@@ -48,14 +48,19 @@ export function ProjectRibbon() {
           <label className="project-ribbon-field">
             <span>Project</span>
             <div className="project-ribbon-inline">
-              <select value={project?.id ?? ""} onChange={(event) => selectProject(event.target.value)} disabled={projects.length === 0}>
+              <select
+                data-testid="project-selector"
+                value={project?.id ?? ""}
+                onChange={(event) => selectProject(event.target.value)}
+                disabled={projects.length === 0}
+              >
                 {projects.map((item) => (
                   <option key={item.id} value={item.id}>
                     {item.name}
                   </option>
                 ))}
               </select>
-              <button type="button" className="ghost-button" onClick={openCreateProject}>
+              <button type="button" className="ghost-button" onClick={openCreateProject} data-testid="project-create-button">
                 + Project
               </button>
             </div>
@@ -63,7 +68,12 @@ export function ProjectRibbon() {
           <label className="project-ribbon-field">
             <span>Task</span>
             <div className="project-ribbon-inline">
-              <select value={selectedTaskId ?? ""} onChange={(event) => selectTask(event.target.value)} disabled={tasks.length === 0}>
+              <select
+                data-testid="task-selector"
+                value={selectedTaskId ?? ""}
+                onChange={(event) => selectTask(event.target.value)}
+                disabled={tasks.length === 0}
+              >
                 {tasks.length === 0 ? <option value="">No tasks</option> : null}
                 {tasks.map((task) => (
                   <option key={task.id} value={task.id}>
@@ -71,7 +81,13 @@ export function ProjectRibbon() {
                   </option>
                 ))}
               </select>
-              <button type="button" className="ghost-button" onClick={openCreateTask} disabled={!project}>
+              <button
+                type="button"
+                className="ghost-button"
+                onClick={openCreateTask}
+                disabled={!project}
+                data-testid="task-create-button"
+              >
                 + Task
               </button>
             </div>
@@ -80,19 +96,20 @@ export function ProjectRibbon() {
       </div>
 
       <div className="project-ribbon-navrow">
-        <nav className="project-ribbon-tabs" aria-label="Project workflow">
+        <nav className="project-ribbon-tabs" aria-label="Project workflow" data-testid="workflow-tabs">
           {tabs.map((tab) => (
             <button
               key={tab.key}
               type="button"
               className={currentSection === tab.key ? "project-ribbon-tab active" : "project-ribbon-tab"}
               onClick={() => navigateToSection(tab.key)}
+              data-testid={`workflow-tab-${tab.key}`}
             >
               {tab.label}
             </button>
           ))}
         </nav>
-        <div className="project-ribbon-stats" role="status" aria-live="polite">
+        <div className="project-ribbon-stats" role="status" aria-live="polite" data-testid="project-ribbon-stats">
           <span className="project-ribbon-stat">{statText("Images", projectStats.imageCount)}</span>
           <span className="project-ribbon-stat">{statText("Classes", projectStats.classCount)}</span>
           <span className="project-ribbon-stat">{statText("Models", projectStats.modelCount)}</span>

@@ -1,12 +1,14 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useProjectNavigationGuard } from "../../../../../components/workspace/ProjectNavigationContext";
 import {
   ApiError,
   cancelExperiment,
+  deleteExperiment,
   getExperiment,
   getExperimentEvaluation,
   getExperimentLogs,
@@ -164,6 +166,7 @@ function metricValueByKey(row: ExperimentMetricPoint, key: string): number | nul
 export default function ExperimentDetailPage({ params }: ExperimentDetailPageProps) {
   const projectId = useMemo(() => decodeURIComponent(params.projectId), [params.projectId]);
   const experimentId = useMemo(() => decodeURIComponent(params.experimentId), [params.experimentId]);
+  const router = useRouter();
   const { setHasUnsavedDrafts } = useProjectNavigationGuard();
 
   const [savedRecord, setSavedRecord] = useState<ProjectExperimentRecord | null>(null);
@@ -178,6 +181,7 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
   const [isSaving, setIsSaving] = useState(false);
   const [isStarting, setIsStarting] = useState(false);
   const [isCanceling, setIsCanceling] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [lastRunMessage, setLastRunMessage] = useState<string | null>(null);
@@ -767,6 +771,25 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
       const message = parseApiErrorMessage(error, "Failed to select checkpoint");
       setToastTone("error");
       setToastMessage(message);
+    }
+  }
+
+  async function handleDelete() {
+    const confirmed = window.confirm(
+      'Delete this experiment and all artifacts?\n\nThis removes runs, logs, checkpoints, evaluation, runtime, predictions, and ONNX artifacts.',
+    );
+    if (!confirmed) return;
+
+    setIsDeleting(true);
+    try {
+      await deleteExperiment(projectId, experimentId);
+      router.replace(`/projects/${encodeURIComponent(projectId)}/experiments`);
+    } catch (error) {
+      const message = parseApiErrorMessage(error, "Failed to delete experiment");
+      setToastTone("error");
+      setToastMessage(message);
+    } finally {
+      setIsDeleting(false);
     }
   }
 
@@ -1456,6 +1479,19 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
                 </div>
 
                 <div className="experiment-card">
+                  <h3>Danger Zone</h3>
+                  <p className="labels-empty">Deleting this experiment removes all persisted run artifacts and cannot be undone.</p>
+                  <button
+                    type="button"
+                    className="ghost-button danger-button"
+                    disabled={isDeleting || status === "queued" || status === "running"}
+                    onClick={() => void handleDelete()}
+                  >
+                    {isDeleting ? "Deleting..." : "Delete Experiment"}
+                  </button>
+                </div>
+
+                <div className="experiment-card">
                   <h3>Metrics</h3>
                   <p className="experiment-log-cursor">
                     Last epoch time: {formatDurationSeconds(latestEpochSeconds)} | ETA: {formatDurationSeconds(latestEtaSeconds)} (finishes ~
@@ -1977,20 +2013,20 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
               <button
                 type="button"
                 className="ghost-button"
-                disabled={!isEditable || !isDirty || !validation.isValid || isSaving || !draftConfig}
+                disabled={!isEditable || !isDirty || !validation.isValid || isSaving || isDeleting || !draftConfig}
                 onClick={() => void handleSave()}
               >
                 {isSaving ? "Saving..." : "Save"}
               </button>
               {status === "running" || status === "queued" ? (
-                <button type="button" className="ghost-button" disabled={isCanceling} onClick={() => void handleCancel()}>
+                <button type="button" className="ghost-button" disabled={isCanceling || isDeleting} onClick={() => void handleCancel()}>
                   {isCanceling ? "Canceling..." : status === "queued" ? "Cancel Queue" : "Cancel"}
                 </button>
               ) : (
                 <button
                   type="button"
                   className="primary-button"
-                  disabled={!isEditable || isStarting || !validation.isValid || !draftConfig}
+                  disabled={!isEditable || isStarting || isDeleting || !validation.isValid || !draftConfig}
                   onClick={() => void handleStart()}
                 >
                   {isStarting ? "Starting..." : "Start Training"}

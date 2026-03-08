@@ -62,8 +62,8 @@ export function ModelBuilderSkeleton({
         ) : null
       }
     >
-        <div className="model-builder-grid">
-          <aside className="model-builder-steps">
+        <div className="model-builder-grid" data-testid="model-builder-grid">
+          <aside className="model-builder-steps" data-testid="model-builder-steps">
             <h3>Builder Steps</h3>
             <ol>
               {STEPS.map((step) => (
@@ -73,7 +73,7 @@ export function ModelBuilderSkeleton({
               ))}
             </ol>
           </aside>
-          <section className="model-builder-center">
+          <section className="model-builder-center" data-testid="model-builder-center">
             <div className="model-builder-center-head">
               <h3>Configuration Area</h3>
               {isDirty ? <span className="model-builder-unsaved">Unsaved changes</span> : null}
@@ -83,14 +83,16 @@ export function ModelBuilderSkeleton({
                 <p>Loading model config...</p>
               </div>
             ) : (
-              <div className="model-builder-editor">{editorContent ?? <p className="labels-empty">No editable controls configured.</p>}</div>
+              <div className="model-builder-editor" data-testid="model-builder-editor">
+                {editorContent ?? <p className="labels-empty">No editable controls configured.</p>}
+              </div>
             )}
             {errorMessage ? <p className="project-field-error">{errorMessage}</p> : null}
             {saveError ? <p className="project-field-error">{saveError}</p> : null}
             {!isValid ? <p className="project-field-error">Draft config is invalid. Fix validation issues before saving.</p> : null}
             {validationPanel ? <div className="model-builder-validation-panel">{validationPanel}</div> : null}
           </section>
-          <aside className="model-builder-summary">
+          <aside className="model-builder-summary" data-testid="model-builder-summary">
             <h3>Model Summary</h3>
             <dl className="model-summary-list">
               <div>
@@ -158,11 +160,23 @@ export function ModelBuilderSkeleton({
             </dl>
           </aside>
         </div>
-        <footer className="model-builder-footer">
-          <button type="button" className="ghost-button" disabled={saveDisabled || !onSave} onClick={onSave ? () => onSave() : undefined}>
+        <footer className="model-builder-footer" data-testid="model-builder-footer">
+          <button
+            type="button"
+            className="ghost-button"
+            disabled={saveDisabled || !onSave}
+            onClick={onSave ? () => onSave() : undefined}
+            data-testid="model-save-button"
+          >
             {isSaving ? "Saving..." : "Save"}
           </button>
-          <button type="button" className="primary-button" disabled={trainDisabled || !onTrainModel} onClick={onTrainModel ? () => onTrainModel() : undefined}>
+          <button
+            type="button"
+            className="primary-button"
+            disabled={trainDisabled || !onTrainModel}
+            onClick={onTrainModel ? () => onTrainModel() : undefined}
+            data-testid="model-train-button"
+          >
             {trainButtonLabel}
           </button>
         </footer>

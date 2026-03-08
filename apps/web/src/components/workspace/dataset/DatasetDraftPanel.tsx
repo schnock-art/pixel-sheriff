@@ -75,11 +75,17 @@ export function DatasetDraftPanel({
   onDuplicateAndEdit: () => void;
 }) {
   return (
-    <>
+    <section data-testid="dataset-draft-panel">
       {mode === "browse" ? (
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
           <strong>Browsing saved dataset version: {selectedVersionName}</strong>
-          <button type="button" className="ghost-button" disabled={!hasSelectedVersion} onClick={onDuplicateAndEdit}>
+          <button
+            type="button"
+            className="ghost-button"
+            disabled={!hasSelectedVersion}
+            onClick={onDuplicateAndEdit}
+            data-testid="dataset-duplicate-edit-button"
+          >
             Duplicate &amp; Edit
           </button>
         </div>
@@ -87,7 +93,13 @@ export function DatasetDraftPanel({
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
           <strong>Draft preview - not saved</strong>
           <div style={{ display: "flex", gap: 8 }}>
-            <button type="button" className="primary-button" disabled={isCreating} onClick={onCreate}>
+            <button
+              type="button"
+              className="primary-button"
+              disabled={isCreating}
+              onClick={onCreate}
+              data-testid="dataset-create-version-button"
+            >
               {isCreating ? "Creating..." : "Create Version"}
             </button>
             <button type="button" className="ghost-button" onClick={onDiscardDraft}>
@@ -101,11 +113,16 @@ export function DatasetDraftPanel({
       <div style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(2, minmax(0, 1fr))" }}>
         <label className="project-field">
           <span>Name</span>
-          <input value={draftName} onChange={(event) => onDraftNameChange(event.target.value)} />
+          <input data-testid="dataset-draft-name" value={draftName} onChange={(event) => onDraftNameChange(event.target.value)} />
         </label>
         <label className="project-field">
           <span>Seed</span>
-          <input type="number" value={seed} onChange={(event) => onSeedChange(Number(event.target.value) || 1337)} />
+          <input
+            data-testid="dataset-draft-seed"
+            type="number"
+            value={seed}
+            onChange={(event) => onSeedChange(Number(event.target.value) || 1337)}
+          />
         </label>
         <label className="project-field">
           <span>Train Ratio</span>
@@ -175,10 +192,16 @@ export function DatasetDraftPanel({
         </label>
       </div>
       <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
-        <button type="button" className="ghost-button" disabled={isPreviewing} onClick={onPreview}>
+        <button
+          type="button"
+          className="ghost-button"
+          disabled={isPreviewing}
+          onClick={onPreview}
+          data-testid="dataset-preview-button"
+        >
           {isPreviewing ? "Previewing..." : "Preview"}
         </button>
       </div>
-    </>
+    </section>
   );
 }

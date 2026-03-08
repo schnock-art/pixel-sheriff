@@ -6,7 +6,7 @@ from pixel_sheriff_trainer.classification.train import (
     resolve_device,
     resolve_runtime_info,
 )
-from pixel_sheriff_trainer.io.checkpoints import AsyncCheckpointWriter, read_checkpoints
+from pixel_sheriff_trainer.io.checkpoints import AsyncCheckpointWriter, compact_completed_checkpoints, read_checkpoints
 from pixel_sheriff_trainer.io.events import EventLog
 from pixel_sheriff_trainer.io.metrics import append_metric
 from pixel_sheriff_trainer.io.run_logging import RunLogger
@@ -443,6 +443,19 @@ class TrainRunner:
                 )
             else:
                 run_logger.log(f"onnx_export status=failed error={onnx_result.error}")
+
+            try:
+                compacted_kinds = compact_completed_checkpoints(
+                    self.storage,
+                    project_id=job.project_id,
+                    experiment_id=job.experiment_id,
+                    attempt=job.attempt,
+                )
+            except Exception as exc:
+                run_logger.log(f"checkpoint_compaction_failed error={exc}")
+            else:
+                if compacted_kinds:
+                    run_logger.log(f"checkpoint_compacted kinds={','.join(compacted_kinds)}")
 
             self.storage.set_experiment_status(job.project_id, job.experiment_id, "completed")
             self.events.append(

@@ -10,7 +10,7 @@ export function DatasetSummaryPanel({
   classDisplayName: (classId: string) => string;
 }) {
   return (
-    <section className="placeholder-card">
+    <section className="placeholder-card" data-testid="dataset-summary-panel">
       <h3>{summarySource === "saved" ? "Summary (Saved Version)" : "Summary (Draft Preview)"}</h3>
       {!summaryData ? <p>{summarySource === "saved" ? "Select a dataset version." : "Run preview to compute counts."}</p> : null}
       {summaryData ? (

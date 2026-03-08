@@ -39,7 +39,7 @@ services:
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       JOB_QUEUE_KEY: ${JOB_QUEUE_KEY:-pixel_sheriff:train_jobs:v1}
       STORAGE_ROOT: /app/data
-      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://localhost:3010,http://web-demo:3000}
       TRAINER_INFERENCE_BASE_URL: ${TRAINER_INFERENCE_BASE_URL:-http://trainer:8020}
     ports:
       - "${API_PORT:-8000}:8000"
@@ -62,7 +62,7 @@ services:
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       JOB_QUEUE_KEY: ${JOB_QUEUE_KEY:-pixel_sheriff:test_jobs:v1}
       STORAGE_ROOT: ${TEST_STORAGE_ROOT:-/tmp/pixel_sheriff_test_data}
-      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://localhost:3010,http://web-demo:3000}
       TRAINER_INFERENCE_BASE_URL: ${TRAINER_INFERENCE_BASE_URL:-http://trainer:8020}
     depends_on:
       - db
@@ -109,5 +109,31 @@ services:
     depends_on:
       - api
 
+  web-demo:
+    build:
+      context: ./apps/web
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: http://api:8000
+      INTERNAL_API_BASE_URL: http://api:8000
+    ports:
+      - "3010:3000"
+    depends_on:
+      - api
+
+  demo-runner:
+    image: mcr.microsoft.com/playwright:v1.41.2-jammy
+    working_dir: /workspace/apps/web
+    environment:
+      DEMO_API_BASE_URL: http://api:8000
+      DEMO_WEB_BASE_URL: http://web-demo:3000
+      CI: "1"
+    depends_on:
+      - api
+      - web-demo
+    volumes:
+      - .:/workspace
+      - web_demo_node_modules:/workspace/apps/web/node_modules
+
 volumes:
   postgres_data:
+  web_demo_node_modules:

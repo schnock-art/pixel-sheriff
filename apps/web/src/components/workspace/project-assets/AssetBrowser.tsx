@@ -87,15 +87,15 @@ export function AssetBrowser({
   }, [searchText, visibleTreeEntries]);
 
   return (
-    <aside className="asset-browser">
-      <section className="placeholder-card asset-browser-panel">
+    <aside className="asset-browser" data-testid="asset-browser">
+      <section className="placeholder-card asset-browser-panel" data-testid="asset-browser-panel">
         <div className="asset-browser-head">
           <div>
             <h3>Assets</h3>
             <p>Browse folders, import images, and manage the current labeling scope.</p>
           </div>
           <div className="asset-browser-head-actions">
-            <button type="button" className="primary-button" onClick={onImport}>
+            <button type="button" className="primary-button" onClick={onImport} data-testid="asset-browser-import">
               Import Images
             </button>
             <button type="button" className="ghost-button" disabled title="Folder creation is not wired yet">
@@ -106,6 +106,7 @@ export function AssetBrowser({
 
         <div className="asset-browser-toolbar">
           <input
+            data-testid="asset-browser-search"
             value={searchText}
             onChange={(event) => setSearchText(event.target.value)}
             placeholder="Search folders or files"
@@ -155,12 +156,13 @@ export function AssetBrowser({
           type="button"
           className={selectedTreeFolderPath === null ? "tree-scope-button active" : "tree-scope-button"}
           onClick={() => onSelectFolderScope(null)}
+          data-testid="folder-tree-root"
         >
           All files
         </button>
         {selectedTreeFolderPath ? <p className="tree-scope-caption">Scope: {selectedTreeFolderPath}</p> : null}
 
-        <ul className="asset-browser-tree">
+        <ul className="asset-browser-tree" data-testid="folder-tree">
           {filteredEntries.map((entry) => (
             <li key={entry.key}>
               {entry.kind === "folder" ? (
@@ -183,6 +185,8 @@ export function AssetBrowser({
                           : "is-empty"
                     }${folderDirtyByPath[entry.path] ? " is-dirty" : ""}`}
                     onClick={() => onSelectFolderScope(entry.path)}
+                    data-testid="folder-tree-folder"
+                    data-demo-path={entry.path}
                   >
                     {entry.name}
                   </button>
@@ -219,6 +223,9 @@ export function AssetBrowser({
                       entry.assetId &&
                       (bulkDeleteMode ? onToggleDeleteSelection(entry.assetId) : onSelectTreeAsset(entry.assetId, entry.folderPath))
                     }
+                    data-testid="folder-tree-asset"
+                    data-demo-path={entry.path}
+                    data-demo-asset-id={entry.assetId ?? ""}
                   >
                     {entry.name}
                   </button>
