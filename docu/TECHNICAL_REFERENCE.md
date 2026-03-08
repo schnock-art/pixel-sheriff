@@ -85,7 +85,7 @@ make help
 - Task-scoped workspace flow was wired end-to-end:
   - projects now include a default task and support creating additional tasks
   - categories/annotations/dataset versions/models/experiments/deployments are task-scoped
-  - labeling workspace now supports task selection via `taskId` query and a `+ New Task` flow
+  - project pages now share a global task selector via the project ribbon (`taskId` query remains synchronized)
 - Labels and geometry overlays now use deterministic class-based colors.
 - Bounding-box interaction now supports move + resize (corner and edge-midpoint handles), plus inline draft warnings.
 - Polygon closing is now more forgiving (`near-start`, double-click, or `Enter`) with draft-status guidance.
@@ -100,9 +100,10 @@ make help
   - detection COCO annotations now omit `segmentation` instead of emitting empty lists
 - Project-scoped Phase 1 UI refactor is now implemented:
   - route structure under `/projects/{project_id}/...`
+  - reusable top project ribbon with project selector, task selector, and workflow tabs
   - top navigation tabs: `Labeling`, `Dataset`, `Models`, `Experiments`, `Deploy`
-  - project selector dropdown with `+ Create Project` modal
-  - datasets `Build Model` CTA creates a project-scoped model draft from latest manifest and opens model detail
+  - labeling `Create Dataset` CTA routes into `/dataset`
+  - dataset `Train Model` CTA routes into prefilled `/models/new?taskId=...&datasetVersionId=...`
   - unsaved draft guard for project/tab/model navigation
 - Model Builder v1.0 edit flow is now implemented:
   - editable steps for Input, Backbone, Outputs (embedding aux), and Export
@@ -180,11 +181,10 @@ make help
     - `/projects/{project_id}/experiments/new`
     - `/projects/{project_id}/experiments/{experiment_id}`
     - `/projects/{project_id}/deploy`
-  - top shell project selector + tabs (`Labeling`, `Dataset`, `Models`, `Experiments`, `Deploy`)
-  - workspace status line (live labeled/class counts; model/experiment counts currently placeholder values in shell)
-- Task management in labeling workspace:
+  - top project ribbon with project selector, task selector, workflow tabs, and live project stats
+- Task management in project shell:
   - projects auto-create a default task
-  - task selector in workspace header (`taskId` query state)
+  - task selector is global across project pages (`taskId` query state)
   - `+ New Task` modal supports kind (`classification`/`bbox`/`segmentation`) and classification `label_mode`
   - task kind locks authoring mode tabs and submit payload shape
   - labels are task-scoped and lock once dataset versions exist for that task (`task_locked_by_dataset`)
@@ -306,7 +306,7 @@ make help
   - folder/subfolder delete actions
   - bulk delete mode with in-scope multi-select
 - Viewer:
-  - aspect-ratio-preserving black letterbox (`object-fit: contain`)
+  - aspect-ratio-preserving `contain` rendering inside a bounded canvas
   - responsive bounded viewport height
   - keyboard navigation (`ArrowLeft` / `ArrowRight`)
   - skip navigation controls (`-10`, `-5`, `<`, `>`, `+5`, `+10`)

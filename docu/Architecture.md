@@ -454,9 +454,11 @@ App-router entry and project shell:
 - `apps/web/src/app/page.tsx` redirects to `/projects`
 - `apps/web/src/app/projects/page.tsx` resolves last/first project or shows empty-state create flow
 - `apps/web/src/app/projects/[projectId]/layout.tsx` provides:
+  - reusable project ribbon
   - project selector dropdown + create-project modal
+  - global task selector + create-task modal entry
   - section tabs (`Labeling`, `Dataset`, `Models`, `Experiments`, `Deploy`)
-  - project status summary bar
+  - project stats chips (`Images`, `Classes`, `Models`, `Experiments`)
   - guarded navigation for unsaved drafts
 - `apps/web/src/app/projects/[projectId]/datasets/page.tsx` mounts the labeling workspace
 - `apps/web/src/app/projects/[projectId]/dataset/page.tsx` mounts the dataset-version workspace (versions/preview/splits/export)
@@ -469,10 +471,10 @@ App-router entry and project shell:
 
 UI structure:
 
-- Left: hierarchical file tree
-- Center: viewer canvas + adaptive pagination + skip/nav controls
-- Right: label panel (label selection + manage mode + edit/submit + MAL suggestions)
-- Header: active task selector + `+ New Task` action
+- Top: project ribbon (project/task context + workflow tabs)
+- Left: asset browser with search/filter/import/delete controls
+- Center: canvas toolbar + viewer canvas + filmstrip/navigation
+- Right: annotation panel (task tabs, objects, classes, actions, MAL suggestions, shortcut hints)
 
 ### Frontend Data/State
 
@@ -575,7 +577,7 @@ Labeling workspace leaf components (`apps/web/src/components/workspace/project-a
   - folder/subfolder delete from tree
   - bulk delete mode (multi-select image removal within current scope)
 - Viewer behavior:
-  - black letterbox with image `contain`
+  - bounded canvas with image `contain`
   - bounded responsive viewport height
   - keyboard `ArrowLeft`/`ArrowRight`
   - skip controls: `-10`, `-5`, `<`, `>`, `+5`, `+10`

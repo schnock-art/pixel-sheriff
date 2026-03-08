@@ -51,11 +51,12 @@ make up
 ## How to Use
 
 1. Create or select a project.
-2. Select or create a task in `Labeling` (`Task` selector at top-right).
+2. Select or create a task from the project ribbon (`Task` selector at the top of project pages).
 3. Import images (existing/new project target).
 4. Label assets in `Labeling`.
-5. Create a dataset version in `Dataset`.
-6. Create/update a model in `Models`.
+5. Click `Create Dataset` to move into `Dataset`, then create a dataset version.
+6. Click `Train Model` from `Dataset` or use `+ New Model` in `Models`.
+7. Create/update a model in `Models`.
    For smaller bbox training runs, switch the family to `ssdlite320_mobilenet_v3_large`; it is the lighter detector and is the better default choice for 16 GB VRAM-class GPUs.
    Family metadata now declares allowed/required input sizes and the model editor enforces them. `ssdlite320_mobilenet_v3_large` requires `320x320`; other current families accept only their documented square-size ranges.
    Detection training defaults to `training.drop_last=true`, which avoids SSD Lite BatchNorm failures on singleton tail batches.
@@ -63,9 +64,9 @@ make up
    Detection ONNX export now also falls back to the legacy TorchScript-based exporter when the default `torch.export` path fails on torchvision postprocessing (`batched_nms`).
    Detection ONNX exports currently validate as fixed-batch (`batch=1`) artifacts; dynamic batch is disabled for torchvision detection graphs because ONNX Runtime validation fails on their exported postprocessing graph.
    Detection ONNX validation is task-aware, so postprocessed outputs such as `[300, 4]` are accepted instead of failing dynamic-batch checks.
-7. Start training in `Experiments` and monitor metrics/logs.
+8. Start training in `Experiments` and monitor metrics/logs.
    Detection experiment pages now expose `Loss`, `mAP`, and `Runtime` dashboard tabs with `train_loss`, `val mAP@50`, `val mAP@50:95`, `epoch_seconds`, and `eta_seconds`.
-8. Export dataset zip or model artifacts as needed.
+9. Export dataset zip or model artifacts as needed.
 
 Experiment consistency note:
 - Experiments default to the model's recorded `source_dataset.manifest_id`, not simply the latest active dataset version in the project.

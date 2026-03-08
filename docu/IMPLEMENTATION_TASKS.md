@@ -72,17 +72,18 @@ Status reflects current repository behavior.
   - [x] `/projects/{project_id}/experiments`
   - [x] `/projects/{project_id}/experiments/{experiment_id}`
 - [x] Project shell UI:
+  - [x] reusable project ribbon
   - [x] project selector dropdown
   - [x] create-project modal
   - [x] section tabs (`Labeling`, `Dataset`, `Models`, `Experiments`, `Deploy`)
-  - [x] project status summary bar
+  - [x] global task selector + create-task modal entry
+  - [x] project stats chips (`Images`, `Classes`, `Models`, `Experiments`)
 - [x] Task-scoped workspace controls:
-  - [x] task selector in labeling workspace header
-  - [x] create-task modal (`classification` / `bbox` / `segmentation`, classification `label_mode`)
   - [x] task-aware label/annotation/dataset data loading (`task_id` contracts)
 - [x] Datasets workspace extracted to `ProjectAssetsWorkspace`
-- [x] Unsaved-draft guard on project/tab/build-model navigation
-- [x] Build Model CTA creates a project-scoped model draft and opens model detail
+- [x] Unsaved-draft guard on project/tab/model-builder navigation
+- [x] Labeling CTA routes to Dataset via `Create Dataset`
+- [x] Dataset CTA routes to prefilled `/models/new` via `Train Model`
 - [x] Models pages support list/create/detail + editable Model Builder draft/save workflow
 - [x] AJV validation layer for web JSON Schema checks (`ajv` + `ajv-formats`) wired for ModelConfig draft validation
 - [x] Experiments pages (list/create/detail) with analytics dashboard + live runtime/log panels

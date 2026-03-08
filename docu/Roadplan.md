@@ -72,10 +72,9 @@ Implemented:
   - `/projects` entry flow (last/first project resolution or create-project empty state)
   - `/projects/{project_id}/datasets|dataset|models|experiments|deploy` routing
   - model/experiment detail routes
-  - top project selector + section tabs (`Labeling`, `Dataset`, `Models`, `Experiments`, `Deploy`)
-  - project status line (`images labeled`, `classes`, `models`, `experiments`)
+  - reusable project ribbon with project selector, task selector, workflow tabs, and project stats
 - task-scoped labeling:
-  - task selector + create-task modal in labeling workspace
+  - global task selector + create-task modal in project ribbon
   - task kind controls annotation mode and payload contract
   - task label mode (`single_label`/`multi_label`) is task-owned
   - task label schema lock once dataset versions exist
@@ -94,8 +93,9 @@ Implemented:
   - single image remove
   - bulk image remove
   - folder/subfolder subtree remove
-- responsive bounded viewport with black letterbox rendering
+- responsive bounded viewport with contained image rendering
 - adaptive pagination window sized to available width
+- bottom filmstrip for quick in-scope asset navigation
 - COCO-style classification payload fields
 - bounding-box annotation workflow (draw/select/move/resize/delete + class assign)
 - polygon segmentation workflow (draw/close/select/delete + class assign; close by near-start, double-click, or `Enter`)
@@ -106,8 +106,9 @@ Implemented:
 - inline geometry draft warnings in the viewer
 - unsaved draft guard for project/tab/model-builder navigation
 - project-scoped model scaffold flow:
-  - datasets `Build Model` creates model draft and opens detail
-  - models page supports `+ New Model`, empty state, and summary table
+  - labeling `Create Dataset` routes the user into dataset-versioning flow
+  - dataset `Train Model` routes into prefilled `/models/new`
+  - models page supports `+ New Model`, empty state, dataset-version-aware summary table, and inferred status chips
   - model detail supports editable builder + save validation + train navigation
 - experiments/deploy:
   - experiments list/create/detail are wired with runtime/log/evaluation dashboards

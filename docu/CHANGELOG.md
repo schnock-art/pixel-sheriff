@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- Frontend workflow shell refresh:
+  - project pages now share a reusable ribbon with global project/task selectors and live stats chips
+  - labeling workspace now uses asset browser + canvas + annotation panel + bottom filmstrip layout
+  - labeling `Build Model` was replaced by `Create Dataset`
+  - dataset page now exposes `Train Model` into prefilled `/models/new`
+  - models list now shows dataset-version context and inferred status chips
+  - viewer/panel layout now keeps sidebars inside the viewport with internal scrolling
 - Task-scoped workflow contracts are now documented and reflected across API/web:
   - project default-task bootstrap on create
   - task CRUD endpoints (`/projects/{project_id}/tasks*`)
@@ -105,7 +112,6 @@ All notable changes to this project will be documented in this file.
   - `PUT /api/v1/projects/{project_id}/models/{model_id}` validates and persists updated `config_json`
   - temporary file-backed model persistence under `models/{project_id}/records.json` (explicit TODO to move to DB table)
 - Models UI wiring:
-  - datasets `Build Model` now creates model draft and navigates to model detail
   - models list page now fetches real project-scoped model summaries and supports `+ New Model`
   - model detail scaffold now loads read-only summary from `config_json`
   - model detail header now includes `Back to Models` action
@@ -124,7 +130,7 @@ All notable changes to this project will be documented in this file.
 - Global project shell UI:
   - project selector dropdown
   - create-project modal
-  - top tabs (`Datasets`, `Models`, `Experiments`, disabled `Deploy`)
+  - initial top tabs before later ribbon refactor
   - project status bar (`images labeled`, `classes`, `models`, `experiments`)
 - Navigation guard utilities and tests:
   - `apps/web/src/lib/workspace/projectRouting.*`
