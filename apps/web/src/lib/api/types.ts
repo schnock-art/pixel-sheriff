@@ -247,6 +247,7 @@ export interface ExperimentMetricPoint {
   val_macro_precision?: number;
   val_macro_recall?: number;
   val_map?: number;
+  val_map_50_95?: number;
   val_iou?: number;
   epoch_seconds?: number;
   eta_seconds?: number;
@@ -339,6 +340,8 @@ export interface ExperimentEvaluationOverall {
   macro_f1?: number;
   macro_precision?: number;
   macro_recall?: number;
+  mAP50?: number;
+  mAP50_95?: number;
 }
 
 export interface ExperimentEvaluationPerClassRow {

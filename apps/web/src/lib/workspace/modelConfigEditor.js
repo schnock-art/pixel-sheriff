@@ -129,6 +129,32 @@ function readSourceDatasetLabelMode(config) {
 
 function buildFamilyDefaults(familyName, config) {
   const numClasses = readSourceDatasetNumClasses(config);
+  if (familyName === "ssdlite320_mobilenet_v3_large") {
+    return {
+      input: {
+        input_size: [320, 320],
+      },
+      architecture: {
+        family: "ssdlite320_mobilenet_v3_large",
+        framework: "torchvision",
+        precision: "fp32",
+        backbone: { name: "mobilenet_v3_large", pretrained: true },
+        neck: { type: "none" },
+        head: { type: "ssdlite", num_classes: numClasses },
+      },
+      loss: { type: "ssdlite_default" },
+      outputs: {
+        primary: {
+          name: "coco_detections",
+          type: "task_output",
+          task: "detection",
+          format: "coco_detections",
+        },
+        aux: [],
+      },
+    };
+  }
+
   if (familyName === "retinanet") {
     return {
       architecture: {
@@ -251,6 +277,13 @@ function setArchitectureFamily(config, familyName, familiesMetadata) {
     defaultArch.backbone = { name: newBackboneName };
     defaultArch.family = familyName;
     nextConfig.architecture = defaultArch;
+    if (isPlainObject(defaults.input)) {
+      const currentInput = isPlainObject(nextConfig.input) ? nextConfig.input : {};
+      nextConfig.input = {
+        ...currentInput,
+        ...stableClone(defaults.input),
+      };
+    }
     nextConfig.loss = stableClone(defaults.loss);
     nextConfig.outputs = stableClone(defaults.outputs);
   } else {

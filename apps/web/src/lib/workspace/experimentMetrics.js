@@ -10,6 +10,7 @@ const BOUNDED_METRIC_KEYS = new Set([
   "val_macro_precision",
   "val_macro_recall",
   "val_map",
+  "val_map_50_95",
   "val_iou",
 ]);
 

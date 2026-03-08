@@ -19,7 +19,9 @@ Primary workflow:
 5. Submit staged edits (or submit single-image edits directly).
 6. Generate and download a deterministic dataset export zip (manifest v1.2 + COCO companion).
 7. Create experiments from project models, tune training params, and run worker-executed training with live SSE metrics + checkpoints.
-8. Compare project runs from analytics dashboard and inspect classification evaluation artifacts (confusion matrix, per-class metrics, prediction explorer).
+8. Compare project runs from analytics dashboard and inspect experiment evaluation artifacts:
+   - classification: confusion matrix, per-class metrics, prediction explorer
+   - detection: loss/mAP/runtime trends plus a detection summary card
 
 Current frontend workspace decomposition note:
 - `ProjectAssetsWorkspace` now acts as a composition/orchestration container.
@@ -188,7 +190,14 @@ Extensible model-building runtime is now implemented for `ModelConfig v1.0`:
 - Adapter families implemented (v0):
   - `resnet_classifier` (normalized primary output: `{"predictions": logits}`)
   - `retinanet` (normalized primary output wraps native detection list under `predictions`)
+  - `ssdlite320_mobilenet_v3_large` (lighter MobileNetV3-based detector for lower-VRAM bbox training)
   - `deeplabv3` (normalized primary output uses segmentation `out` tensor under `predictions`)
+- Family metadata contract:
+  - `families.v1.json` now includes per-family `input_size` rules used by the web editor and API validation
+  - `resnet_classifier`: square sizes >= `32`
+  - `retinanet`: square sizes >= `224` in steps of `32`
+  - `deeplabv3`: square sizes >= `224` in steps of `32`
+  - `ssdlite320_mobilenet_v3_large`: fixed `320x320`
 - Model/dataset task normalization:
   - dataset/task kinds are normalized before model-family matching (`bbox` -> `detection`, `classification_single` -> `classification`)
   - multi-label classification model defaults use `classification_bce_with_logits`
@@ -267,7 +276,9 @@ Trainer responsibilities and runtime behavior:
 - Detection/segmentation data contract:
   - export zips use UUID `asset_id` as COCO `image_id`
   - trainer detection and segmentation loaders consume string `image_id` values directly and only remap integer COCO `category_id`
-  - detection loader remaps exported COCO category ids to zero-based RetinaNet foreground labels before training
+  - detection loader remaps exported COCO category ids according to family label semantics:
+    - `retinanet` uses zero-based foreground labels
+    - `ssdlite320_mobilenet_v3_large` uses one-based foreground labels because SSD reserves `0` for background
 - Shared experiment-file contract:
   - reads/writes run-attempt files under `experiments/{project_id}/{experiment_id}/runs/{attempt}/...`
   - appends `events.jsonl` for SSE tail streaming
@@ -291,6 +302,12 @@ Trainer responsibilities and runtime behavior:
   - default `TrainingConfig v0.1` uses `runtime.num_workers = 0` (fallback `advanced.num_workers`) for container-safe data loading
   - if a shared-memory dataloader failure occurs with `num_workers > 0`, trainer retries once with `num_workers=0` and emits a status message event
   - detection RetinaNet builder disables implicit pretrained-backbone downloads to keep trainer behavior deterministic offline
+  - detection train loaders honor `training.drop_last` and default it to `true`; this prevents SSD Lite singleton-tail BatchNorm crashes on uneven train split sizes
+  - SSD Lite preflights the effective train loader shape and raises `batchnorm_small_batch_unsupported` instead of failing inside PyTorch when a one-sample batch would be emitted
+  - detection evaluation falls back to CPU automatically when CUDA `torchvision` detection kernels (for example NMS/postprocessing) are not available for the current GPU/runtime stack
+  - ONNX export falls back from the default `torch.export` pipeline to legacy `torch.onnx.export(..., dynamo=False)` when torchvision detection postprocessing triggers data-dependent export guards
+  - detection ONNX exports currently disable dynamic batch and are validated as fixed-batch (`batch=1`) graphs because exported torchvision detection postprocessing does not validate reliably under ONNX Runtime with dynamic batch enabled
+  - detection ONNX validation is task-aware, so postprocessed outputs are not incorrectly rejected for lacking a batch-shaped leading dimension
   - runtime tuning fields supported in config:
     - `runtime.pin_memory`, `runtime.persistent_workers`
     - `runtime.prefetch_factor`, `runtime.cache_resized_images`, `runtime.max_cached_images`
@@ -613,7 +630,7 @@ Labeling workspace leaf components (`apps/web/src/components/workspace/project-a
   - checkpoints tracked as `best_metric`, `best_loss`, `latest` with selection placeholder (`Pick`)
   - metrics chart supports axis/ticks, legend, series toggles, crosshair hover, and per-epoch tooltip values
   - metrics panel shows last epoch duration + ETA + estimated finish clock time
-  - experiment detail dashboard (classification only) includes:
+  - experiment detail dashboard (classification) includes:
     - metric tabs (`Loss`, `Accuracy`, `F1/Precision/Recall`) with log-scale toggle
     - accuracy tab overlays `train_accuracy` and `val_accuracy`
     - timing row shows epoch duration + ETA + estimated finish clock time
@@ -623,7 +640,13 @@ Labeling workspace leaf components (`apps/web/src/components/workspace/project-a
     - prediction explorer with mode/class filters and limit controls
     - sample image preview modal
     - served-attempt indicator from evaluation/samples APIs
-  - non-classification experiments show dashboard placeholder (`not supported yet`)
+  - experiment detail dashboard (detection) includes:
+    - metric tabs (`Loss`, `mAP`, `Runtime`) with log-scale toggle
+    - `Loss` view for `train_loss`
+    - `mAP` view for `val_map` (`mAP@50`) and `val_map_50_95` (`mAP@50:95`)
+    - `Runtime` view for `epoch_seconds` and `eta_seconds`
+    - detection summary card with best/latest checkpoint, classes, validation split, and final `mAP@50` / `mAP@50:95`
+  - segmentation experiments still show the dashboard placeholder
   - trainer failure details are surfaced in UI (toast + inline `Last run error` in experiment header)
   - refresh-safe behavior: persisted history loads first, then live stream resumes for running experiments
   - training log panel is attempt-scoped and displays the served run number so reruns do not look like one continuous log stream
@@ -718,7 +741,7 @@ Supported statuses:
 - Auth/multi-user permissions not implemented
 - MAL runtime v1 is implemented for classification ONNX (`deployments` + on-demand `/predict` via trainer inference service with session cache)
 - MAL batch/curation inference workflows are still pending (`/predict/batch` and queue-driven bulk scoring)
-- Detection/segmentation training execution remains TODO (unsupported jobs fail gracefully)
+- Detection and segmentation training pipelines are implemented, but deploy/evaluation parity is still uneven across tasks
 - Classification training currently supports `resnet_classifier` family only in worker runtime
-- Detection/segmentation deep evaluation dashboards are placeholders (classification analytics only in this phase)
+- Segmentation deep evaluation dashboards are still placeholders; classification and detection dashboards are implemented
 - Stale submit contexts can still occur under aggressive project/asset churn, but web submit flow now prunes missing staged assets and surfaces explicit recovery messaging.

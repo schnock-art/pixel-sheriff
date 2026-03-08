@@ -20,6 +20,12 @@ def _build_retinanet(model_config: dict[str, Any]) -> FamilyAdapter:
     return build_retinanet_adapter(model_config)
 
 
+def _build_ssdlite(model_config: dict[str, Any]) -> FamilyAdapter:
+    from sheriff_api.ml.adapters.torchvision_ssdlite import build_ssdlite_adapter
+
+    return build_ssdlite_adapter(model_config)
+
+
 def _build_deeplabv3(model_config: dict[str, Any]) -> FamilyAdapter:
     from sheriff_api.ml.adapters.torchvision_deeplabv3 import build_deeplabv3_adapter
 
@@ -29,6 +35,7 @@ def _build_deeplabv3(model_config: dict[str, Any]) -> FamilyAdapter:
 FAMILY_REGISTRY: dict[str, AdapterBuilder] = {
     "resnet_classifier": _build_resnet_classifier,
     "retinanet": _build_retinanet,
+    "ssdlite320_mobilenet_v3_large": _build_ssdlite,
     "deeplabv3": _build_deeplabv3,
 }
 
@@ -36,6 +43,7 @@ FAMILY_REGISTRY: dict[str, AdapterBuilder] = {
 FAMILY_TASK_MAP: dict[str, str] = {
     "resnet_classifier": "classification",
     "retinanet": "detection",
+    "ssdlite320_mobilenet_v3_large": "detection",
     "deeplabv3": "segmentation",
 }
 
@@ -46,7 +54,42 @@ FAMILY_BACKBONES: dict[str, list[str]] = {
         "mobilenet_v3_large", "mobilenet_v3_small",
     ],
     "retinanet": ["resnet50", "resnet101"],
+    "ssdlite320_mobilenet_v3_large": ["mobilenet_v3_large"],
     "deeplabv3": ["resnet50", "resnet101"],
+}
+
+# Family-specific input-size contracts used by metadata generation and
+# model-config validation. These rules are intentionally conservative:
+# SSD Lite is fixed at 320x320, while the other currently supported
+# families accept square inputs in documented ranges.
+FAMILY_INPUT_SIZE_RULES: dict[str, dict[str, int | str]] = {
+    "resnet_classifier": {
+        "shape": "square",
+        "mode": "range",
+        "min_square_size": 32,
+        "step": 1,
+        "recommended_square_size": 224,
+    },
+    "retinanet": {
+        "shape": "square",
+        "mode": "range",
+        "min_square_size": 224,
+        "step": 32,
+        "recommended_square_size": 640,
+    },
+    "ssdlite320_mobilenet_v3_large": {
+        "shape": "square",
+        "mode": "fixed",
+        "required_square_size": 320,
+        "recommended_square_size": 320,
+    },
+    "deeplabv3": {
+        "shape": "square",
+        "mode": "range",
+        "min_square_size": 224,
+        "step": 32,
+        "recommended_square_size": 640,
+    },
 }
 
 

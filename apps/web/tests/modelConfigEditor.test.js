@@ -20,16 +20,25 @@ const FAMILIES_METADATA = {
       name: "deeplabv3",
       task: "segmentation",
       allowed_backbones: ["resnet50", "resnet101"],
+      input_size: { shape: "square", mode: "range", min_square_size: 224, step: 32, recommended_square_size: 640 },
     },
     {
       name: "resnet_classifier",
       task: "classification",
       allowed_backbones: ["resnet18", "resnet34", "resnet50", "resnet101", "mobilenet_v3_large", "mobilenet_v3_small"],
+      input_size: { shape: "square", mode: "range", min_square_size: 32, step: 1, recommended_square_size: 224 },
     },
     {
       name: "retinanet",
       task: "detection",
       allowed_backbones: ["resnet50", "resnet101"],
+      input_size: { shape: "square", mode: "range", min_square_size: 224, step: 32, recommended_square_size: 640 },
+    },
+    {
+      name: "ssdlite320_mobilenet_v3_large",
+      task: "detection",
+      allowed_backbones: ["mobilenet_v3_large"],
+      input_size: { shape: "square", mode: "fixed", required_square_size: 320, recommended_square_size: 320 },
     },
   ],
 };
@@ -147,6 +156,25 @@ test("setArchitectureFamily regenerates architecture, head, loss, and outputs fo
   assert.equal(next.architecture.head.num_classes, 3);
   assert.equal(next.architecture.framework, "torchvision");
   assert.equal(next.architecture.family, "retinanet");
+});
+
+test("setArchitectureFamily configures SSD Lite defaults for lighter detection training", () => {
+  const config = {
+    input: { input_size: [640, 640], resize_policy: "letterbox" },
+    source_dataset: { manifest_id: "ds-1", task: "detection", num_classes: 3 },
+    architecture: { backbone: { name: "resnet50" }, head: { num_classes: 3 } },
+    loss: { type: "retinanet_default" },
+    outputs: { primary: { name: "old", type: "task_output", task: "detection", format: "coco_detections" }, aux: [] },
+  };
+  const next = setArchitectureFamily(config, "ssdlite320_mobilenet_v3_large", FAMILIES_METADATA);
+  assert.equal(next.loss.type, "ssdlite_default");
+  assert.equal(next.architecture.family, "ssdlite320_mobilenet_v3_large");
+  assert.equal(next.architecture.backbone.name, "mobilenet_v3_large");
+  assert.equal(next.architecture.head.type, "ssdlite");
+  assert.equal(next.architecture.head.num_classes, 3);
+  assert.deepEqual(next.input.input_size, [320, 320]);
+  assert.equal(next.outputs.primary.task, "detection");
+  assert.equal(next.outputs.primary.format, "coco_detections");
 });
 
 test("setArchitectureFamily uses BCE loss for multi-label classification datasets", () => {

@@ -9,7 +9,7 @@ Shared contract artifacts live here. This directory is the canonical source for 
   - `model-config-1.0.schema.json`
 - `metadata/`
   - `backbones.v1.json`
-  - `families.v1.json`
+  - `families.v1.json` (`task`, `allowed_backbones`, and per-family `input_size` contracts)
 - `openapi/`
   - reserved for OpenAPI exports
 - `ts-client/`

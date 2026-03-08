@@ -117,6 +117,7 @@
           "enum": [
             "resnet_classifier",
             "retinanet",
+            "ssdlite320_mobilenet_v3_large",
             "fasterrcnn",
             "maskrcnn",
             "deeplabv3"
@@ -186,6 +187,7 @@
           "enum": [
             "linear",
             "retinanet",
+            "ssdlite",
             "fasterrcnn",
             "maskrcnn",
             "deeplabv3_head"
@@ -246,6 +248,7 @@
             "classification_cross_entropy",
             "classification_bce_with_logits",
             "retinanet_default",
+            "ssdlite_default",
             "fasterrcnn_default",
             "maskrcnn_default",
             "deeplabv3_default",

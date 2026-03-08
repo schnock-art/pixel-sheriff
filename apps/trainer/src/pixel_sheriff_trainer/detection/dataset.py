@@ -24,7 +24,7 @@ class DetectionSample:
 class DetectionDataset(Dataset):
     """Parses COCO instances JSON → (image_tensor, target_dict).
 
-    target_dict format matches torchvision detection models (RetinaNet):
+    target_dict format matches torchvision detection models:
       {"boxes": FloatTensor[N, 4], "labels": LongTensor[N]}
     Boxes are in [x_min, y_min, x_max, y_max] format (XYXY), pixel coordinates.
     """
@@ -110,6 +110,16 @@ def _extract_if_missing(zip_path: Path, workdir: Path) -> Path:
     return dataset_dir
 
 
+def _resolve_detection_label_offset(model_config: dict[str, Any]) -> int:
+    architecture = model_config.get("architecture")
+    if not isinstance(architecture, dict):
+        return 0
+    family = str(architecture.get("family", "")).strip().lower()
+    if family == "ssdlite320_mobilenet_v3_large":
+        return 1
+    return 0
+
+
 def build_detection_loaders(
     *,
     export_zip_path: Path,
@@ -137,6 +147,7 @@ def build_detection_loaders(
         class_names.append(str(cat.get("name", f"class_{cat_id}")))
         class_order.append(str(cat_id))
     num_classes = len(categories)
+    label_offset = _resolve_detection_label_offset(model_config)
 
     # Parse images
     images_raw = coco.get("images", [])
@@ -147,8 +158,10 @@ def build_detection_loaders(
             continue
         image_map[image_id] = img
 
-    # Parse annotations → per-image-id lists. Torchvision RetinaNet expects
-    # class labels in the foreground range [0, num_classes - 1].
+    # Parse annotations → per-image-id lists. Torchvision detection families do
+    # not all use the same foreground label range:
+    # - RetinaNet: [0, num_classes - 1]
+    # - SSD Lite: [1, num_classes], with 0 reserved for background
     annotations_raw = coco.get("annotations", [])
     annotations_by_image: dict[str, list[dict[str, Any]]] = {}
     for ann in annotations_raw:
@@ -163,7 +176,7 @@ def build_detection_loaders(
         if cat_id not in cat_id_to_idx:
             continue
         remapped = dict(ann)
-        remapped["category_id"] = cat_id_to_idx[cat_id]
+        remapped["category_id"] = cat_id_to_idx[cat_id] + label_offset
         annotations_by_image.setdefault(img_id, []).append(remapped)
 
     # Build samples list
@@ -235,6 +248,10 @@ def build_detection_loaders(
     ])
 
     batch_size = max(1, int(training_config.get("batch_size", 4)))
+    training_block = training_config.get("training")
+    drop_last = True
+    if isinstance(training_block, dict) and isinstance(training_block.get("drop_last"), bool):
+        drop_last = bool(training_block.get("drop_last"))
 
     def collate_fn(batch: list[tuple[Any, dict[str, Any]]]) -> tuple[list[Any], list[dict[str, Any]]]:
         return [item[0] for item in batch], [item[1] for item in batch]
@@ -250,7 +267,7 @@ def build_detection_loaders(
 
     train_loader: DataLoader[Any] = DataLoader(
         train_dataset, batch_size=batch_size, shuffle=True,
-        num_workers=0, collate_fn=collate_fn,
+        num_workers=0, drop_last=drop_last, collate_fn=collate_fn,
     )
     val_loader: DataLoader[Any] = DataLoader(
         val_dataset, batch_size=1, shuffle=False,

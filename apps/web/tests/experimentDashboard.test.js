@@ -1,7 +1,12 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
-const { filterPredictionRows, normalizeConfusion } = require("../src/lib/workspace/experimentDashboard.js");
+const {
+  dashboardSeriesForTask,
+  dashboardTabsForTask,
+  filterPredictionRows,
+  normalizeConfusion,
+} = require("../src/lib/workspace/experimentDashboard.js");
 
 test("normalizeConfusion handles none/by_true/by_pred and zero-sum safely", () => {
   const matrix = [
@@ -42,4 +47,15 @@ test("filterPredictionRows applies mode/class filters and ordering", () => {
   const filtered = filterPredictionRows(rows, { mode: "lowest_confidence_correct", trueClassIndex: 0, predClassIndex: 0, limit: 1 });
   assert.equal(filtered.length, 1);
   assert.equal(filtered[0].asset_id, "b");
+});
+
+test("dashboardTabsForTask and dashboardSeriesForTask expose detection metrics", () => {
+  const tabs = dashboardTabsForTask("detection");
+  assert.deepEqual(tabs.map((tab) => tab.key), ["loss", "map", "runtime"]);
+
+  const mapSeries = dashboardSeriesForTask("detection", "map");
+  assert.deepEqual(mapSeries.map((series) => series.key), ["val_map", "val_map_50_95"]);
+
+  const runtimeSeries = dashboardSeriesForTask("detection", "runtime");
+  assert.deepEqual(runtimeSeries.map((series) => series.key), ["epoch_seconds", "eta_seconds"]);
 });

@@ -29,6 +29,59 @@ def _build_retinanet(num_classes: int) -> torch.nn.Module:
     return model
 
 
+def _build_ssdlite320_mobilenet_v3_large(num_classes: int) -> torch.nn.Module:
+    import torchvision.models.detection as tv_det
+    # Torchvision SSD expects num_classes including background.
+    model = tv_det.ssdlite320_mobilenet_v3_large(
+        weights=None,
+        weights_backbone=None,
+        num_classes=num_classes + 1,
+    )
+    return model
+
+
+def _normalized_detection_family(model_config: dict[str, Any]) -> str:
+    architecture = model_config.get("architecture")
+    if not isinstance(architecture, dict):
+        return "retinanet"
+    family = architecture.get("family")
+    if not isinstance(family, str) or not family.strip():
+        return "retinanet"
+    return family.strip().lower()
+
+
+def _loader_may_emit_small_batch(loader: Any) -> bool:
+    batch_size_raw = getattr(loader, "batch_size", None)
+    if not isinstance(batch_size_raw, int):
+        return False
+    if batch_size_raw < 2:
+        return True
+    if bool(getattr(loader, "drop_last", False)):
+        return False
+    dataset = getattr(loader, "dataset", None)
+    try:
+        dataset_len = len(dataset) if dataset is not None else None
+    except TypeError:
+        dataset_len = None
+    if not isinstance(dataset_len, int) or dataset_len < 1:
+        return False
+    return dataset_len % batch_size_raw == 1
+
+
+def _is_no_kernel_image_error(exc: Exception) -> bool:
+    message = str(exc).lower()
+    return "no kernel image is available for execution on the device" in message or "cudaerrornokernelimagefordevice" in message
+
+
+def _build_detection_model(model_config: dict[str, Any], *, num_classes: int) -> torch.nn.Module:
+    family = _normalized_detection_family(model_config)
+    if family == "ssdlite320_mobilenet_v3_large":
+        return _build_ssdlite320_mobilenet_v3_large(num_classes)
+    if family == "retinanet":
+        return _build_retinanet(num_classes)
+    raise ValueError(f"unsupported_detection_family:{family}")
+
+
 def run_detection_training(
     *,
     model_config: dict[str, Any],
@@ -43,7 +96,10 @@ def run_detection_training(
     resume_state: dict[str, Any] | None = None,
 ) -> tuple[str, DetectionEvaluation | None]:
     resolved_device = device or torch.device("cpu")
-    model = _build_retinanet(num_classes)
+    family = _normalized_detection_family(model_config)
+    if family == "ssdlite320_mobilenet_v3_large" and _loader_may_emit_small_batch(train_loader):
+        raise ValueError("batchnorm_small_batch_unsupported")
+    model = _build_detection_model(model_config, num_classes=num_classes)
     model.to(resolved_device)
 
     if resolved_device.type == "cuda":
@@ -121,7 +177,17 @@ def run_detection_training(
         do_eval = (eval_interval <= 1) or epoch == 1 or epoch == epochs or (epoch % eval_interval == 0)
         evaluation: DetectionEvaluation | None = None
         if do_eval:
-            evaluation = evaluate_detection(model, val_loader, resolved_device, num_classes=num_classes)
+            try:
+                evaluation = evaluate_detection(model, val_loader, resolved_device, num_classes=num_classes)
+            except Exception as exc:
+                if resolved_device.type != "cuda" or not _is_no_kernel_image_error(exc):
+                    raise
+                cpu_device = torch.device("cpu")
+                model.to(cpu_device)
+                try:
+                    evaluation = evaluate_detection(model, val_loader, cpu_device, num_classes=num_classes)
+                finally:
+                    model.to(resolved_device)
             if epoch == epochs:
                 final_evaluation = evaluation
 
@@ -145,15 +211,15 @@ def run_detection_training(
 
         metrics_payload: dict[str, Any] = {
             "train_loss": train_loss,
-            "mAP50": float(evaluation.mAP50) if evaluation is not None else None,
-            "mAP50_95": float(evaluation.mAP50_95) if evaluation is not None else None,
+            "val_map": float(evaluation.mAP50) if evaluation is not None else None,
+            "val_map_50_95": float(evaluation.mAP50_95) if evaluation is not None else None,
             "lr": current_lr,
             "epoch_seconds": epoch_seconds,
         }
 
         should_save_latest = epoch == epochs or (epoch % save_every == 0)
         if should_save_latest:
-            on_checkpoint("latest", epoch, "mAP50" if evaluation else None,
+            on_checkpoint("latest", epoch, "val_map" if evaluation else None,
                           float(evaluation.mAP50) if evaluation else None, {
                               "epoch": epoch,
                               "model_state_dict": model.state_dict(),
@@ -165,7 +231,7 @@ def run_detection_training(
         if keep_best and evaluation is not None:
             if best_map50 is None or evaluation.mAP50 > best_map50:
                 best_map50 = evaluation.mAP50
-                on_checkpoint("best_metric", epoch, "mAP50", best_map50, {
+                on_checkpoint("best_metric", epoch, "val_map", best_map50, {
                     "epoch": epoch,
                     "model_state_dict": model.state_dict(),
                     "metrics": metrics_payload,

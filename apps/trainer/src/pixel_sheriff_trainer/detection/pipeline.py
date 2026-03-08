@@ -6,7 +6,11 @@ from typing import Any, Callable
 
 from pixel_sheriff_trainer.detection.dataset import build_detection_loaders
 from pixel_sheriff_trainer.detection.eval import DetectionEvaluation, evaluate_detection
-from pixel_sheriff_trainer.detection.train import DetectionEpochMetrics, run_detection_training
+from pixel_sheriff_trainer.detection.train import (
+    DetectionEpochMetrics,
+    _build_detection_model,
+    run_detection_training,
+)
 from pixel_sheriff_trainer.export_onnx import OnnxExportResult, _resolve_best_checkpoint, _as_relative_uri
 from pixel_sheriff_trainer.io.storage import ExperimentStorage
 from pixel_sheriff_trainer.pipeline import (
@@ -65,8 +69,8 @@ class DetectionPipeline(TaskPipeline):
             row: dict[str, Any] = {
                 "epoch": int(epoch_metrics.epoch),
                 "train_loss": float(epoch_metrics.train_loss),
-                "mAP50": epoch_metrics.mAP50,
-                "mAP50_95": epoch_metrics.mAP50_95,
+                "val_map": epoch_metrics.mAP50,
+                "val_map_50_95": epoch_metrics.mAP50_95,
                 "lr": float(epoch_metrics.lr),
                 "epoch_seconds": float(epoch_metrics.epoch_seconds),
                 "eta_seconds": epoch_metrics.eta_seconds,
@@ -160,7 +164,6 @@ class DetectionPipeline(TaskPipeline):
         loaders: TaskLoaders,
     ) -> OnnxExportResult:
         import torch
-        from pixel_sheriff_trainer.detection.train import _build_retinanet
         from pixel_sheriff_trainer.export_onnx import (
             OnnxExportResult,
             _input_shape_from_model,
@@ -196,7 +199,7 @@ class DetectionPipeline(TaskPipeline):
             else checkpoint_payload
         )
 
-        model = _build_retinanet(loaders.num_classes)
+        model = _build_detection_model(job.model_config, num_classes=loaders.num_classes)
         model.load_state_dict(state_dict, strict=True)
         model.eval()
 

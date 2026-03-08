@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from jsonschema import Draft7Validator
+from sheriff_api.ml.registry import FAMILY_INPUT_SIZE_RULES
 
 
 class ManifestConfigError(ValueError):
@@ -159,6 +160,63 @@ def _normalize_input(manifest: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _family_input_size_issue(config: dict[str, Any]) -> dict[str, str] | None:
+    architecture = config.get("architecture")
+    if not isinstance(architecture, dict):
+        return None
+    family = architecture.get("family")
+    if not isinstance(family, str) or not family.strip():
+        return None
+    rule = FAMILY_INPUT_SIZE_RULES.get(family.strip())
+    if not isinstance(rule, dict):
+        return None
+
+    input_cfg = config.get("input")
+    if not isinstance(input_cfg, dict):
+        return None
+    raw_size = input_cfg.get("input_size")
+    if not isinstance(raw_size, list) or len(raw_size) != 2:
+        return None
+    if not all(isinstance(value, int) for value in raw_size):
+        return None
+    width, height = int(raw_size[0]), int(raw_size[1])
+    if width < 1 or height < 1:
+        return None
+
+    if str(rule.get("shape")) != "square":
+        return None
+    if width != height:
+        return {
+            "path": "input.input_size",
+            "message": f"{family.strip()} requires square input sizes",
+        }
+
+    mode = str(rule.get("mode", "")).strip().lower()
+    if mode == "fixed":
+        required = int(rule.get("required_square_size", 0) or 0)
+        if required > 0 and width != required:
+            return {
+                "path": "input.input_size",
+                "message": f"{family.strip()} requires input_size [{required}, {required}]",
+            }
+        return None
+
+    if mode == "range":
+        minimum = int(rule.get("min_square_size", 1) or 1)
+        step = max(1, int(rule.get("step", 1) or 1))
+        if width < minimum:
+            return {
+                "path": "input.input_size",
+                "message": f"{family.strip()} requires square input_size >= {minimum}",
+            }
+        if (width - minimum) % step != 0:
+            return {
+                "path": "input.input_size",
+                "message": f"{family.strip()} requires square input_size in increments of {step} from {minimum}",
+            }
+    return None
+
+
 def _defaults_for_task(
     task: str,
     num_classes: int,
@@ -297,16 +355,13 @@ def build_default_model_config(
 
 
 def validate_model_config(config: dict[str, Any]) -> None:
-    schema = _load_schema()
-    validator = Draft7Validator(schema)
-    errors = sorted(validator.iter_errors(config), key=lambda err: list(err.absolute_path))
-    if not errors:
+    issues = collect_model_config_issues(config)
+    if not issues:
         return
 
     rendered_errors: list[str] = []
-    for error in errors[:8]:
-        path = ".".join(str(part) for part in error.absolute_path) or "$"
-        rendered_errors.append(f"{path}: {error.message}")
+    for issue in issues[:8]:
+        rendered_errors.append(f"{issue['path']}: {issue['message']}")
     raise ModelConfigValidationError("; ".join(rendered_errors))
 
 
@@ -318,4 +373,7 @@ def collect_model_config_issues(config: dict[str, Any]) -> list[dict[str, str]]:
     for error in errors:
         path = ".".join(str(part) for part in error.absolute_path) or "$"
         issues.append({"path": path, "message": error.message})
+    family_issue = _family_input_size_issue(config)
+    if family_issue is not None:
+        issues.append(family_issue)
     return issues

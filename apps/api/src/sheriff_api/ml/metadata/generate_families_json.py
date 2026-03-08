@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from sheriff_api.ml.registry import FAMILY_BACKBONES, FAMILY_TASK_MAP
+from sheriff_api.ml.registry import FAMILY_BACKBONES, FAMILY_INPUT_SIZE_RULES, FAMILY_TASK_MAP
 
 
 def _default_output_path() -> Path:
@@ -20,6 +20,7 @@ def build_families_payload() -> dict[str, Any]:
                 "name": family_name,
                 "task": FAMILY_TASK_MAP[family_name],
                 "allowed_backbones": FAMILY_BACKBONES[family_name],
+                "input_size": FAMILY_INPUT_SIZE_RULES[family_name],
             }
         )
     return {"schema_version": "1", "families": families_payload}

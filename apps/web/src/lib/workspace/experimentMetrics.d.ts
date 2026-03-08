@@ -6,6 +6,7 @@ export interface MetricPoint {
   val_loss?: number;
   val_accuracy?: number;
   val_map?: number;
+  val_map_50_95?: number;
   val_iou?: number;
 }
 

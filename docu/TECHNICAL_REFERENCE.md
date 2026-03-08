@@ -120,7 +120,7 @@ make help
   - live SSE stream consumed by web chart UI
   - chart includes axes, legend, toggles, and hover value tooltip
   - experiment dataset export now preserves saved dataset-version split membership (`train`/`val`/`test`) from stored `splits.items`
-- Classification experiment analytics + deep dashboard:
+- Classification + detection experiment analytics and dashboards:
   - trainer now writes attempt-scoped classification evaluation artifacts:
     - `experiments/{project_id}/{experiment_id}/runs/{attempt}/evaluation.json`
     - `experiments/{project_id}/{experiment_id}/runs/{attempt}/predictions.jsonl`
@@ -134,7 +134,10 @@ make help
   - evaluation/samples API endpoints include served `attempt` in responses
   - evaluation and predictions metadata now include a `provenance` block with project/experiment/attempt/model/task/dataset-export identifiers
   - experiments list page now includes summary cards, multi-run metric chart, and hyperparameter scatter
-  - experiment detail page now includes confusion matrix drill-down, per-class metrics, and prediction explorer
+  - experiment detail page now includes:
+    - classification drill-down views (confusion matrix, per-class metrics, prediction explorer)
+    - detection trend/dashboard views (`train_loss`, `val mAP@50`, `val mAP@50:95`, `epoch_seconds`, `eta_seconds`)
+    - attempt-scoped log/evaluation/ONNX labeling so reruns stay distinguishable in the UI
 - Backend ML model-building layer (v0) is now implemented under `apps/api/src/sheriff_api/ml`:
   - extensible `ModelFactory` + family adapter registry
   - backbone metadata registry (`resnet18/34/50/101`) + verification utilities
@@ -158,7 +161,7 @@ make help
 
 - `apps/web`: Next.js labeling UI
 - `apps/api`: FastAPI backend
-- `apps/trainer`: Redis worker that executes classification training jobs
+- `apps/trainer`: Redis worker that executes training/inference jobs
 - Postgres + Redis via Docker Compose
 - Local filesystem storage under `./data`
 
@@ -207,6 +210,9 @@ make help
   - AJV (`ajv` + `ajv-formats`) validation against `ModelConfig v1.0`
   - Save enablement only when draft has changes and passes schema validation
   - unsaved changes indicator + guarded navigation integration
+  - detection family options now include:
+    - `retinanet` as the higher-capacity default detector
+    - `ssdlite320_mobilenet_v3_large` as the lighter bbox option, with a `320x320` input recommendation for <=16 GB VRAM-class hardware
 - Experiments pages support project-scoped list/create/detail plus live training telemetry
 - Experiments list analytics dashboard includes:
   - summary cards (`best accuracy`, `lowest val loss`, `total runs`, `failures`)
@@ -241,7 +247,13 @@ make help
   - per-class metrics sortable table
   - prediction explorer filters (`mode`, `true class`, `pred class`, `limit`)
   - sample image preview modal
-  - detection/segmentation placeholder (`not supported yet`)
+- Experiment detail deep dashboard (detection) includes:
+  - chart tabs (`Loss`, `mAP`, `Runtime`) + log scale
+  - loss view for `train_loss`
+  - mAP view for `val_map` (`mAP@50`) and `val_map_50_95` (`mAP@50:95`)
+  - runtime view for `epoch_seconds` and `eta_seconds`
+  - detection summary card for best/latest checkpoint, classes, validation split, and final `mAP@50` / `mAP@50:95`
+  - confusion-matrix/per-class/prediction explorer panels remain classification-only
 - Classification evaluation artifact + API contract:
   - per-attempt artifacts are source-of-truth under `runs/{attempt}/...`
   - latest mirrors at experiment root are default API/UI read targets
@@ -256,8 +268,11 @@ make help
     - `by_pred`: column-normalized
 - Detection trainer contract:
   - COCO `category_id` values remain integer in exports but RetinaNet training remaps them to zero-based foreground label indices (`0..num_classes-1`)
+  - SSD Lite training uses one-based foreground labels because class `0` is reserved for background
   - trainer RetinaNet construction disables implicit backbone weight downloads (`weights=None`, `weights_backbone=None`) for deterministic local/container runs
-    - zero-sum rows/columns render `0` safely
+  - detection metrics are persisted under normalized experiment field names:
+    - `val_map` for `mAP@50`
+    - `val_map_50_95` for `mAP@50:95`
 - Local folder import with one modal:
   - import into existing or new project
   - select task mode when creating a new project (`classification_single`, `bbox`, `segmentation`)
@@ -342,11 +357,23 @@ make help
   - `packages/pixel_sheriff_ml` provides shared helpers used by API + trainer (`architecture_family`, `build_resnet_classifier`)
   - trainer uses shared classifier builder for real classification runs
   - API experiment queue/start flow uses shared architecture-family resolution
+  - shared family metadata now also carries per-family `input_size` contracts:
+    - `resnet_classifier`: square sizes >= `32`
+    - `retinanet`: square sizes >= `224` in steps of `32`
+    - `deeplabv3`: square sizes >= `224` in steps of `32`
+    - `ssdlite320_mobilenet_v3_large`: fixed `320x320`
+  - the model editor filters size presets from that contract and both web/API validation reject unsupported family/input-size combinations
   - model config defaults normalize dataset task kinds before family selection (`bbox` -> `detection`, `classification_single` -> `classification`)
   - multi-label classification defaults now use `loss.type = "classification_bce_with_logits"` and that loss is part of the shared `ModelConfig` schema
 - Trainer reliability safeguards:
   - classification dataloader defaults to `runtime.num_workers=0` (falls back to `advanced.num_workers`) for container-safe execution
   - if a shared-memory dataloader failure occurs with `num_workers > 0`, trainer retries once with `num_workers=0`
+  - detection dataloaders now also default to `training.drop_last=true`; this is especially important for `ssdlite320_mobilenet_v3_large`, which can fail in BatchNorm on singleton tail batches
+  - SSD Lite training now fails fast with `batchnorm_small_batch_unsupported` when the effective training batch can collapse to one sample (for example `batch_size=1`, or `37` samples with `batch_size=4` and `drop_last=false`)
+  - detection evaluation now falls back to CPU automatically when CUDA `torchvision` NMS/postprocessing kernels are unavailable for the local GPU/runtime combination; training still stays on CUDA
+  - ONNX export now retries with legacy `torch.onnx.export(..., dynamo=False)` when the default `torch.export` path fails on torchvision detection postprocessing guards such as `batched_nms`
+  - detection ONNX exports currently disable dynamic batch and validate as `batch=1` graphs, because exported torchvision detection postprocessing does not validate reliably under ONNX Runtime with dynamic batch enabled
+  - detection ONNX validation is task-aware, so postprocessed outputs are validated as detection outputs instead of assuming the first output axis equals the requested batch size
   - runtime loader tuning is available via config/UI:
     - `runtime.num_workers`, `runtime.pin_memory`, `runtime.persistent_workers`
     - `runtime.prefetch_factor`, `runtime.cache_resized_images`, `runtime.max_cached_images`
@@ -543,7 +570,7 @@ Also, trainer Dockerfiles now share a named BuildKit pip cache (`id=pixel-sherif
 - Review/QA workflow
 - Geometry tooling polish (no polygon vertex dragging/edit yet)
 - Deploy UX is functional for classification ONNX but still early-stage (limited controls and error guidance)
-- Detection/segmentation trainer implementations are not yet available (classification only for now)
+- Detection training/export flows are available; segmentation/deploy UX remains less mature than the classification path
 - MAL batch/curation pipeline is still minimal (single-asset deploy inference is implemented; batch queue scoring is still pending)
 - Shared-asset reference mode (upload-once/link-many)
 

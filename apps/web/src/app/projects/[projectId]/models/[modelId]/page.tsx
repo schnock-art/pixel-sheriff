@@ -47,6 +47,15 @@ interface DatasetVersionRecord {
   class_names: Record<string, string>;
 }
 
+interface FamilyInputSizeRule {
+  shape?: string;
+  mode?: string;
+  min_square_size?: number;
+  step?: number;
+  recommended_square_size?: number;
+  required_square_size?: number;
+}
+
 const INPUT_SIZE_PRESETS = [224, 320, 384, 512, 640] as const;
 const RESIZE_POLICY_OPTIONS = ["letterbox", "stretch", "longest_side_pad"] as const;
 const NORMALIZATION_OPTIONS = ["imagenet", "none", "custom"] as const;
@@ -87,6 +96,43 @@ function tasksMatch(left: string | null | undefined, right: string | null | unde
   const normalizedLeft = normalizeModelTask(left);
   const normalizedRight = normalizeModelTask(right);
   return normalizedLeft !== null && normalizedLeft === normalizedRight;
+}
+
+function getFamilyInputSizeRule(family: { input_size?: FamilyInputSizeRule } | null | undefined): FamilyInputSizeRule | null {
+  if (!family?.input_size || typeof family.input_size !== "object") return null;
+  return family.input_size;
+}
+
+function isAllowedSquareSize(rule: FamilyInputSizeRule | null, size: number): boolean {
+  if (!Number.isFinite(size) || size < 1) return false;
+  if (!rule || rule.shape !== "square") return true;
+  if (rule.mode === "fixed") {
+    return size === rule.required_square_size;
+  }
+  if (rule.mode === "range") {
+    const minimum = typeof rule.min_square_size === "number" ? rule.min_square_size : 1;
+    const step = typeof rule.step === "number" && rule.step > 0 ? rule.step : 1;
+    return size >= minimum && (size - minimum) % step === 0;
+  }
+  return true;
+}
+
+function formatFamilyInputSizeHint(rule: FamilyInputSizeRule | null): string | null {
+  if (!rule || rule.shape !== "square") return null;
+  if (rule.mode === "fixed" && typeof rule.required_square_size === "number") {
+    return `Required for this family: ${rule.required_square_size} x ${rule.required_square_size}.`;
+  }
+  if (rule.mode === "range") {
+    const minimum = typeof rule.min_square_size === "number" ? rule.min_square_size : 1;
+    const step = typeof rule.step === "number" && rule.step > 0 ? rule.step : 1;
+    const recommended = typeof rule.recommended_square_size === "number" ? rule.recommended_square_size : null;
+    const recommendedText = recommended ? ` Recommended: ${recommended} x ${recommended}.` : "";
+    if (step === 1) {
+      return `Allowed for this family: any square >= ${minimum}.${recommendedText}`;
+    }
+    return `Allowed for this family: square sizes >= ${minimum} in steps of ${step}.${recommendedText}`;
+  }
+  return null;
 }
 
 export default function ModelDetailPage({ params }: ModelDetailPageProps) {
@@ -233,6 +279,13 @@ export default function ModelDetailPage({ params }: ModelDetailPageProps) {
     ? allDatasetVersions.filter((v) => tasksMatch(v.task, currentTask))
     : allDatasetVersions;
   const allowedBackbones = currentFamilyFromMeta?.allowed_backbones ?? [];
+  const currentFamilyInputSizeRule = getFamilyInputSizeRule(currentFamilyFromMeta);
+  const allowedPresetSizes = INPUT_SIZE_PRESETS.filter((value) => isAllowedSquareSize(currentFamilyInputSizeRule, value));
+  const customInputAllowed = currentFamilyInputSizeRule?.mode !== "fixed";
+  const inputSizeHelpText = formatFamilyInputSizeHint(currentFamilyInputSizeRule);
+  const inputSizeIssue =
+    validation.errors.find((issue) => issue.path === "$.input.input_size" && issue.keyword === "familyInputSize")
+    ?? null;
 
   const outputs = asRecord(draftConfig?.outputs);
   const auxOutputs = Array.isArray(outputs.aux) ? outputs.aux : [];
@@ -455,21 +508,27 @@ export default function ModelDetailPage({ params }: ModelDetailPageProps) {
               setDraftConfig((current) => (current ? setSquareInputSize(current, parsed) : current));
             }}
           >
-            {INPUT_SIZE_PRESETS.map((value) => (
+            {allowedPresetSizes.map((value) => (
               <option key={value} value={value}>
                 {value} x {value}
               </option>
             ))}
-            <option value="custom">Custom</option>
+            {customInputAllowed || inputSizePresetValue === "custom" ? (
+              <option value="custom" disabled={!customInputAllowed}>
+                {customInputAllowed ? "Custom" : "Current size invalid"}
+              </option>
+            ) : null}
           </select>
         </label>
-        {inputSizePresetValue === "custom" ? (
+        {inputSizeHelpText ? <p className="project-field-help">{inputSizeHelpText}</p> : null}
+        {inputSizeIssue ? <p className="project-field-error">{inputSizeIssue.message}</p> : null}
+        {inputSizePresetValue === "custom" && customInputAllowed ? (
           <label className="project-field">
             <span>Custom Square Size</span>
             <input
               type="number"
-              min={1}
-              step={1}
+              min={currentFamilyInputSizeRule?.min_square_size ?? 1}
+              step={currentFamilyInputSizeRule?.step ?? 1}
               value={customInputSizeValue}
               onChange={(event) => {
                 const parsed = Number.parseInt(event.target.value, 10);

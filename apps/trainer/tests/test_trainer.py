@@ -12,8 +12,13 @@ try:
     from pixel_sheriff_ml.model_factory import build_resnet_classifier
     from pixel_sheriff_trainer.classification.dataset import build_classification_loaders
     from pixel_sheriff_trainer.detection.dataset import build_detection_loaders
+    from pixel_sheriff_trainer.detection.eval import DetectionEvaluation
     from pixel_sheriff_trainer.detection.train import DetectionEpochMetrics, run_detection_training
-    from pixel_sheriff_trainer.export_onnx import export_best_classification_onnx
+    from pixel_sheriff_trainer.export_onnx import (
+        _validate_onnxruntime_batch_outputs,
+        export_best_classification_onnx,
+        export_model_to_onnx,
+    )
     from pixel_sheriff_trainer.io.checkpoints import save_checkpoint
     from pixel_sheriff_trainer.io.storage import ExperimentStorage
     from pixel_sheriff_trainer.jobs import TrainJob, parse_train_job
@@ -26,9 +31,12 @@ except Exception:
     build_resnet_classifier = None  # type: ignore[assignment]
     build_classification_loaders = None  # type: ignore[assignment]
     build_detection_loaders = None  # type: ignore[assignment]
+    DetectionEvaluation = None  # type: ignore[assignment]
     DetectionEpochMetrics = None  # type: ignore[assignment]
     run_detection_training = None  # type: ignore[assignment]
     export_best_classification_onnx = None  # type: ignore[assignment]
+    export_model_to_onnx = None  # type: ignore[assignment]
+    _validate_onnxruntime_batch_outputs = None  # type: ignore[assignment]
     save_checkpoint = None  # type: ignore[assignment]
     ExperimentStorage = None  # type: ignore[assignment]
     TrainJob = None  # type: ignore[assignment]
@@ -371,11 +379,47 @@ def test_detection_loader_accepts_uuid_image_ids(tmp_path: Path) -> None:
     assert loaded.num_classes == 1
     assert loaded.train_count == 1
     assert loaded.val_count == 1
+    assert loaded.train_loader.drop_last is True
 
     train_images, train_targets = next(iter(loaded.train_loader))
     assert len(train_images) == 1
     assert tuple(train_targets[0]["boxes"].shape) == (1, 4)
     assert train_targets[0]["labels"].tolist() == [0]
+
+
+def test_detection_loader_offsets_labels_for_ssdlite_family(tmp_path: Path) -> None:
+    if not HAS_TORCH:
+        pytest.skip("torch/torchvision not available")
+    project_id = str(uuid.uuid4())
+    zip_path = _write_tiny_coco_export_zip(tmp_path, project_id, include_segmentation=False)
+    loaded = build_detection_loaders(
+        export_zip_path=zip_path,
+        workdir=tmp_path / "workdir_detection_ssdlite",
+        model_config={
+            "input": {"input_size": [320, 320]},
+            "architecture": {"family": "ssdlite320_mobilenet_v3_large"},
+        },
+        training_config={"batch_size": 1},
+    )
+
+    train_images, train_targets = next(iter(loaded.train_loader))
+    assert len(train_images) == 1
+    assert train_targets[0]["labels"].tolist() == [1]
+
+
+def test_detection_loader_respects_explicit_drop_last_false(tmp_path: Path) -> None:
+    if not HAS_TORCH:
+        pytest.skip("torch/torchvision not available")
+    project_id = str(uuid.uuid4())
+    zip_path = _write_tiny_coco_export_zip(tmp_path, project_id, include_segmentation=False)
+    loaded = build_detection_loaders(
+        export_zip_path=zip_path,
+        workdir=tmp_path / "workdir_detection_drop_last",
+        model_config={"input": {"input_size": [32, 32]}},
+        training_config={"batch_size": 1, "training": {"drop_last": False}},
+    )
+
+    assert loaded.train_loader.drop_last is False
 
 
 def test_detection_training_smoke_accepts_zero_based_labels(tmp_path: Path) -> None:
@@ -421,6 +465,181 @@ def test_detection_training_smoke_accepts_zero_based_labels(tmp_path: Path) -> N
     assert evaluation is not None
     assert len(captured_epochs) == 1
     assert checkpoints
+
+
+def test_detection_training_uses_ssdlite_builder(monkeypatch: pytest.MonkeyPatch) -> None:
+    if not HAS_TORCH:
+        pytest.skip("torch/torchvision not available")
+
+    import pixel_sheriff_trainer.detection.train as detection_train
+
+    class FakeDetector(torch.nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.scale = torch.nn.Parameter(torch.tensor(1.0))
+
+        def forward(self, images, targets=None):  # type: ignore[override]
+            if self.training:
+                return {"total_loss": self.scale}
+            return [
+                {
+                    "boxes": torch.zeros((0, 4), dtype=torch.float32),
+                    "scores": torch.zeros((0,), dtype=torch.float32),
+                    "labels": torch.zeros((0,), dtype=torch.int64),
+                }
+                for _ in images
+            ]
+
+    called = {"ssdlite": False}
+
+    def _fake_builder(_num_classes: int) -> torch.nn.Module:
+        called["ssdlite"] = True
+        return FakeDetector()
+
+    monkeypatch.setattr(detection_train, "_build_ssdlite320_mobilenet_v3_large", _fake_builder)
+    monkeypatch.setattr(
+        detection_train,
+        "evaluate_detection",
+        lambda *_args, **_kwargs: DetectionEvaluation(mAP50=0.0, mAP50_95=0.0),
+    )
+
+    sample_image = torch.zeros((3, 8, 8), dtype=torch.float32)
+    sample_target = {
+        "boxes": torch.tensor([[1.0, 1.0, 4.0, 4.0]], dtype=torch.float32),
+        "labels": torch.tensor([1], dtype=torch.int64),
+    }
+    train_loader = [([sample_image], [sample_target])]
+    val_loader = [([sample_image], [sample_target])]
+
+    status, evaluation = run_detection_training(
+        model_config={"architecture": {"family": "ssdlite320_mobilenet_v3_large"}},
+        training_config={
+            "optimizer": {"lr": 0.0001, "weight_decay": 0.0},
+            "scheduler": {"type": "none"},
+            "logging": {"save_every_epochs": 1, "keep_best": False},
+            "evaluation": {"eval_interval_epochs": 1},
+            "epochs": 1,
+            "batch_size": 1,
+        },
+        train_loader=train_loader,
+        val_loader=val_loader,
+        num_classes=1,
+        should_cancel=lambda: False,
+        on_epoch=lambda _row: None,
+        on_checkpoint=lambda *_args, **_kwargs: None,
+        device=torch.device("cpu"),
+        resume_state=None,
+    )
+
+    assert called["ssdlite"] is True
+    assert status == "completed"
+    assert evaluation is not None
+
+
+def test_detection_training_rejects_ssdlite_small_batch_loader() -> None:
+    if not HAS_TORCH:
+        pytest.skip("torch/torchvision not available")
+
+    class FakeLoader:
+        batch_size = 4
+        drop_last = False
+        dataset = [None] * 37
+
+        def __iter__(self):
+            return iter(())
+
+    with pytest.raises(ValueError, match="batchnorm_small_batch_unsupported"):
+        run_detection_training(
+            model_config={"architecture": {"family": "ssdlite320_mobilenet_v3_large"}},
+            training_config={
+                "optimizer": {"lr": 0.0001, "weight_decay": 0.0},
+                "scheduler": {"type": "none"},
+                "logging": {"save_every_epochs": 1, "keep_best": False},
+                "evaluation": {"eval_interval_epochs": 1},
+                "epochs": 1,
+                "batch_size": 4,
+            },
+            train_loader=FakeLoader(),
+            val_loader=[],
+            num_classes=4,
+            should_cancel=lambda: False,
+            on_epoch=lambda _row: None,
+            on_checkpoint=lambda *_args, **_kwargs: None,
+            device=torch.device("cpu"),
+            resume_state=None,
+        )
+
+
+def test_detection_training_falls_back_to_cpu_eval_when_cuda_nms_is_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
+    if not HAS_TORCH:
+        pytest.skip("torch/torchvision not available")
+
+    import pixel_sheriff_trainer.detection.train as detection_train
+
+    class FakeTensor:
+        def to(self, *_args, **_kwargs):
+            return self
+
+    class FakeDetector(torch.nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.scale = torch.nn.Parameter(torch.tensor(1.0))
+            self.devices: list[str] = []
+
+        def to(self, device=None, *args, **kwargs):  # type: ignore[override]
+            if device is not None:
+                self.devices.append(str(device))
+            return self
+
+        def forward(self, images, targets=None):  # type: ignore[override]
+            if self.training:
+                return {"total_loss": self.scale}
+            return [{"boxes": torch.zeros((0, 4)), "scores": torch.zeros((0,)), "labels": torch.zeros((0,), dtype=torch.int64)}]
+
+    fake_model = FakeDetector()
+    eval_devices: list[str] = []
+
+    def _fake_eval(model, _val_loader, device, *, num_classes, iou_thresholds=None):
+        eval_devices.append(str(device))
+        if str(device) == "cuda":
+            raise RuntimeError("CUDA error: no kernel image is available for execution on the device")
+        return DetectionEvaluation(mAP50=0.25, mAP50_95=0.15)
+
+    monkeypatch.setattr(detection_train, "_build_retinanet", lambda _num_classes: fake_model)
+    monkeypatch.setattr(detection_train, "evaluate_detection", _fake_eval)
+
+    train_loader = [
+        (
+            [FakeTensor(), FakeTensor()],
+            [{"boxes": FakeTensor(), "labels": FakeTensor()}, {"boxes": FakeTensor(), "labels": FakeTensor()}],
+        )
+    ]
+    val_loader = [([FakeTensor()], [{"boxes": FakeTensor(), "labels": FakeTensor()}])]
+
+    status, evaluation = run_detection_training(
+        model_config={"architecture": {"family": "retinanet"}},
+        training_config={
+            "optimizer": {"lr": 0.0001, "weight_decay": 0.0},
+            "scheduler": {"type": "none"},
+            "logging": {"save_every_epochs": 1, "keep_best": False},
+            "evaluation": {"eval_interval_epochs": 1},
+            "epochs": 1,
+            "batch_size": 2,
+        },
+        train_loader=train_loader,
+        val_loader=val_loader,
+        num_classes=1,
+        should_cancel=lambda: False,
+        on_epoch=lambda _row: None,
+        on_checkpoint=lambda *_args, **_kwargs: None,
+        device=torch.device("cuda"),
+        resume_state=None,
+    )
+
+    assert status == "completed"
+    assert evaluation is not None
+    assert eval_devices == ["cuda", "cpu"]
+    assert fake_model.devices[:3] == ["cuda", "cpu", "cuda"]
 
 
 def test_detection_training_cancel_stops_between_batches(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -866,3 +1085,133 @@ def test_export_best_classification_onnx_supports_dynamic_batch(tmp_path: Path) 
         dummy = np.random.randn(batch_size, 3, 32, 32).astype(np.float32)
         output = session.run(["output"], {"input": dummy})[0]
         assert int(output.shape[0]) == batch_size
+
+
+@pytest.mark.skipif(not HAS_TORCH, reason="torch is required")
+def test_export_model_to_onnx_falls_back_to_legacy_export_for_torch_export_failures(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    storage = ExperimentStorage(str(tmp_path))
+
+    class TinyModel(torch.nn.Module):
+        def forward(self, x):  # type: ignore[override]
+            return x
+
+    calls: list[bool] = []
+
+    def _fake_export(model, args, f, **kwargs):
+        calls.append(bool(kwargs.get("dynamo")))
+        if kwargs.get("dynamo") is True:
+            raise RuntimeError("GuardOnDataDependentSymNode caused by batched_nms during torch.export")
+        Path(f).write_bytes(b"fake-onnx")
+        return None
+
+    monkeypatch.setattr(torch.onnx, "export", _fake_export)
+    import pixel_sheriff_trainer.export_onnx as export_onnx_mod
+
+    monkeypatch.setattr(
+        export_onnx_mod,
+        "_validate_exported_onnx",
+        lambda _path, *, input_shape, output_names=None, task=None, batch_sizes=(1, 4): {
+            "status": "passed",
+            "onnx_checker": {"status": "passed", "error": None},
+            "onnxruntime": {"status": "passed", "error": None, "providers": [], "batch_results": {}},
+        },
+    )
+
+    result = export_model_to_onnx(
+        TinyModel(),
+        storage,
+        project_id="project-1",
+        experiment_id="experiment-1",
+        attempt=1,
+        checkpoint_kind="best_metric",
+        checkpoint_uri="checkpoints/best_metric.pt",
+        input_shape=(3, 32, 32),
+        input_names=["input"],
+        output_names=["output"],
+        preprocess={"resize_policy": "stretch"},
+        class_order=["1"],
+        class_names=["cat"],
+        extra_metadata={"task": "detection"},
+    )
+
+    assert result.status == "exported"
+    assert calls == [True, False]
+    metadata = json.loads(storage.resolve(result.metadata_uri).read_text(encoding="utf-8"))
+    assert metadata["onnx"]["export_backend"]["mode"] == "legacy"
+    assert "GuardOnDataDependentSymNode" in metadata["onnx"]["export_backend"]["fallback_reason"]
+
+
+@pytest.mark.skipif(not HAS_TORCH, reason="torch is required")
+def test_export_model_to_onnx_disables_dynamic_batch_for_detection(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    storage = ExperimentStorage(str(tmp_path))
+
+    class TinyModel(torch.nn.Module):
+        def forward(self, x):  # type: ignore[override]
+            return x
+
+    captured: dict[str, object] = {}
+
+    import pixel_sheriff_trainer.export_onnx as export_onnx_mod
+
+    def _fake_export_with_fallback(model, example_input, model_path, *, input_names, output_names, dynamic_axes):
+        captured["dynamic_axes"] = {key: dict(value) for key, value in dynamic_axes.items()}
+        Path(model_path).write_bytes(b"fake-onnx")
+        return {"mode": "legacy", "fallback_reason": None}
+
+    def _fake_validate(_path, *, input_shape, output_names=None, task=None, batch_sizes=(1, 4)):
+        captured["task"] = task
+        captured["batch_sizes"] = batch_sizes
+        return {
+            "status": "passed",
+            "onnx_checker": {"status": "passed", "error": None},
+            "onnxruntime": {"status": "passed", "error": None, "providers": [], "batch_results": {}},
+        }
+
+    monkeypatch.setattr(export_onnx_mod, "_export_with_fallback", _fake_export_with_fallback)
+    monkeypatch.setattr(export_onnx_mod, "_validate_exported_onnx", _fake_validate)
+
+    result = export_model_to_onnx(
+        TinyModel(),
+        storage,
+        project_id="project-1",
+        experiment_id="experiment-1",
+        attempt=1,
+        checkpoint_kind="best_metric",
+        checkpoint_uri="checkpoints/best_metric.pt",
+        input_shape=(3, 320, 320),
+        input_names=["input"],
+        output_names=["output"],
+        preprocess={"resize_policy": "stretch"},
+        class_order=["1"],
+        class_names=["cat"],
+        extra_metadata={"task": "detection"},
+    )
+
+    assert result.status == "exported"
+    assert captured["task"] == "detection"
+    assert captured["dynamic_axes"] == {}
+    assert captured["batch_sizes"] == (1,)
+
+    metadata = json.loads(storage.resolve(result.metadata_uri).read_text(encoding="utf-8"))
+    assert metadata["onnx"]["dynamic_axes"] == {}
+    assert "Dynamic batch is disabled for detection exports" in metadata["onnx"]["runtime_note"]
+
+
+def test_validate_onnxruntime_batch_outputs_allows_detection_postprocessed_shapes() -> None:
+    import numpy as np
+
+    result = _validate_onnxruntime_batch_outputs(
+        [np.zeros((300, 4), dtype=np.float32), np.zeros((300,), dtype=np.float32)],
+        batch_size=1,
+        task="detection",
+    )
+
+    assert result["status"] == "passed"
+    assert result["output_shape"] == [300, 4]
+    assert result["batch_semantics"] == "postprocessed_detection_outputs"

@@ -117,6 +117,7 @@ async def project_experiments_analytics(
                 "val_macro_precision",
                 "val_macro_recall",
                 "val_map",
+                "val_map_50_95",
                 "val_iou",
                 "epoch_seconds",
                 "eta_seconds",

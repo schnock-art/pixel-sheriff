@@ -41,6 +41,14 @@ export interface FamiliesMetadata {
     name: string;
     task: string;
     allowed_backbones: string[];
+    input_size?: {
+      shape?: string;
+      mode?: string;
+      min_square_size?: number;
+      step?: number;
+      recommended_square_size?: number;
+      required_square_size?: number;
+    };
   }>;
 }
 export function setSourceDataset(config: Record<string, unknown>, datasetVersionSummary: DatasetVersionSummary): Record<string, unknown>;

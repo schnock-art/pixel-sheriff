@@ -38,7 +38,12 @@ import {
   mergeMetricPoints,
   metricKeyForTask,
 } from "../../../../../lib/workspace/experimentMetrics";
-import { filterPredictionRows, normalizeConfusion } from "../../../../../lib/workspace/experimentDashboard";
+import {
+  dashboardSeriesForTask,
+  dashboardTabsForTask,
+  filterPredictionRows,
+  normalizeConfusion,
+} from "../../../../../lib/workspace/experimentDashboard";
 import { buildDatasetVersionOptions } from "../../../../../lib/workspace/experimentDatasetSelection";
 import { onnxClassNamesText, onnxInputShapeText, onnxStatusLabel, onnxValidationText } from "../../../../../lib/workspace/experimentOnnx";
 import { mergeLogChunk, runtimeBadgeLabel } from "../../../../../lib/workspace/experimentRuntime";
@@ -140,6 +145,7 @@ function asMetricValue(value: unknown): number | null {
 }
 
 function metricValueByKey(row: ExperimentMetricPoint, key: string): number | null {
+  const extra = row as unknown as Record<string, unknown>;
   if (key === "train_loss") return asMetricValue(row.train_loss);
   if (key === "train_accuracy") return asMetricValue(row.train_accuracy);
   if (key === "val_loss") return asMetricValue(row.val_loss);
@@ -147,7 +153,8 @@ function metricValueByKey(row: ExperimentMetricPoint, key: string): number | nul
   if (key === "val_macro_f1") return asMetricValue(row.val_macro_f1);
   if (key === "val_macro_precision") return asMetricValue(row.val_macro_precision);
   if (key === "val_macro_recall") return asMetricValue(row.val_macro_recall);
-  if (key === "val_map") return asMetricValue(row.val_map);
+  if (key === "val_map") return asMetricValue(row.val_map) ?? asMetricValue(extra.mAP50);
+  if (key === "val_map_50_95") return asMetricValue(row.val_map_50_95) ?? asMetricValue(extra.mAP50_95);
   if (key === "val_iou") return asMetricValue(row.val_iou);
   if (key === "epoch_seconds") return asMetricValue(row.epoch_seconds);
   if (key === "eta_seconds") return asMetricValue(row.eta_seconds);
@@ -196,7 +203,7 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
   const [isLogsLoading, setIsLogsLoading] = useState(false);
   const [isLogsExpanded, setIsLogsExpanded] = useState(true);
   const [logsAutoRefresh, setLogsAutoRefresh] = useState(true);
-  const [dashboardChartTab, setDashboardChartTab] = useState<"loss" | "accuracy" | "prf">("loss");
+  const [dashboardChartTab, setDashboardChartTab] = useState<"loss" | "accuracy" | "prf" | "map" | "runtime">("loss");
   const [dashboardLogScale, setDashboardLogScale] = useState(false);
   const [confusionNormalize, setConfusionNormalize] = useState<"none" | "by_true" | "by_pred">("none");
   const [perClassSort, setPerClassSort] = useState<"f1_desc" | "f1_asc" | "precision_desc" | "recall_desc" | "support_desc">("f1_desc");
@@ -791,6 +798,8 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
   const latestEtaSeconds = typeof latestMetric?.eta_seconds === "number" ? latestMetric.eta_seconds : null;
   const latestEtaClock = formatEtaClock(latestEtaSeconds);
   const isClassificationTask = task === "classification";
+  const isDetectionTask = task === "detection";
+  const dashboardSupported = isClassificationTask || isDetectionTask;
   const classNames = useMemo(
     () => (Array.isArray(evaluation?.classes?.class_names) ? evaluation?.classes?.class_names : []),
     [evaluation?.classes?.class_names],
@@ -832,28 +841,14 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
     return rows;
   }, [evaluation?.per_class, perClassSort]);
 
+  const dashboardTabs = useMemo(() => dashboardTabsForTask(task), [task]);
+
   const dashboardSeries = useMemo(() => {
-    if (dashboardChartTab === "loss") {
-      return [
-        { key: "train_loss", label: "train loss", color: "#cc6f36" },
-        { key: "val_loss", label: "val loss", color: "#c96262" },
-      ];
-    }
-    if (dashboardChartTab === "accuracy") {
-      return [
-        { key: "train_accuracy", label: "train accuracy", color: "#2f9d58" },
-        { key: "val_accuracy", label: "val accuracy", color: "#2f6fca" },
-      ];
-    }
-    return [
-      { key: "val_macro_f1", label: "val macro f1", color: "#2f6fca" },
-      { key: "val_macro_precision", label: "val macro precision", color: "#2f9d58" },
-      { key: "val_macro_recall", label: "val macro recall", color: "#cc6f36" },
-    ];
-  }, [dashboardChartTab]);
+    return dashboardSeriesForTask(task, dashboardChartTab);
+  }, [dashboardChartTab, task]);
 
   const dashboardSeriesKeys = useMemo(() => dashboardSeries.map((series) => series.key), [dashboardSeries]);
-  const dashboardBounded = dashboardChartTab !== "loss";
+  const dashboardBounded = dashboardChartTab === "accuracy" || dashboardChartTab === "prf" || dashboardChartTab === "map";
   const dashboardHasData = useMemo(
     () =>
       metrics.some((row) =>
@@ -911,7 +906,15 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
   );
 
   useEffect(() => {
-    if (!isClassificationTask) {
+    if (dashboardTabs.some((tab) => tab.key === dashboardChartTab)) return;
+    const nextTab = dashboardTabs[0]?.key;
+    if (nextTab === "loss" || nextTab === "accuracy" || nextTab === "prf" || nextTab === "map" || nextTab === "runtime") {
+      setDashboardChartTab(nextTab);
+    }
+  }, [dashboardChartTab, dashboardTabs]);
+
+  useEffect(() => {
+    if (!dashboardSupported) {
       setEvaluation(null);
       setEvaluationError(null);
       setIsEvaluationLoading(false);
@@ -942,7 +945,7 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
     return () => {
       isMounted = false;
     };
-  }, [experimentId, isClassificationTask, projectId, status]);
+  }, [dashboardSupported, experimentId, projectId, status]);
 
   useEffect(() => {
     if (!cellDrawer || !isClassificationTask) {
@@ -981,6 +984,15 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
       isMounted = false;
     };
   }, [cellDrawer, evaluation?.samples?.misclassified, experimentId, isClassificationTask, projectId]);
+
+  const detectionOverallMap50 =
+    evaluation?.overall && typeof evaluation.overall === "object" && typeof (evaluation.overall as Record<string, unknown>).mAP50 === "number"
+      ? ((evaluation.overall as Record<string, unknown>).mAP50 as number)
+      : null;
+  const detectionOverallMap50_95 =
+    evaluation?.overall && typeof evaluation.overall === "object" && typeof (evaluation.overall as Record<string, unknown>).mAP50_95 === "number"
+      ? ((evaluation.overall as Record<string, unknown>).mAP50_95 as number)
+      : null;
 
   return (
     <>
@@ -1634,52 +1646,41 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
                 {evaluation?.attempt ? <span className="status-pill">Evaluation Run #{evaluation.attempt}</span> : null}
               </header>
 
-              {!isClassificationTask ? (
+              {!dashboardSupported ? (
                 <div className="placeholder-card">
                   <p>Dashboard not supported yet for this task.</p>
                 </div>
               ) : null}
 
-              {isClassificationTask && isEvaluationLoading ? (
+              {dashboardSupported && isEvaluationLoading ? (
                 <div className="placeholder-card">
                   <p>Loading evaluation dashboard...</p>
                 </div>
               ) : null}
 
-              {isClassificationTask && !isEvaluationLoading && evaluationError ? (
+              {dashboardSupported && !isEvaluationLoading && evaluationError ? (
                 <div className="placeholder-card">
                   <p>{evaluationError}</p>
                 </div>
               ) : null}
 
-              {isClassificationTask && !isEvaluationLoading && !evaluationError && evaluation ? (
+              {dashboardSupported && !isEvaluationLoading && !evaluationError ? (
                 <>
                   <div className="experiment-card">
                     <div className="experiment-analytics-header">
                       <h4>Metrics Trends</h4>
                       <div className="experiment-analytics-controls">
                         <div className="experiment-tab-row">
-                          <button
-                            type="button"
-                            className={`ghost-button ${dashboardChartTab === "loss" ? "active-toggle" : ""}`}
-                            onClick={() => setDashboardChartTab("loss")}
-                          >
-                            Loss
-                          </button>
-                          <button
-                            type="button"
-                            className={`ghost-button ${dashboardChartTab === "accuracy" ? "active-toggle" : ""}`}
-                            onClick={() => setDashboardChartTab("accuracy")}
-                          >
-                            Accuracy
-                          </button>
-                          <button
-                            type="button"
-                            className={`ghost-button ${dashboardChartTab === "prf" ? "active-toggle" : ""}`}
-                            onClick={() => setDashboardChartTab("prf")}
-                          >
-                            F1 / Precision / Recall
-                          </button>
+                          {dashboardTabs.map((tab) => (
+                            <button
+                              key={tab.key}
+                              type="button"
+                              className={`ghost-button ${dashboardChartTab === tab.key ? "active-toggle" : ""}`}
+                              onClick={() => setDashboardChartTab(tab.key as "loss" | "accuracy" | "prf" | "map" | "runtime")}
+                            >
+                              {tab.label}
+                            </button>
+                          ))}
                         </div>
                         <label className="model-builder-checkbox">
                           <input
@@ -1757,13 +1758,39 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
                             transform={`rotate(-90 16 ${chartPadding + (chartInnerHeight / 2)})`}
                             textAnchor="middle"
                           >
-                            {dashboardChartTab === "loss" ? "Loss" : "Metric value"}{dashboardLogScale ? " (log10)" : ""}
+                            {dashboardChartTab === "loss" ? "Loss" : dashboardChartTab === "runtime" ? "Seconds" : "Metric value"}{dashboardLogScale ? " (log10)" : ""}
                           </text>
                         </svg>
                       )}
                     </div>
                   </div>
 
+                  {isDetectionTask ? (
+                    <div className="experiment-card">
+                      <div className="experiment-analytics-header">
+                        <h4>Detection Summary</h4>
+                      </div>
+                      <div className="experiment-runtime-grid">
+                        <span>Task</span>
+                        <strong>{task}</strong>
+                        <span>Best checkpoint</span>
+                        <strong>{formatCheckpoint(checkpointIndex.best_metric)}</strong>
+                        <span>Latest checkpoint</span>
+                        <strong>{formatCheckpoint(checkpointIndex.latest)}</strong>
+                        <span>Validation mAP@50</span>
+                        <strong>{typeof detectionOverallMap50 === "number" ? detectionOverallMap50.toFixed(4) : "-"}</strong>
+                        <span>Validation mAP@50:95</span>
+                        <strong>{typeof detectionOverallMap50_95 === "number" ? detectionOverallMap50_95.toFixed(4) : "-"}</strong>
+                        <span>Classes</span>
+                        <strong>{classNames.length > 0 ? classNames.join(", ") : "-"}</strong>
+                        <span>Validation split</span>
+                        <strong>{evaluation?.split ?? "val"}</strong>
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {isClassificationTask && evaluation ? (
+                  <>
                   <div className="experiment-card">
                     <div className="experiment-analytics-header">
                       <h4>Confusion Matrix (Validation)</h4>
@@ -1929,6 +1956,8 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
                       )}
                     </div>
                   </div>
+                  </>
+                  ) : null}
                 </>
               ) : null}
             </section>

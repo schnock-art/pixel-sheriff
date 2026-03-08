@@ -66,7 +66,75 @@ function filterPredictionRows(rows, options = {}) {
   return filtered.slice(0, limit);
 }
 
+function dashboardTabsForTask(task) {
+  if (task === "detection") {
+    return [
+      { key: "loss", label: "Loss" },
+      { key: "map", label: "mAP" },
+      { key: "runtime", label: "Runtime" },
+    ];
+  }
+  if (task === "classification") {
+    return [
+      { key: "loss", label: "Loss" },
+      { key: "accuracy", label: "Accuracy" },
+      { key: "prf", label: "F1 / Precision / Recall" },
+    ];
+  }
+  return [];
+}
+
+function dashboardSeriesForTask(task, tab) {
+  if (task === "detection") {
+    if (tab === "loss") {
+      return [
+        { key: "train_loss", label: "train loss", color: "#cc6f36" },
+      ];
+    }
+    if (tab === "map") {
+      return [
+        { key: "val_map", label: "val mAP@50", color: "#2f6fca" },
+        { key: "val_map_50_95", label: "val mAP@50:95", color: "#2f9d58" },
+      ];
+    }
+    if (tab === "runtime") {
+      return [
+        { key: "epoch_seconds", label: "epoch seconds", color: "#5b6fd1" },
+        { key: "eta_seconds", label: "eta seconds", color: "#c96262" },
+      ];
+    }
+    return [];
+  }
+
+  if (task === "classification") {
+    if (tab === "loss") {
+      return [
+        { key: "train_loss", label: "train loss", color: "#cc6f36" },
+        { key: "val_loss", label: "val loss", color: "#c96262" },
+      ];
+    }
+    if (tab === "accuracy") {
+      return [
+        { key: "train_accuracy", label: "train accuracy", color: "#2f9d58" },
+        { key: "val_accuracy", label: "val accuracy", color: "#2f6fca" },
+      ];
+    }
+    if (tab === "prf") {
+      return [
+        { key: "val_macro_f1", label: "val macro f1", color: "#2f6fca" },
+        { key: "val_macro_precision", label: "val macro precision", color: "#2f9d58" },
+        { key: "val_macro_recall", label: "val macro recall", color: "#cc6f36" },
+      ];
+    }
+    return [];
+  }
+
+  return [];
+}
+
 module.exports = {
+  dashboardSeriesForTask,
+  dashboardTabsForTask,
   normalizeConfusion,
   filterPredictionRows,
 };

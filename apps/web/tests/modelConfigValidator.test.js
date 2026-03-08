@@ -92,3 +92,65 @@ test("validateModelConfigDraft accepts multi-label classification loss type", ()
   const result = validateModelConfigDraft(config);
   assert.equal(result.isValid, true);
 });
+
+test("validateModelConfigDraft accepts SSD Lite detection configs", () => {
+  const config = buildValidConfig();
+  config.source_dataset.task = "detection";
+  config.source_dataset.num_classes = 3;
+  config.source_dataset.class_order = ["flower", "bee", "bird"];
+  config.source_dataset.class_names = ["Flower", "Bee", "Bird"];
+  config.input.input_size = [320, 320];
+  config.architecture.family = "ssdlite320_mobilenet_v3_large";
+  config.architecture.backbone.name = "mobilenet_v3_large";
+  config.architecture.neck.type = "none";
+  config.architecture.head.type = "ssdlite";
+  config.architecture.head.num_classes = 3;
+  config.loss.type = "ssdlite_default";
+  config.outputs.primary.name = "coco_detections";
+  config.outputs.primary.task = "detection";
+  config.outputs.primary.format = "coco_detections";
+  config.export.onnx.output_names = ["coco_detections"];
+
+  const result = validateModelConfigDraft(config);
+  assert.equal(result.isValid, true);
+});
+
+test("validateModelConfigDraft rejects SSD Lite configs with non-required image size", () => {
+  const config = buildValidConfig();
+  config.source_dataset.task = "detection";
+  config.source_dataset.num_classes = 3;
+  config.source_dataset.class_order = ["flower", "bee", "bird"];
+  config.source_dataset.class_names = ["Flower", "Bee", "Bird"];
+  config.input.input_size = [224, 224];
+  config.architecture.family = "ssdlite320_mobilenet_v3_large";
+  config.architecture.backbone.name = "mobilenet_v3_large";
+  config.architecture.neck.type = "none";
+  config.architecture.head.type = "ssdlite";
+  config.architecture.head.num_classes = 3;
+  config.loss.type = "ssdlite_default";
+  config.outputs.primary.name = "coco_detections";
+  config.outputs.primary.task = "detection";
+  config.outputs.primary.format = "coco_detections";
+  config.export.onnx.output_names = ["coco_detections"];
+
+  const result = validateModelConfigDraft(config);
+  assert.equal(result.isValid, false);
+  assert.ok(result.errors.some((issue) => issue.path === "$.input.input_size" && /requires input_size \[320, 320\]/.test(issue.message)));
+});
+
+test("validateModelConfigDraft rejects detection families outside their square size contract", () => {
+  const config = buildValidConfig();
+  config.source_dataset.task = "detection";
+  config.input.input_size = [250, 250];
+  config.architecture.family = "retinanet";
+  config.architecture.head.type = "retinanet";
+  config.loss.type = "retinanet_default";
+  config.outputs.primary.name = "coco_detections";
+  config.outputs.primary.task = "detection";
+  config.outputs.primary.format = "coco_detections";
+  config.export.onnx.output_names = ["coco_detections"];
+
+  const result = validateModelConfigDraft(config);
+  assert.equal(result.isValid, false);
+  assert.ok(result.errors.some((issue) => issue.path === "$.input.input_size" && /increments of 32 from 224/.test(issue.message)));
+});

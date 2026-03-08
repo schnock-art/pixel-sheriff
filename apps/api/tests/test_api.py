@@ -1161,6 +1161,90 @@ async def test_project_model_update_persists_valid_config(client: AsyncClient) -
 
 
 @pytest.mark.asyncio
+async def test_project_model_update_accepts_ssdlite_detection_config(client: AsyncClient) -> None:
+    project_id, _manifest = await _create_detection_project_with_manifest(client, project_name="model-update-ssdlite")
+
+    created = await client.post(f"/api/v1/projects/{project_id}/models", json={})
+    assert created.status_code == 200
+    created_payload = created.json()
+    model_id = created_payload["id"]
+    updated_config = created_payload["config"]
+    updated_config["input"]["input_size"] = [320, 320]
+    updated_config["architecture"] = {
+        "family": "ssdlite320_mobilenet_v3_large",
+        "framework": "torchvision",
+        "precision": "fp32",
+        "backbone": {"name": "mobilenet_v3_large", "pretrained": True},
+        "neck": {"type": "none"},
+        "head": {"type": "ssdlite", "num_classes": updated_config["source_dataset"]["num_classes"]},
+    }
+    updated_config["loss"] = {"type": "ssdlite_default"}
+    updated_config["outputs"]["primary"] = {
+        "name": "coco_detections",
+        "type": "task_output",
+        "task": "detection",
+        "format": "coco_detections",
+    }
+    updated_config["export"]["onnx"]["output_names"] = ["coco_detections"]
+
+    update_response = await client.put(
+        f"/api/v1/projects/{project_id}/models/{model_id}",
+        json={"config_json": updated_config},
+    )
+    assert update_response.status_code == 200
+    update_payload = update_response.json()
+    assert update_payload["config_json"]["input"]["input_size"] == [320, 320]
+    assert update_payload["config_json"]["architecture"]["family"] == "ssdlite320_mobilenet_v3_large"
+    assert update_payload["config_json"]["architecture"]["backbone"]["name"] == "mobilenet_v3_large"
+    assert update_payload["config_json"]["loss"]["type"] == "ssdlite_default"
+
+
+@pytest.mark.asyncio
+async def test_project_model_update_rejects_ssdlite_detection_config_with_invalid_input_size(client: AsyncClient) -> None:
+    project_id, _manifest = await _create_detection_project_with_manifest(client, project_name="model-update-ssdlite-invalid-size")
+
+    created = await client.post(f"/api/v1/projects/{project_id}/models", json={})
+    assert created.status_code == 200
+    created_payload = created.json()
+    model_id = created_payload["id"]
+    updated_config = created_payload["config"]
+    updated_config["input"]["input_size"] = [224, 224]
+    updated_config["architecture"] = {
+        "family": "ssdlite320_mobilenet_v3_large",
+        "framework": "torchvision",
+        "precision": "fp32",
+        "backbone": {"name": "mobilenet_v3_large", "pretrained": True},
+        "neck": {"type": "none"},
+        "head": {"type": "ssdlite", "num_classes": updated_config["source_dataset"]["num_classes"]},
+    }
+    updated_config["loss"] = {"type": "ssdlite_default"}
+    updated_config["outputs"]["primary"] = {
+        "name": "coco_detections",
+        "type": "task_output",
+        "task": "detection",
+        "format": "coco_detections",
+    }
+    updated_config["export"]["onnx"]["output_names"] = ["coco_detections"]
+
+    update_response = await client.put(
+        f"/api/v1/projects/{project_id}/models/{model_id}",
+        json={"config_json": updated_config},
+    )
+    payload = assert_api_error(
+        update_response,
+        status_code=422,
+        code="validation_error",
+        message="Model config validation failed",
+    )
+    issues = payload["error"]["details"]["issues"]
+    assert isinstance(issues, list)
+    assert any(
+        issue.get("path") == "input.input_size" and "requires input_size [320, 320]" in str(issue.get("message"))
+        for issue in issues
+    )
+
+
+@pytest.mark.asyncio
 async def test_project_model_update_returns_validation_error_for_invalid_config(client: AsyncClient) -> None:
     project_id, _manifest = await _create_detection_project_with_manifest(client, project_name="model-update-invalid")
 
