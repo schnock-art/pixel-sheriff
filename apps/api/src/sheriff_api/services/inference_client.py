@@ -12,6 +12,7 @@ _TASK_INFER_ENDPOINT: dict[str, str] = {
 
 _TASK_WARMUP_ENDPOINT: dict[str, str] = {
     "classification": "/infer/classification/warmup",
+    "bbox": "/infer/detection/warmup",
 }
 
 
@@ -43,9 +44,18 @@ class InferenceClient:
     async def infer_segmentation(self, payload: dict[str, Any]) -> dict[str, Any]:
         return await self.infer("segmentation", payload)
 
-    async def warmup_classification(self, payload: dict[str, Any]) -> dict[str, Any]:
+    async def warmup(self, task_kind: str, payload: dict[str, Any]) -> dict[str, Any]:
+        endpoint = _TASK_WARMUP_ENDPOINT.get(task_kind)
+        if endpoint is None:
+            raise ValueError(f"Unsupported task kind for warmup: {task_kind!r}")
         async with httpx.AsyncClient(timeout=self._timeout) as client:
-            response = await client.post(f"{self._base_url}/infer/classification/warmup", json=payload)
+            response = await client.post(f"{self._base_url}{endpoint}", json=payload)
         response.raise_for_status()
         parsed = response.json()
         return parsed if isinstance(parsed, dict) else {}
+
+    async def warmup_classification(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return await self.warmup("classification", payload)
+
+    async def warmup_detection(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return await self.warmup("bbox", payload)

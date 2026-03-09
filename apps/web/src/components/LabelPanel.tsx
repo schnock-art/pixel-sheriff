@@ -57,12 +57,18 @@ interface LabelPanelProps {
   onHoverObject: (objectId: string | null) => void;
   onSelectObject: (objectId: string | null) => void;
   onDeleteSelectedObject: () => void;
-  activeDeploymentName?: string | null;
-  activeDeploymentDevicePreference?: string | null;
+  availableDeployments?: Array<{ deployment_id: string; name: string; device_preference: string }>;
+  selectedDeploymentId?: string | null;
+  selectedDeploymentName?: string | null;
+  selectedDeploymentDevicePreference?: string | null;
   lastInferenceDeviceSelected?: string | null;
   suggestionPredictions?: Array<{ class_id: string; class_name: string; score: number }>;
+  suggestionBoxes?: Array<{ class_id: string; class_name: string; score: number; bbox: number[] }>;
+  suggestionScoreThreshold?: number;
+  onChangeSuggestionScoreThreshold?: (value: number) => void;
   isSuggesting?: boolean;
-  hasActiveDeployment?: boolean;
+  hasCompatibleDeployment?: boolean;
+  onChangeSelectedDeploymentId?: (deploymentId: string) => void;
   onSuggest?: () => void;
   onApplySuggestedLabel?: (categoryId: string) => void;
 }
@@ -98,12 +104,18 @@ export function LabelPanel({
   onHoverObject,
   onSelectObject,
   onDeleteSelectedObject,
-  activeDeploymentName = null,
-  activeDeploymentDevicePreference = null,
+  availableDeployments = [],
+  selectedDeploymentId = null,
+  selectedDeploymentName = null,
+  selectedDeploymentDevicePreference = null,
   lastInferenceDeviceSelected = null,
   suggestionPredictions = [],
+  suggestionBoxes = [],
+  suggestionScoreThreshold = 0.3,
+  onChangeSuggestionScoreThreshold,
   isSuggesting = false,
-  hasActiveDeployment = false,
+  hasCompatibleDeployment = false,
+  onChangeSelectedDeploymentId,
   onSuggest,
   onApplySuggestedLabel,
 }: LabelPanelProps) {
@@ -409,32 +421,71 @@ export function LabelPanel({
         </>
       )}
 
-      {annotationMode === "labels" ? (
+      {annotationMode === "labels" || annotationMode === "bbox" ? (
         <section className="placeholder-card">
           <h4>Suggestions</h4>
-          {hasActiveDeployment ? (
+          {hasCompatibleDeployment ? (
             <>
+              <label className="project-field">
+                <span>Model</span>
+                <select
+                  value={selectedDeploymentId ?? ""}
+                  onChange={(event) => onChangeSelectedDeploymentId?.(event.target.value)}
+                >
+                  {availableDeployments.map((deployment) => (
+                    <option key={deployment.deployment_id} value={deployment.deployment_id}>
+                      {deployment.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
               <p className="labels-empty">
-                Model: {activeDeploymentName ?? "-"} | preference: {activeDeploymentDevicePreference ?? "-"} | last device: {lastInferenceDeviceSelected ?? "-"}
+                Model: {selectedDeploymentName ?? "-"} | preference: {selectedDeploymentDevicePreference ?? "-"} | last device: {lastInferenceDeviceSelected ?? "-"}
               </p>
+              {annotationMode === "bbox" ? (
+                <label className="project-field">
+                  <span>Confidence threshold</span>
+                  <input
+                    type="number"
+                    min="0"
+                    max="1"
+                    step="0.05"
+                    value={suggestionScoreThreshold}
+                    onChange={(event) => onChangeSuggestionScoreThreshold?.(Number.parseFloat(event.target.value) || 0)}
+                  />
+                </label>
+              ) : null}
               <div className="label-actions">
                 <button type="button" className="ghost-button" onClick={onSuggest} disabled={isSuggesting || !onSuggest}>
                   {isSuggesting ? "Suggesting..." : "Suggest"}
                 </button>
-                <button
-                  type="button"
-                  className="primary-button"
-                  onClick={() => onApplySuggestedLabel?.(suggestionPredictions[0].class_id)}
-                  disabled={suggestionPredictions.length === 0 || !onApplySuggestedLabel}
-                >
-                  Apply top-1
-                </button>
+                {annotationMode === "labels" ? (
+                  <button
+                    type="button"
+                    className="primary-button"
+                    onClick={() => onApplySuggestedLabel?.(suggestionPredictions[0].class_id)}
+                    disabled={suggestionPredictions.length === 0 || !onApplySuggestedLabel}
+                  >
+                    Apply top-1
+                  </button>
+                ) : null}
               </div>
-              {suggestionPredictions.length > 0 ? (
+              {annotationMode === "labels" && suggestionPredictions.length > 0 ? (
                 <ol className="label-list">
                   {suggestionPredictions.map((row) => (
                     <li key={`${row.class_id}-${row.class_name}`}>
                       <button type="button" className="label-item" onClick={() => onApplySuggestedLabel?.(row.class_id)}>
+                        <span>{row.class_name}</span>
+                        <span className="label-check">{row.score.toFixed(3)}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ol>
+              ) : annotationMode === "bbox" && suggestionBoxes.length > 0 ? (
+                <ol className="label-list">
+                  {suggestionBoxes.map((row, index) => (
+                    <li key={`${row.class_id}-${index}`}>
+                      <button type="button" className="label-item">
                         <span>{row.class_name}</span>
                         <span className="label-check">{row.score.toFixed(3)}</span>
                       </button>
@@ -446,7 +497,7 @@ export function LabelPanel({
               )}
             </>
           ) : (
-            <p className="labels-empty">No active deployment. Open Deploy tab to configure one.</p>
+            <p className="labels-empty">No deployed models for this task. Open Deploy tab to configure one.</p>
           )}
         </section>
       ) : null}

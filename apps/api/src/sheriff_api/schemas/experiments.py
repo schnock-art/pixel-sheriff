@@ -150,6 +150,7 @@ class ProjectExperimentSummary(BaseModel):
     id: str
     project_id: str
     task_id: str | None = None
+    task: str | None = None
     model_id: str
     name: str
     created_at: datetime

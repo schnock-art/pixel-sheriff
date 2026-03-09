@@ -15,6 +15,7 @@ from .schemas import (
     InferClassificationWarmupRequest,
     InferDetectionRequest,
     InferDetectionResponse,
+    InferDetectionWarmupRequest,
     InferSegmentationRequest,
     InferSegmentationResponse,
     InferWarmupResponse,
@@ -53,6 +54,40 @@ def _run_onnx(session: object, tensor: np.ndarray) -> np.ndarray:
     outputs = session.run(None, {input_name: tensor})
     first = outputs[0]
     return np.asarray(first, dtype=np.float32)
+
+
+async def _warmup_session(
+    *,
+    cache: SessionCache,
+    onnx_path: Path,
+    metadata_path: Path,
+    device_preference: str,
+    model_key: str | None,
+) -> InferWarmupResponse:
+    if not onnx_path.exists() or not metadata_path.exists():
+        raise HTTPException(status_code=404, detail={"code": "artifact_not_found", "message": "Inference artifacts not found"})
+
+    resolved_model_key = model_key or await asyncio.to_thread(sha256_file, onnx_path)
+    onnx_hash = await asyncio.to_thread(sha256_file, onnx_path)
+    if onnx_hash != resolved_model_key:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "model_key_mismatch", "message": "Provided model_key does not match ONNX content"},
+        )
+
+    try:
+        _session, device_selected = await cache.acquire_session(
+            model_key=resolved_model_key,
+            onnx_path=onnx_path,
+            device_preference=device_preference,
+        )
+    except CacheBusyError as exc:
+        raise HTTPException(status_code=503, detail={"code": "cache_busy", "message": "Inference cache is busy"}) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail={"code": "session_load_failed", "message": str(exc)}) from exc
+    await cache.release(resolved_model_key, device_selected)
+
+    return InferWarmupResponse(device_selected=device_selected, warmed=True)
 
 
 def create_app() -> FastAPI:
@@ -123,30 +158,13 @@ def create_app() -> FastAPI:
             )
         except ValueError as exc:
             raise HTTPException(status_code=422, detail={"code": "path_invalid", "message": str(exc)}) from exc
-        if not onnx_path.exists() or not metadata_path.exists():
-            raise HTTPException(status_code=404, detail={"code": "artifact_not_found", "message": "Inference artifacts not found"})
-
-        model_key = payload.model_key or await asyncio.to_thread(sha256_file, onnx_path)
-        onnx_hash = await asyncio.to_thread(sha256_file, onnx_path)
-        if onnx_hash != model_key:
-            raise HTTPException(
-                status_code=409,
-                detail={"code": "model_key_mismatch", "message": "Provided model_key does not match ONNX content"},
-            )
-
-        try:
-            _session, device_selected = await cache.acquire_session(
-                model_key=model_key,
-                onnx_path=onnx_path,
-                device_preference=payload.device_preference,
-            )
-        except CacheBusyError as exc:
-            raise HTTPException(status_code=503, detail={"code": "cache_busy", "message": "Inference cache is busy"}) from exc
-        except Exception as exc:
-            raise HTTPException(status_code=503, detail={"code": "session_load_failed", "message": str(exc)}) from exc
-        await cache.release(model_key, device_selected)
-
-        return InferWarmupResponse(device_selected=device_selected, warmed=True)
+        return await _warmup_session(
+            cache=cache,
+            onnx_path=onnx_path,
+            metadata_path=metadata_path,
+            device_preference=payload.device_preference,
+            model_key=payload.model_key,
+        )
 
     @app.post("/infer/detection", response_model=InferDetectionResponse)
     async def infer_detection(payload: InferDetectionRequest) -> InferDetectionResponse:
@@ -188,6 +206,25 @@ def create_app() -> FastAPI:
             return InferDetectionResponse(device_selected=device_selected, boxes=boxes)
         finally:
             await cache.release(model_key, device_selected)
+
+    @app.post("/infer/detection/warmup", response_model=InferWarmupResponse)
+    async def warmup_detection(payload: InferDetectionWarmupRequest) -> InferWarmupResponse:
+        try:
+            onnx_path, metadata_path, _asset_path = _resolve_paths(
+                storage_root,
+                onnx_relpath=payload.onnx_relpath,
+                metadata_relpath=payload.metadata_relpath,
+                asset_relpath=None,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail={"code": "path_invalid", "message": str(exc)}) from exc
+        return await _warmup_session(
+            cache=cache,
+            onnx_path=onnx_path,
+            metadata_path=metadata_path,
+            device_preference=payload.device_preference,
+            model_key=payload.model_key,
+        )
 
     @app.post("/infer/segmentation", response_model=InferSegmentationResponse)
     async def infer_segmentation(payload: InferSegmentationRequest) -> InferSegmentationResponse:

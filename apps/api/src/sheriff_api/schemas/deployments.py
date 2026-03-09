@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -69,6 +69,7 @@ class PredictRequest(BaseModel):
     asset_id: str
     deployment_id: str | None = None
     top_k: int = Field(default=5, ge=1, le=100)
+    score_threshold: float = Field(default=0.3, ge=0.0, le=1.0)
 
 
 class PredictPrediction(BaseModel):
@@ -78,14 +79,35 @@ class PredictPrediction(BaseModel):
     score: float
 
 
-class PredictResponse(BaseModel):
+class PredictDetectionBox(BaseModel):
+    class_index: int = Field(ge=0)
+    class_id: str
+    class_name: str
+    score: float
+    bbox: list[float] = Field(description="[x, y, width, height] in pixel coordinates")
+
+
+class PredictClassificationResponse(BaseModel):
     asset_id: str
     deployment_id: str
-    task: DeploymentTask = "classification"
+    task: Literal["classification"] = "classification"
     device_selected: Literal["cuda", "cpu"]
     predictions: list[PredictPrediction] = Field(default_factory=list)
     deployment_name: str | None = None
     device_preference: DevicePreference | None = None
+
+
+class PredictBBoxResponse(BaseModel):
+    asset_id: str
+    deployment_id: str
+    task: Literal["bbox"] = "bbox"
+    device_selected: Literal["cuda", "cpu"]
+    boxes: list[PredictDetectionBox] = Field(default_factory=list)
+    deployment_name: str | None = None
+    device_preference: DevicePreference | None = None
+
+
+PredictResponse = Annotated[PredictClassificationResponse | PredictBBoxResponse, Field(discriminator="task")]
 
 
 class InferencePrediction(BaseModel):

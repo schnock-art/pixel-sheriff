@@ -258,6 +258,7 @@ export interface ProjectExperimentSummary {
   id: string;
   project_id: string;
   task_id: string | null;
+  task?: string | null;
   model_id: string;
   name: string;
   created_at: string;
@@ -485,6 +486,7 @@ export interface PredictPayload {
   asset_id: string;
   deployment_id?: string | null;
   top_k?: number;
+  score_threshold?: number;
 }
 
 export interface PredictPrediction {
@@ -494,7 +496,15 @@ export interface PredictPrediction {
   score: number;
 }
 
-export interface PredictResponse {
+export interface PredictDetectionBox {
+  class_index: number;
+  class_id: string;
+  class_name: string;
+  score: number;
+  bbox: number[];
+}
+
+export interface PredictClassificationResponse {
   asset_id: string;
   deployment_id: string;
   task: "classification";
@@ -503,6 +513,18 @@ export interface PredictResponse {
   deployment_name?: string | null;
   device_preference?: DeploymentDevicePreference | null;
 }
+
+export interface PredictBBoxResponse {
+  asset_id: string;
+  deployment_id: string;
+  task: "bbox";
+  device_selected: "cuda" | "cpu";
+  boxes: PredictDetectionBox[];
+  deployment_name?: string | null;
+  device_preference?: DeploymentDevicePreference | null;
+}
+
+export type PredictResponse = PredictClassificationResponse | PredictBBoxResponse;
 
 export type ExperimentEvent =
   | { type: "status"; status: ExperimentStatus; attempt?: number; job_id?: string; ts?: string; message?: string }

@@ -60,6 +60,13 @@ class InferDetectionResponse(BaseModel):
     boxes: list[DetectionBox]
 
 
+class InferDetectionWarmupRequest(BaseModel):
+    onnx_relpath: str
+    metadata_relpath: str
+    device_preference: Literal["auto", "cuda", "cpu"] = "auto"
+    model_key: str | None = None
+
+
 # --- Segmentation ---
 
 class InferSegmentationRequest(BaseModel):

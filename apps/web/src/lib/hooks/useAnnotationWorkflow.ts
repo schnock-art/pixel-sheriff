@@ -274,6 +274,12 @@ export function useAnnotationWorkflow({
     setSelectedObjectId(object.id);
   }
 
+  function replaceGeometryObjects(nextObjects: GeometryObject[]) {
+    const normalizedObjects = normalizeGeometryObjectInput(nextObjects);
+    stageGeometry(normalizedObjects);
+    setSelectedObjectId(normalizedObjects[0]?.id ?? null);
+  }
+
   function deleteSelectedGeometryObject() {
     if (!selectedObjectId) return;
     const next = currentObjects.filter((object) => object.id !== selectedObjectId);
@@ -453,6 +459,7 @@ export function useAnnotationWorkflow({
     clearSelectedLabels,
     assignSelectedGeometryCategory,
     upsertGeometryObject,
+    replaceGeometryObjects,
     deleteSelectedGeometryObject,
     handleSubmit,
     resetAnnotationWorkflow,

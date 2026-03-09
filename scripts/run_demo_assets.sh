@@ -25,18 +25,18 @@ case "$MODE" in
 esac
 
 ensure_stack() {
-  echo "Building Docker images for current web/api sources..."
+  echo "Building isolated demo images for current web/api sources..."
   (
     cd "$ROOT_DIR"
-    "$DOCKER_BIN" compose build api web-demo
-    "$DOCKER_BIN" compose up -d db redis api web-demo
+    "$DOCKER_BIN" compose --profile demo build api-demo trainer-demo web-demo
+    "$DOCKER_BIN" compose --profile demo up -d db-demo redis-demo trainer-demo api-demo web-demo
   )
 
   local attempts=60
   until (
     cd "$ROOT_DIR" &&
-    "$DOCKER_BIN" compose exec -T api python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health').read()" >/dev/null 2>&1 &&
-    "$DOCKER_BIN" compose exec -T web-demo sh -lc "wget -q -O - http://localhost:3000/projects >/dev/null"
+    "$DOCKER_BIN" compose --profile demo exec -T api-demo python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health').read()" >/dev/null 2>&1 &&
+    "$DOCKER_BIN" compose --profile demo exec -T web-demo sh -lc "wget -q -O - http://localhost:3000/projects >/dev/null"
   ); do
     attempts=$((attempts - 1))
     if [[ "$attempts" -le 0 ]]; then
@@ -50,7 +50,7 @@ ensure_stack() {
 run_demo_assets() {
   (
     cd "$ROOT_DIR"
-    "$DOCKER_BIN" compose run --rm demo-runner bash -lc "npm ci --cache /tmp/npm-cache && npm run demo:$MODE"
+    "$DOCKER_BIN" compose --profile demo run --rm demo-runner bash -lc "npm ci --cache /tmp/npm-cache && npm run demo:$MODE"
   )
 }
 

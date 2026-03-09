@@ -174,11 +174,6 @@ export default function ProjectAssetsWorkspace() {
     for (const label of allLabelRows) map.set(label.id, label.name);
     return map;
   }, [allLabelRows]);
-  const suggestionState = useWorkspaceSuggestions({
-    selectedProjectId,
-    currentAssetId: treeState.currentAsset?.id ?? null,
-    setMessage,
-  });
 
   const viewerAsset = useMemo(
     () =>
@@ -222,10 +217,19 @@ export default function ProjectAssetsWorkspace() {
     clearSelectedLabels,
     assignSelectedGeometryCategory,
     upsertGeometryObject,
+    replaceGeometryObjects,
     deleteSelectedGeometryObject,
     handleSubmit,
     resetAnnotationWorkflow,
   } = annotationWorkflow;
+  const suggestionState = useWorkspaceSuggestions({
+    selectedProjectId,
+    selectedTaskId: selectedTask?.id ?? null,
+    currentAssetId: treeState.currentAsset?.id ?? null,
+    selectedTaskKind: selectedTask?.kind ?? null,
+    onApplyDetectionSuggestions: replaceGeometryObjects,
+    setMessage,
+  });
   const geometryObjectRows = useMemo(
     () =>
       currentObjects.map((object) => ({
@@ -785,12 +789,18 @@ export default function ProjectAssetsWorkspace() {
             onHoverObject={setHoveredGeometryObjectId}
             onSelectObject={handleSelectGeometryObject}
             onDeleteSelectedObject={deleteSelectedGeometryObject}
-            activeDeploymentName={suggestionState.activeDeployment?.name ?? null}
-            activeDeploymentDevicePreference={suggestionState.activeDeployment?.device_preference ?? null}
+            availableDeployments={suggestionState.availableDeployments}
+            selectedDeploymentId={suggestionState.selectedDeploymentId}
+            selectedDeploymentName={suggestionState.selectedDeployment?.name ?? null}
+            selectedDeploymentDevicePreference={suggestionState.selectedDeployment?.device_preference ?? null}
             lastInferenceDeviceSelected={suggestionState.lastInferenceDeviceSelected}
             suggestionPredictions={suggestionState.suggestionPredictions}
+            suggestionBoxes={suggestionState.suggestionBoxes}
+            suggestionScoreThreshold={suggestionState.suggestionScoreThreshold}
+            onChangeSuggestionScoreThreshold={suggestionState.setSuggestionScoreThreshold}
             isSuggesting={suggestionState.isSuggesting}
-            hasActiveDeployment={Boolean(suggestionState.activeDeployment)}
+            hasCompatibleDeployment={suggestionState.availableDeployments.length > 0}
+            onChangeSelectedDeploymentId={suggestionState.setSelectedDeploymentId}
             onSuggest={suggestionState.handleSuggest}
             onApplySuggestedLabel={handleApplySuggestedLabel}
           />

@@ -1485,6 +1485,71 @@ async def _create_project_model(client: AsyncClient, *, project_name: str) -> tu
     return project_id, created.json()["id"]
 
 
+async def _create_detection_project_model_with_categories(
+    client: AsyncClient,
+    *,
+    project_name: str,
+    category_names: list[str],
+) -> tuple[str, str, str, list[str]]:
+    project = (await client.post("/api/v1/projects", json={"name": project_name, "task_type": "bbox"})).json()
+    project_id = project["id"]
+    task_id = project["default_task_id"]
+
+    category_ids: list[str] = []
+    for index, name in enumerate(category_names):
+        category_response = await client.post(
+            f"/api/v1/projects/{project_id}/categories",
+            json={"task_id": task_id, "name": name, "display_order": index},
+        )
+        assert category_response.status_code == 200
+        category_ids.append(category_response.json()["id"])
+
+    upload = await client.post(
+        f"/api/v1/projects/{project_id}/assets/upload",
+        files={"file": ("sample.jpg", b"fake-image-bytes", "image/jpeg")},
+    )
+    assert upload.status_code == 200
+    asset = upload.json()
+
+    annotation = await client.post(
+        f"/api/v1/projects/{project_id}/annotations",
+        json={
+            "asset_id": asset["id"],
+            "task_id": task_id,
+            "status": "approved",
+            "payload_json": {
+                "version": "2.0",
+                "classification": {"category_ids": [category_ids[0]], "primary_category_id": category_ids[0]},
+                "image_basis": {"width": 100, "height": 80},
+                "objects": [
+                    {"id": "bbox-1", "kind": "bbox", "category_id": category_ids[0], "bbox": [10, 10, 20, 15]},
+                ],
+            },
+        },
+    )
+    assert annotation.status_code == 200
+
+    created_dataset = await client.post(
+        f"/api/v1/projects/{project_id}/datasets/versions",
+        json={
+            "name": "detection-v1",
+            "task_id": task_id,
+            "selection": {"mode": "filter_snapshot", "filters": {"include_labeled_only": True}},
+            "split": {
+                "seed": 42,
+                "ratios": {"train": 1.0, "val": 0.0, "test": 0.0},
+                "stratify": {"enabled": False, "by": "label_primary"},
+            },
+            "set_active": True,
+        },
+    )
+    assert created_dataset.status_code == 200
+
+    created_model = await client.post(f"/api/v1/projects/{project_id}/models", json={})
+    assert created_model.status_code == 200
+    return project_id, created_model.json()["id"], task_id, category_ids
+
+
 async def _create_classification_project_model(client: AsyncClient, *, project_name: str) -> tuple[str, str, str]:
     project_id, model_id, task_id, _category_ids = await _create_classification_project_model_with_categories(
         client,
@@ -2094,6 +2159,44 @@ async def test_create_deployment_resolves_onnx_and_persists_model_key(client: As
 
 
 @pytest.mark.asyncio
+async def test_create_detection_deployment_maps_experiment_task_to_bbox(client: AsyncClient) -> None:
+    project_id, model_id, task_id, category_ids = await _create_detection_project_model_with_categories(
+        client,
+        project_name="deploy-detection",
+        category_names=["boat"],
+    )
+    created = await client.post(
+        f"/api/v1/projects/{project_id}/experiments",
+        json={"model_id": model_id, "name": "detect-exp"},
+    )
+    assert created.status_code == 200
+    experiment_id = created.json()["id"]
+    _seed_experiment_run_artifacts(project_id=project_id, experiment_id=experiment_id, attempt=1, include_onnx=True)
+
+    settings = get_settings()
+    metadata_path = Path(settings.storage_root) / "experiments" / project_id / experiment_id / "runs" / "1" / "onnx" / "onnx.metadata.json"
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    metadata["class_ids"] = category_ids
+    metadata["task"] = "detection"
+    metadata_path.write_text(json.dumps(metadata, indent=2, sort_keys=True), encoding="utf-8")
+
+    response = await client.post(
+        f"/api/v1/projects/{project_id}/deployments",
+        json={
+            "name": "detect-deploy",
+            "task": "bbox",
+            "device_preference": "auto",
+            "source": {"experiment_id": experiment_id, "attempt": 1, "checkpoint_kind": "best_metric"},
+            "is_active": True,
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()["deployment"]
+    assert payload["task"] == "bbox"
+    assert payload["task_id"] == task_id
+
+
+@pytest.mark.asyncio
 async def test_predict_without_active_returns_no_active_deployment(client: AsyncClient) -> None:
     project = (await client.post("/api/v1/projects", json={"name": "predict-no-active"})).json()
     project_id = project["id"]
@@ -2170,6 +2273,190 @@ async def test_predict_maps_inference_predictions_with_class_ids(client: AsyncCl
 
 
 @pytest.mark.asyncio
+async def test_predict_detection_maps_inference_boxes_with_class_ids(client: AsyncClient) -> None:
+    project_id, model_id, _task_id, category_ids = await _create_detection_project_model_with_categories(
+        client,
+        project_name="predict-detection",
+        category_names=["boat", "buoy"],
+    )
+    upload = await client.post(
+        f"/api/v1/projects/{project_id}/assets/upload",
+        files={"file": ("sample.jpg", b"fake-image-bytes", "image/jpeg")},
+    )
+    assert upload.status_code == 200
+    asset_id = upload.json()["id"]
+
+    created = await client.post(
+        f"/api/v1/projects/{project_id}/experiments",
+        json={"model_id": model_id, "name": "predict-detect-exp"},
+    )
+    assert created.status_code == 200
+    experiment_id = created.json()["id"]
+    _seed_experiment_run_artifacts(project_id=project_id, experiment_id=experiment_id, attempt=1, include_onnx=True)
+
+    settings = get_settings()
+    metadata_path = Path(settings.storage_root) / "experiments" / project_id / experiment_id / "runs" / "1" / "onnx" / "onnx.metadata.json"
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    metadata["class_ids"] = category_ids
+    metadata["task"] = "detection"
+    metadata_path.write_text(json.dumps(metadata, indent=2, sort_keys=True), encoding="utf-8")
+
+    deployed = await client.post(
+        f"/api/v1/projects/{project_id}/deployments",
+        json={
+            "name": "detect-predict-deploy",
+            "task": "bbox",
+            "device_preference": "auto",
+            "source": {"experiment_id": experiment_id, "attempt": 1, "checkpoint_kind": "best_metric"},
+            "is_active": True,
+        },
+    )
+    assert deployed.status_code == 200
+
+    async def _infer(_payload: dict) -> dict:
+        return {
+            "device_selected": "cpu",
+            "boxes": [
+                {"class_index": 0, "score": 0.9, "bbox": [10, 20, 30, 40]},
+                {"class_index": 1, "score": 0.4, "bbox": [1, 2, 3, 4]},
+            ],
+        }
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(deployments_router.inference_client, "infer_detection", _infer)
+    response = await client.post(
+        f"/api/v1/projects/{project_id}/predict",
+        json={"asset_id": asset_id, "score_threshold": 0.55},
+    )
+    monkeypatch.undo()
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["task"] == "bbox"
+    assert payload["device_selected"] == "cpu"
+    assert payload["boxes"][0]["class_id"] == category_ids[0]
+    assert payload["boxes"][0]["class_name"] == "boat"
+    assert payload["boxes"][0]["bbox"] == [10.0, 20.0, 30.0, 40.0]
+
+
+@pytest.mark.asyncio
+async def test_predict_detection_maps_inference_boxes_with_class_names_fallback(client: AsyncClient) -> None:
+    project_id, model_id, _task_id, category_ids = await _create_detection_project_model_with_categories(
+        client,
+        project_name="predict-detection-fallback",
+        category_names=["boat", "buoy"],
+    )
+    upload = await client.post(
+        f"/api/v1/projects/{project_id}/assets/upload",
+        files={"file": ("sample.jpg", b"fake-image-bytes", "image/jpeg")},
+    )
+    assert upload.status_code == 200
+    asset_id = upload.json()["id"]
+
+    created = await client.post(
+        f"/api/v1/projects/{project_id}/experiments",
+        json={"model_id": model_id, "name": "predict-detect-exp-fallback"},
+    )
+    assert created.status_code == 200
+    experiment_id = created.json()["id"]
+    _seed_experiment_run_artifacts(project_id=project_id, experiment_id=experiment_id, attempt=1, include_onnx=True)
+
+    settings = get_settings()
+    metadata_path = Path(settings.storage_root) / "experiments" / project_id / experiment_id / "runs" / "1" / "onnx" / "onnx.metadata.json"
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    metadata.pop("class_ids", None)
+    metadata["class_order"] = ["boat", "buoy"]
+    metadata["class_names"] = ["boat", "buoy"]
+    metadata["task"] = "detection"
+    metadata_path.write_text(json.dumps(metadata, indent=2, sort_keys=True), encoding="utf-8")
+
+    deployed = await client.post(
+        f"/api/v1/projects/{project_id}/deployments",
+        json={
+            "name": "detect-predict-deploy-fallback",
+            "task": "bbox",
+            "device_preference": "auto",
+            "source": {"experiment_id": experiment_id, "attempt": 1, "checkpoint_kind": "best_metric"},
+            "is_active": True,
+        },
+    )
+    assert deployed.status_code == 200
+
+    async def _infer(_payload: dict) -> dict:
+        return {
+            "device_selected": "cpu",
+            "boxes": [{"class_index": 1, "score": 0.4, "bbox": [1, 2, 3, 4]}],
+        }
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(deployments_router.inference_client, "infer_detection", _infer)
+    response = await client.post(f"/api/v1/projects/{project_id}/predict", json={"asset_id": asset_id})
+    monkeypatch.undo()
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["boxes"][0]["class_id"] == category_ids[1]
+    assert payload["boxes"][0]["class_name"] == "buoy"
+
+
+@pytest.mark.asyncio
+async def test_predict_detection_rejects_invalid_class_index(client: AsyncClient) -> None:
+    project_id, model_id, _task_id, category_ids = await _create_detection_project_model_with_categories(
+        client,
+        project_name="predict-detection-mismatch",
+        category_names=["boat"],
+    )
+    upload = await client.post(
+        f"/api/v1/projects/{project_id}/assets/upload",
+        files={"file": ("sample.jpg", b"fake-image-bytes", "image/jpeg")},
+    )
+    assert upload.status_code == 200
+    asset_id = upload.json()["id"]
+
+    created = await client.post(
+        f"/api/v1/projects/{project_id}/experiments",
+        json={"model_id": model_id, "name": "predict-detect-exp-mismatch"},
+    )
+    assert created.status_code == 200
+    experiment_id = created.json()["id"]
+    _seed_experiment_run_artifacts(project_id=project_id, experiment_id=experiment_id, attempt=1, include_onnx=True)
+
+    settings = get_settings()
+    metadata_path = Path(settings.storage_root) / "experiments" / project_id / experiment_id / "runs" / "1" / "onnx" / "onnx.metadata.json"
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    metadata["class_ids"] = category_ids
+    metadata["task"] = "detection"
+    metadata_path.write_text(json.dumps(metadata, indent=2, sort_keys=True), encoding="utf-8")
+
+    deployed = await client.post(
+        f"/api/v1/projects/{project_id}/deployments",
+        json={
+            "name": "detect-predict-mismatch",
+            "task": "bbox",
+            "device_preference": "auto",
+            "source": {"experiment_id": experiment_id, "attempt": 1, "checkpoint_kind": "best_metric"},
+            "is_active": True,
+        },
+    )
+    assert deployed.status_code == 200
+
+    async def _infer(_payload: dict) -> dict:
+        return {
+            "device_selected": "cpu",
+            "boxes": [{"class_index": 3, "score": 0.9, "bbox": [10, 20, 30, 40]}],
+        }
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(deployments_router.inference_client, "infer_detection", _infer)
+    response = await client.post(f"/api/v1/projects/{project_id}/predict", json={"asset_id": asset_id})
+    monkeypatch.undo()
+    assert_api_error(
+        response,
+        status_code=409,
+        code="deployment_output_dim_mismatch",
+        message="Inference output does not match deployment class_ids",
+    )
+
+
+@pytest.mark.asyncio
 async def test_predict_returns_output_dim_mismatch(client: AsyncClient) -> None:
     project_id, model_id, _task_id, category_ids = await _create_classification_project_model_with_categories(
         client,
@@ -2226,6 +2513,52 @@ async def test_predict_returns_output_dim_mismatch(client: AsyncClient) -> None:
         code="deployment_output_dim_mismatch",
         message="Inference output does not match deployment class_ids",
     )
+
+
+@pytest.mark.asyncio
+async def test_warmup_deployment_supports_detection(client: AsyncClient) -> None:
+    project_id, model_id, _task_id, category_ids = await _create_detection_project_model_with_categories(
+        client,
+        project_name="warmup-detection",
+        category_names=["boat"],
+    )
+    created = await client.post(
+        f"/api/v1/projects/{project_id}/experiments",
+        json={"model_id": model_id, "name": "warmup-detect-exp"},
+    )
+    assert created.status_code == 200
+    experiment_id = created.json()["id"]
+    _seed_experiment_run_artifacts(project_id=project_id, experiment_id=experiment_id, attempt=1, include_onnx=True)
+
+    settings = get_settings()
+    metadata_path = Path(settings.storage_root) / "experiments" / project_id / experiment_id / "runs" / "1" / "onnx" / "onnx.metadata.json"
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    metadata["class_ids"] = category_ids
+    metadata["task"] = "detection"
+    metadata_path.write_text(json.dumps(metadata, indent=2, sort_keys=True), encoding="utf-8")
+
+    deployed = await client.post(
+        f"/api/v1/projects/{project_id}/deployments",
+        json={
+            "name": "warmup-detect-deploy",
+            "task": "bbox",
+            "device_preference": "auto",
+            "source": {"experiment_id": experiment_id, "attempt": 1, "checkpoint_kind": "best_metric"},
+            "is_active": True,
+        },
+    )
+    assert deployed.status_code == 200
+    deployment_id = deployed.json()["deployment"]["deployment_id"]
+
+    async def _warmup(_payload: dict) -> dict:
+        return {"device_selected": "cuda", "warmed": True}
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(deployments_router.inference_client, "warmup_detection", _warmup)
+    response = await client.post(f"/api/v1/projects/{project_id}/deployments/{deployment_id}/warmup")
+    monkeypatch.undo()
+    assert response.status_code == 200
+    assert response.json()["device_selected"] == "cuda"
 
 
 @pytest.mark.asyncio

@@ -16,6 +16,38 @@ services:
     ports:
       - "${REDIS_PORT:-6379}:6379"
 
+  db-test:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASS:-postgres}
+      POSTGRES_DB: ${TEST_DB_NAME:-pixel_sheriff_test}
+    volumes:
+      - postgres_test_data:/var/lib/postgresql/data
+    profiles:
+      - test
+
+  redis-test:
+    image: redis:7
+    profiles:
+      - test
+
+  db-demo:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASS:-postgres}
+      POSTGRES_DB: ${DEMO_DB_NAME:-pixel_sheriff_demo}
+    volumes:
+      - postgres_demo_data:/var/lib/postgresql/data
+    profiles:
+      - demo
+
+  redis-demo:
+    image: redis:7
+    profiles:
+      - demo
+
   trainer-base:
     image: ${TRAINER_BASE_TAG:-pixel-sheriff/trainer-base:cu129}
     build:
@@ -54,19 +86,19 @@ services:
       context: .
       dockerfile: apps/api/Dockerfile.test
     environment:
-      DB_HOST: ${DB_HOST:-db}
-      DB_PORT: ${DB_PORT:-5432}
+      DB_HOST: db-test
+      DB_PORT: 5432
       DB_USER: ${DB_USER:-postgres}
       DB_PASS: ${DB_PASS:-postgres}
       DB_NAME: ${TEST_DB_NAME:-pixel_sheriff_test}
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      REDIS_URL: redis://redis-test:6379/0
       JOB_QUEUE_KEY: ${JOB_QUEUE_KEY:-pixel_sheriff:test_jobs:v1}
       STORAGE_ROOT: ${TEST_STORAGE_ROOT:-/tmp/pixel_sheriff_test_data}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://localhost:3010,http://web-demo:3000}
       TRAINER_INFERENCE_BASE_URL: ${TRAINER_INFERENCE_BASE_URL:-http://trainer:8020}
     depends_on:
-      - db
-      - redis
+      - db-test
+      - redis-test
     profiles:
       - test
 
@@ -98,6 +130,36 @@ services:
     gpus: ${TRAINER_GPUS:-all}
     restart: unless-stopped
 
+  trainer-demo:
+    build:
+      context: .
+      dockerfile: apps/trainer/Dockerfile
+      args:
+        TRAINER_BASE_IMAGE: ${TRAINER_BASE_IMAGE:-python:3.11-slim}
+        PYTORCH_INDEX_URL: ${TRAINER_PYTORCH_INDEX_URL:-https://download.pytorch.org/whl/cu129}
+    environment:
+      REDIS_URL: redis://redis-demo:6379/0
+      JOB_QUEUE_KEY: ${DEMO_JOB_QUEUE_KEY:-pixel_sheriff:demo_train_jobs:v1}
+      STORAGE_ROOT: /app/data
+      TRAINER_POLL_SECONDS: ${TRAINER_POLL_SECONDS:-5}
+      TRAINER_INFERENCE_PORT: ${TRAINER_INFERENCE_PORT:-8020}
+      INFERENCE_CACHE_MAX_MODELS_GPU: ${INFERENCE_CACHE_MAX_MODELS_GPU:-1}
+      INFERENCE_CACHE_MAX_MODELS_CPU: ${INFERENCE_CACHE_MAX_MODELS_CPU:-3}
+      INFERENCE_CACHE_TTL_SECONDS: ${INFERENCE_CACHE_TTL_SECONDS:-600}
+      NVIDIA_VISIBLE_DEVICES: ${NVIDIA_VISIBLE_DEVICES:-all}
+      NVIDIA_DRIVER_CAPABILITIES: ${NVIDIA_DRIVER_CAPABILITIES:-compute,utility}
+    depends_on:
+      - redis-demo
+      - db-demo
+    volumes:
+      - demo_data:/app/data
+    expose:
+      - "${TRAINER_INFERENCE_PORT:-8020}"
+    gpus: ${TRAINER_GPUS:-all}
+    restart: unless-stopped
+    profiles:
+      - demo
+
   web:
     build:
       context: ./apps/web
@@ -109,31 +171,64 @@ services:
     depends_on:
       - api
 
+  api-demo:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    environment:
+      DB_HOST: db-demo
+      DB_PORT: 5432
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASS: ${DB_PASS:-postgres}
+      DB_NAME: ${DEMO_DB_NAME:-pixel_sheriff_demo}
+      REDIS_URL: redis://redis-demo:6379/0
+      JOB_QUEUE_KEY: ${DEMO_JOB_QUEUE_KEY:-pixel_sheriff:demo_train_jobs:v1}
+      STORAGE_ROOT: /app/data
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://localhost:3010,http://web-demo:3000}
+      TRAINER_INFERENCE_BASE_URL: http://trainer-demo:8020
+    ports:
+      - "${DEMO_API_PORT:-8011}:8000"
+    depends_on:
+      - db-demo
+      - redis-demo
+      - trainer-demo
+    volumes:
+      - demo_data:/app/data
+    profiles:
+      - demo
+
   web-demo:
     build:
       context: ./apps/web
     environment:
-      NEXT_PUBLIC_API_BASE_URL: http://api:8000
-      INTERNAL_API_BASE_URL: http://api:8000
+      NEXT_PUBLIC_API_BASE_URL: http://api-demo:8000
+      INTERNAL_API_BASE_URL: http://api-demo:8000
     ports:
-      - "3010:3000"
+      - "${WEB_DEMO_PORT:-3010}:3000"
     depends_on:
-      - api
+      - api-demo
+    profiles:
+      - demo
 
   demo-runner:
     image: mcr.microsoft.com/playwright:v1.41.2-jammy
     working_dir: /workspace/apps/web
     environment:
-      DEMO_API_BASE_URL: http://api:8000
+      DEMO_API_BASE_URL: http://api-demo:8000
       DEMO_WEB_BASE_URL: http://web-demo:3000
       CI: "1"
     depends_on:
-      - api
+      - api-demo
       - web-demo
     volumes:
       - .:/workspace
       - web_demo_node_modules:/workspace/apps/web/node_modules
+    profiles:
+      - demo
 
 volumes:
   postgres_data:
+  postgres_test_data:
+  postgres_demo_data:
+  demo_data:
   web_demo_node_modules:

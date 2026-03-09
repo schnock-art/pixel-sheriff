@@ -8,6 +8,7 @@ import { useProjectNavigationGuard } from "../../../../../components/workspace/P
 import {
   ApiError,
   cancelExperiment,
+  createDeployment,
   deleteExperiment,
   getExperiment,
   getExperimentEvaluation,
@@ -15,6 +16,7 @@ import {
   getExperimentOnnx,
   getExperimentRuntime,
   listExperimentSamples,
+  listDeployments,
   listDatasetVersions,
   listProjectModels,
   resolveAssetUri,
@@ -49,6 +51,7 @@ import {
 import { buildDatasetVersionOptions } from "../../../../../lib/workspace/experimentDatasetSelection";
 import { onnxClassNamesText, onnxInputShapeText, onnxStatusLabel, onnxValidationText } from "../../../../../lib/workspace/experimentOnnx";
 import { mergeLogChunk, runtimeBadgeLabel } from "../../../../../lib/workspace/experimentRuntime";
+import { deploymentTaskForExperiment } from "../../../../../lib/workspace/deployHelpers.js";
 
 interface ExperimentDetailPageProps {
   params: {
@@ -180,8 +183,10 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isStarting, setIsStarting] = useState(false);
+  const [showStartChoiceModal, setShowStartChoiceModal] = useState(false);
   const [isCanceling, setIsCanceling] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isDeploying, setIsDeploying] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [lastRunMessage, setLastRunMessage] = useState<string | null>(null);
@@ -696,8 +701,8 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
     await fetchLogsChunk(false);
   }
 
-  async function handleSave() {
-    if (!draftConfig || !savedRecord) return;
+  async function saveExperimentDraft(): Promise<boolean> {
+    if (!draftConfig || !savedRecord) return false;
     setIsSaving(true);
     setSaveError(null);
     try {
@@ -713,14 +718,20 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
       setCheckpoints(updated.checkpoints ?? []);
       setToastTone("success");
       setToastMessage("Experiment saved");
+      return true;
     } catch (error) {
       const message = parseApiErrorMessage(error, "Failed to save experiment");
       setSaveError(message);
       setToastTone("error");
       setToastMessage(`Save failed: ${message}`);
+      return false;
     } finally {
       setIsSaving(false);
     }
+  }
+
+  async function handleSave() {
+    await saveExperimentDraft();
   }
 
   async function handleStart() {
@@ -740,6 +751,50 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
       setToastMessage(message);
     } finally {
       setIsStarting(false);
+    }
+  }
+
+  function handleStartClick() {
+    if (isDirty) {
+      setShowStartChoiceModal(true);
+      return;
+    }
+    void handleStart();
+  }
+
+  async function handleSaveAndStart() {
+    const saved = await saveExperimentDraft();
+    if (!saved) return;
+    setShowStartChoiceModal(false);
+    await handleStart();
+  }
+
+  async function handleDeployModel() {
+    if (!savedRecord || !onnxInfo?.attempt) return;
+    setIsDeploying(true);
+    try {
+      const deploymentList = await listDeployments(projectId);
+      const deploymentNameBase = (savedRecord.name || draftName || `deploy_${experimentId.slice(0, 8)}`).trim();
+      await createDeployment(projectId, {
+        name: `${deploymentNameBase} run ${onnxInfo.attempt}`,
+        task: deploymentTaskForExperiment(savedRecord.task ?? task),
+        device_preference: "auto",
+        source: {
+          experiment_id: experimentId,
+          attempt: onnxInfo.attempt,
+          checkpoint_kind: "best_metric",
+        },
+        is_active: deploymentList.items.filter((item) => item.status === "available").length === 0,
+      });
+      setToastTone("success");
+      setToastMessage("Deployment created");
+      router.push(`/projects/${encodeURIComponent(projectId)}/deploy`);
+    } catch (error) {
+      const message = parseApiErrorMessage(error, "Failed to deploy model");
+      setToastTone("error");
+      setToastMessage(message);
+    } finally {
+      setIsDeploying(false);
     }
   }
 
@@ -1470,6 +1525,16 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
                     <button type="button" className="ghost-button" onClick={() => void loadOnnx()} disabled={isOnnxLoading}>
                       {isOnnxLoading ? "Refreshing..." : "Refresh ONNX"}
                     </button>
+                    {status === "completed" && onnxInfo?.status === "exported" && onnxInfo.attempt ? (
+                      <button
+                        type="button"
+                        className="primary-button"
+                        onClick={() => void handleDeployModel()}
+                        disabled={isDeploying}
+                      >
+                        {isDeploying ? "Deploying..." : "Deploy Model"}
+                      </button>
+                    ) : null}
                   </div>
                   {onnxError ? <p className="project-field-error">{onnxError}</p> : null}
                   {onnxInfo?.status === "failed" && onnxInfo.error ? <p className="project-field-error">{onnxInfo.error}</p> : null}
@@ -2027,7 +2092,7 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
                   type="button"
                   className="primary-button"
                   disabled={!isEditable || isStarting || isDeleting || !validation.isValid || !draftConfig}
-                  onClick={() => void handleStart()}
+                  onClick={handleStartClick}
                 >
                   {isStarting ? "Starting..." : "Start Training"}
                 </button>
@@ -2102,6 +2167,41 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
           <button type="button" aria-label="Dismiss message" onClick={() => setToastMessage(null)}>
             x
           </button>
+        </div>
+      ) : null}
+
+      {showStartChoiceModal ? (
+        <div className="project-modal-backdrop" role="presentation">
+          <div className="project-modal" role="dialog" aria-modal="true" aria-label="Choose start action">
+            <h3>Unsaved Experiment Changes</h3>
+            <p className="import-selection-summary">
+              Training now will use the last saved experiment config unless you save first.
+            </p>
+            <div className="project-modal-actions">
+              <button type="button" className="ghost-button" onClick={() => setShowStartChoiceModal(false)}>
+                Close
+              </button>
+              <button
+                type="button"
+                className="ghost-button"
+                disabled={isStarting || isSaving}
+                onClick={() => {
+                  setShowStartChoiceModal(false);
+                  void handleStart();
+                }}
+              >
+                Start saved version
+              </button>
+              <button
+                type="button"
+                className="primary-button"
+                disabled={isStarting || isSaving}
+                onClick={() => void handleSaveAndStart()}
+              >
+                {isSaving ? "Saving..." : isStarting ? "Starting..." : "Save and run"}
+              </button>
+            </div>
+          </div>
         </div>
       ) : null}
     </>

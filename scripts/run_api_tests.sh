@@ -27,10 +27,10 @@ if ! docker compose version >/dev/null 2>&1; then
   run_local "$@"
 fi
 
-docker compose up -d db redis >/dev/null
+docker compose --profile test up -d db-test redis-test >/dev/null
 
-if ! docker compose exec -T db psql -U "$DB_USER" -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='${TEST_DB_NAME}'" | grep -q 1; then
-  docker compose exec -T db psql -U "$DB_USER" -d postgres -c "CREATE DATABASE ${TEST_DB_NAME}" >/dev/null
+if ! docker compose --profile test exec -T db-test psql -U "$DB_USER" -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='${TEST_DB_NAME}'" | grep -q 1; then
+  docker compose --profile test exec -T db-test psql -U "$DB_USER" -d postgres -c "CREATE DATABASE ${TEST_DB_NAME}" >/dev/null
 fi
 
 # Rebuild the api-test image on invocation so test code and copied contract

@@ -316,8 +316,8 @@ export default function ModelDetailPage({ params }: ModelDetailPageProps) {
     });
   }
 
-  async function handleSave() {
-    if (!draftConfig) return;
+  async function saveModelDraft(): Promise<boolean> {
+    if (!draftConfig) return false;
     setIsSaving(true);
     setSaveError(null);
     try {
@@ -328,14 +328,20 @@ export default function ModelDetailPage({ params }: ModelDetailPageProps) {
       setDraftConfig(updatedConfig);
       setToastTone("success");
       setToastMessage("Model saved");
+      return true;
     } catch (error) {
       const message = parseApiErrorMessage(error, "Failed to save model");
       setSaveError(message);
       setToastTone("error");
       setToastMessage(`Save failed: ${message}`);
+      return false;
     } finally {
       setIsSaving(false);
     }
+  }
+
+  async function handleSave() {
+    await saveModelDraft();
   }
 
   async function handleTrainModel() {
@@ -345,6 +351,11 @@ export default function ModelDetailPage({ params }: ModelDetailPageProps) {
       const listed = await listExperiments(projectId, { modelId });
       const rows = listed.items ?? [];
       if (rows.length === 0) {
+        if (isDirty) {
+          setLatestExperiment(null);
+          setShowTrainChoiceModal(true);
+          return;
+        }
         const created = await createExperiment(projectId, { model_id: modelId });
         guardedNavigate(() => {
           router.push(`/projects/${encodeURIComponent(projectId)}/experiments/${encodeURIComponent(created.id)}`);
@@ -383,6 +394,19 @@ export default function ModelDetailPage({ params }: ModelDetailPageProps) {
     } finally {
       setIsLaunchingTrain(false);
     }
+  }
+
+  async function handleSaveAndContinueExperiment() {
+    if (!latestExperiment) return;
+    const saved = await saveModelDraft();
+    if (!saved) return;
+    handleContinueExperiment();
+  }
+
+  async function handleSaveAndNewRun() {
+    const saved = await saveModelDraft();
+    if (!saved) return;
+    await handleNewRun();
   }
 
   const editorContent = (
@@ -813,20 +837,49 @@ export default function ModelDetailPage({ params }: ModelDetailPageProps) {
       {showTrainChoiceModal ? (
         <div className="project-modal-backdrop" role="presentation">
           <div className="project-modal" role="dialog" aria-modal="true" aria-label="Choose train action">
-            <h3>Existing Experiment Found</h3>
-            <p className="import-selection-summary">
-              Latest run: <strong>{latestExperiment?.name ?? "-"}</strong>
-            </p>
+            <h3>{latestExperiment ? "Existing Experiment Found" : "Unsaved Model Changes"}</h3>
+            {latestExperiment ? (
+              <p className="import-selection-summary">
+                Latest run: <strong>{latestExperiment.name}</strong>
+              </p>
+            ) : null}
+            {isDirty ? (
+              <p className="import-selection-summary">
+                This model has unsaved changes. Training without saving will use the last saved model config.
+              </p>
+            ) : null}
             <div className="project-modal-actions">
               <button type="button" className="ghost-button" onClick={() => setShowTrainChoiceModal(false)}>
                 Close
               </button>
-              <button type="button" className="ghost-button" disabled={!latestExperiment} onClick={handleContinueExperiment}>
-                Continue
+              {latestExperiment ? (
+                <button type="button" className="ghost-button" disabled={!latestExperiment || isSaving} onClick={handleContinueExperiment}>
+                  Continue
+                </button>
+              ) : null}
+              <button type="button" className="ghost-button" disabled={isLaunchingTrain || isSaving} onClick={() => void handleNewRun()}>
+                {latestExperiment ? (isLaunchingTrain ? "Creating..." : "New run") : "Run saved version"}
               </button>
-              <button type="button" className="primary-button" disabled={isLaunchingTrain} onClick={() => void handleNewRun()}>
-                {isLaunchingTrain ? "Creating..." : "New run"}
-              </button>
+              {isDirty ? (
+                <button
+                  type="button"
+                  className="primary-button"
+                  disabled={isSaving || isLaunchingTrain}
+                  onClick={() => void (latestExperiment ? handleSaveAndContinueExperiment() : handleSaveAndNewRun())}
+                >
+                  {isSaving ? "Saving..." : latestExperiment ? "Save and continue" : "Save and run"}
+                </button>
+              ) : null}
+              {isDirty && latestExperiment ? (
+                <button
+                  type="button"
+                  className="primary-button"
+                  disabled={isSaving || isLaunchingTrain}
+                  onClick={() => void handleSaveAndNewRun()}
+                >
+                  {isSaving ? "Saving..." : isLaunchingTrain ? "Creating..." : "Save and new run"}
+                </button>
+              ) : null}
             </div>
           </div>
         </div>

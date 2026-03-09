@@ -15,6 +15,7 @@ import {
   type DeploymentDevicePreference,
   type ProjectExperimentSummary,
 } from "../../../../lib/api";
+import { deploymentTaskForExperiment } from "../../../../lib/workspace/deployHelpers.js";
 
 interface DeployPageProps {
   params: { projectId: string };
@@ -101,11 +102,17 @@ export default function DeployPage({ params }: DeployPageProps) {
     setCreatingExperimentId(experimentId);
     setErrorMessage(null);
     try {
+      const experiment = experiments.find((item) => item.id === experimentId);
+      const normalizedTask = String(experiment?.task ?? "").trim().toLowerCase();
+      if (normalizedTask && normalizedTask !== "classification" && normalizedTask !== "detection" && normalizedTask !== "bbox") {
+        setErrorMessage(`Deploy is not supported for ${experiment?.task ?? "this task"} experiments yet.`);
+        return;
+      }
       const onnx = await getExperimentOnnx(projectId, experimentId);
       const name = createNameByExperiment[experimentId]?.trim() || `deploy_${experimentId.slice(0, 8)}`;
       await createDeployment(projectId, {
         name,
-        task: "classification",
+        task: deploymentTaskForExperiment(experiment?.task ?? "classification"),
         device_preference: "auto",
         source: {
           experiment_id: experimentId,

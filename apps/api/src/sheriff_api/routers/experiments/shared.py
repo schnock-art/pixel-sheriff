@@ -271,11 +271,21 @@ async def require_project(db: AsyncSession, project_id: str) -> Project:
 
 
 def as_experiment_summary(record: dict[str, Any]) -> ProjectExperimentSummary:
-    return ProjectExperimentSummary.model_validate(record)
+    payload = dict(record)
+    if not isinstance(payload.get("task"), str):
+        config_json = payload.get("config_json")
+        if isinstance(config_json, dict) and isinstance(config_json.get("task"), str):
+            payload["task"] = str(config_json.get("task"))
+    return ProjectExperimentSummary.model_validate(payload)
 
 
 def as_experiment_record(record: dict[str, Any]) -> ProjectExperimentRecord:
-    return ProjectExperimentRecord.model_validate(record)
+    payload = dict(record)
+    if not isinstance(payload.get("task"), str):
+        config_json = payload.get("config_json")
+        if isinstance(config_json, dict) and isinstance(config_json.get("task"), str):
+            payload["task"] = str(config_json.get("task"))
+    return ProjectExperimentRecord.model_validate(payload)
 
 
 def safe_float(value: Any) -> float | None:
