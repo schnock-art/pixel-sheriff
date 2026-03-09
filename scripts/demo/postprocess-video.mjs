@@ -36,12 +36,10 @@ export async function postprocessHeroVideo() {
 
   runProcess("ffmpeg", [
     "-y",
-    "-t",
-    "12",
     "-i",
     heroWebmPath,
     "-vf",
-    "fps=8,scale=840:-1:flags=lanczos,split[s0][s1];[s0]palettegen=max_colors=128[p];[s1][p]paletteuse",
+    "fps=6,scale=720:-1:flags=lanczos,split[s0][s1];[s0]palettegen=max_colors=96[p];[s1][p]paletteuse=dither=bayer:bayer_scale=3",
     heroGifPath,
   ]);
 
