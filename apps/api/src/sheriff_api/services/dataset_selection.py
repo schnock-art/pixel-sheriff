@@ -50,6 +50,14 @@ def slugify_label(value: str) -> str:
 
 
 def asset_relative_path(asset: Asset) -> str:
+    folder_path = getattr(asset, "folder_path", None)
+    file_name = getattr(asset, "resolved_file_name", None) or getattr(asset, "file_name", None)
+    if isinstance(file_name, str) and file_name.strip():
+        normalized_name = file_name.strip()
+        if isinstance(folder_path, str) and folder_path.strip():
+            return f"{folder_path.strip('/')}/{normalized_name}"
+        return normalized_name
+
     metadata = asset.metadata_json if isinstance(asset.metadata_json, dict) else {}
     relative_path = metadata.get("relative_path")
     if isinstance(relative_path, str) and relative_path.strip():
@@ -61,6 +69,9 @@ def asset_relative_path(asset: Asset) -> str:
 
 
 def asset_filename(asset: Asset) -> str:
+    resolved_name = getattr(asset, "resolved_file_name", None)
+    if isinstance(resolved_name, str) and resolved_name.strip():
+        return resolved_name.strip()
     metadata = asset.metadata_json if isinstance(asset.metadata_json, dict) else {}
     original_filename = metadata.get("original_filename")
     if isinstance(original_filename, str) and original_filename.strip():

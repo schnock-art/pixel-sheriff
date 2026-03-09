@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 
 import { LabelPanel } from "../LabelPanel";
@@ -10,21 +10,23 @@ import {
   createCategory,
   deleteCategory,
   createProject,
+  importVideo,
   listAssets,
   patchCategory,
   resolveAssetUri,
   uploadAsset,
-  type Annotation,
-  type AnnotationStatus,
   type ProjectTaskType,
   type TaskKind,
 } from "../../lib/api";
 import { useAnnotationWorkflow } from "../../lib/hooks/useAnnotationWorkflow";
 import { useAssets } from "../../lib/hooks/useAssets";
 import { useDeleteWorkflow } from "../../lib/hooks/useDeleteWorkflow";
+import { useFolders } from "../../lib/hooks/useFolders";
 import { buildTargetRelativePath, isImageCandidate, useImportWorkflow } from "../../lib/hooks/useImportWorkflow";
 import { useLabels } from "../../lib/hooks/useLabels";
 import { useProjectAssetsTreeState } from "../../lib/hooks/useProjectAssetsTreeState";
+import { useSequence } from "../../lib/hooks/useSequence";
+import { useSequenceNavigation } from "../../lib/hooks/useSequenceNavigation";
 import { useWorkspaceSuggestions } from "../../lib/hooks/useWorkspaceSuggestions";
 import { useWorkspaceHotkeys } from "../../lib/hooks/useWorkspaceHotkeys";
 import {
@@ -41,6 +43,11 @@ import { AssetFilmstrip } from "./project-assets/AssetFilmstrip";
 import { CanvasToolbar, type CanvasTool } from "./project-assets/CanvasToolbar";
 import { ProjectAssetsImportModal } from "./project-assets/ProjectAssetsImportModal";
 import { ProjectAssetsStatusOverlay } from "./project-assets/ProjectAssetsStatusOverlay";
+import { SequenceThumbnailStrip } from "./project-assets/SequenceThumbnailStrip";
+import { SequenceTimeline } from "./project-assets/SequenceTimeline";
+import { SequenceToolbar } from "./project-assets/SequenceToolbar";
+import { VideoImportModal } from "./project-assets/VideoImportModal";
+import { WebcamCaptureModal } from "./project-assets/WebcamCaptureModal";
 import { useProjectNavigationGuard } from "./ProjectNavigationContext";
 
 type FolderReviewStatus = "all_labeled" | "has_unlabeled" | "empty";
@@ -63,6 +70,13 @@ function taskKindToAnnotationMode(taskKind: TaskKind | null | undefined): Worksp
   if (taskKind === "bbox") return "bbox";
   if (taskKind === "segmentation") return "segmentation";
   return "labels";
+}
+
+function formatSequenceTimestamp(seconds: number | null | undefined): string {
+  if (typeof seconds !== "number" || !Number.isFinite(seconds) || seconds < 0) return "--:--.-";
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds - minutes * 60;
+  return `${String(minutes).padStart(2, "0")}:${remainingSeconds.toFixed(1).padStart(4, "0")}`;
 }
 
 export default function ProjectAssetsWorkspace() {
@@ -90,6 +104,11 @@ export default function ProjectAssetsWorkspace() {
   const [importNewProjectTaskType, setImportNewProjectTaskType] = useState<NewProjectTaskType>("classification_single");
   const [geometryCategoryId, setGeometryCategoryId] = useState<string | null>(null);
   const [hoveredGeometryObjectId, setHoveredGeometryObjectId] = useState<string | null>(null);
+  const [isVideoImportModalOpen, setIsVideoImportModalOpen] = useState(false);
+  const [isVideoImporting, setIsVideoImporting] = useState(false);
+  const [videoImportError, setVideoImportError] = useState<string | null>(null);
+  const [isWebcamModalOpen, setIsWebcamModalOpen] = useState(false);
+  const [sequencePauseSignal, setSequencePauseSignal] = useState(0);
   const projectAnnotationMode = useMemo(() => taskKindToAnnotationMode(selectedTask?.kind), [selectedTask?.kind]);
 
   useEffect(() => {
@@ -115,6 +134,7 @@ export default function ProjectAssetsWorkspace() {
     selectedProjectId,
     selectedTaskId,
   );
+  const { data: folders, refetch: refetchFolders, hasProcessingSequences } = useFolders(selectedProjectId);
   const { data: labels, refetch: refetchLabels } = useLabels(selectedProjectId, selectedTaskId);
   const availableAssetIds = useMemo(() => assets.map((asset) => asset.id), [assets]);
   const selectedProjectName = selectedProject?.name ?? "No project selected";
@@ -158,10 +178,53 @@ export default function ProjectAssetsWorkspace() {
 
   const treeState = useProjectAssetsTreeState({
     assets,
+    folders,
     annotations,
     assetById,
     projectAnnotationMode,
   });
+  const currentSequenceId = treeState.currentAsset?.sequence_id ?? null;
+  const {
+    data: currentSequence,
+    isLoading: isSequenceLoading,
+    error: currentSequenceError,
+    refetch: refetchSequence,
+  } = useSequence(selectedProjectId, currentSequenceId, selectedTaskId);
+  const selectSequenceAsset = useCallback(
+    (assetId: string) => {
+      treeState.handleSelectTreeAsset(assetId, currentSequence?.folder_path ?? treeState.currentAsset?.folder_path ?? undefined);
+    },
+    [currentSequence?.folder_path, treeState.currentAsset?.folder_path, treeState.handleSelectTreeAsset],
+  );
+  const sequenceNavigation = useSequenceNavigation({
+    sequence: currentSequence,
+    currentAssetId: treeState.currentAsset?.id ?? null,
+    onSelectAsset: selectSequenceAsset,
+    pauseSignal: sequencePauseSignal,
+  });
+  const isSequenceMode = Boolean(treeState.currentAsset?.sequence_id);
+  const currentSequenceFrameNumber = useMemo(() => {
+    if (typeof sequenceNavigation.currentFrame?.frame_index === "number") return sequenceNavigation.currentFrame.frame_index + 1;
+    if (sequenceNavigation.currentIndex >= 0) return sequenceNavigation.currentIndex + 1;
+    return 0;
+  }, [sequenceNavigation.currentFrame?.frame_index, sequenceNavigation.currentIndex]);
+  const currentSequenceFrameLabel = useMemo(
+    () => `Frame ${currentSequenceFrameNumber} / ${currentSequence?.frame_count ?? sequenceNavigation.totalFrames ?? 0}`,
+    [currentSequence?.frame_count, currentSequenceFrameNumber, sequenceNavigation.totalFrames],
+  );
+  const currentSequenceTimestampLabel = useMemo(
+    () => `Time ${formatSequenceTimestamp(sequenceNavigation.currentFrame?.timestamp_seconds ?? null)}`,
+    [sequenceNavigation.currentFrame?.timestamp_seconds],
+  );
+  const folderIdByPath = useMemo(() => new Map(folders.map((folder) => [folder.path, folder.id])), [folders]);
+  const videoImportDefaultName = useMemo(
+    () => `video_${new Date().toISOString().slice(0, 19).replaceAll(":", "-")}`,
+    [isVideoImportModalOpen],
+  );
+  const webcamDefaultName = useMemo(
+    () => `webcam_${new Date().toISOString().slice(0, 19).replaceAll(":", "-")}`,
+    [isWebcamModalOpen],
+  );
   const allLabelRows = labels.map((label) => ({
     id: label.id,
     name: label.name,
@@ -248,11 +311,11 @@ export default function ProjectAssetsWorkspace() {
     currentAsset: treeState.currentAsset,
     assetRows: treeState.assetRows,
     assets,
+    folderIdByPath,
     treeFolderAssetIds: treeState.treeBuild.folderAssetIds,
     assetById,
     annotations,
     setAnnotations,
-    pendingAnnotations,
     setPendingAnnotations: annotationWorkflow.setPendingAnnotations,
     setAssetIndex: treeState.setAssetIndex,
     setCollapsedFolders: treeState.setCollapsedFolders,
@@ -263,12 +326,12 @@ export default function ProjectAssetsWorkspace() {
     resetAnnotationWorkflow,
     setEditMode,
     refetchAssets,
+    refetchFolders,
     refetchProjects,
     onProjectDeleted: () => router.replace("/projects"),
   });
   const {
     isDeletingAssets,
-    isDeletingProject,
     bulkDeleteMode,
     selectedDeleteAssets,
     selectedDeleteAssetIds,
@@ -329,6 +392,31 @@ export default function ProjectAssetsWorkspace() {
   }, [message]);
 
   useEffect(() => {
+    if (!selectedProjectId) return;
+    const folderPaths = folders.map((folder) => folder.path).sort((left, right) => left.localeCompare(right));
+    setImportFolderOptionsByProject((previous) => {
+      const existing = previous[selectedProjectId] ?? [];
+      if (existing.length === folderPaths.length && existing.every((value, index) => value === folderPaths[index])) {
+        return previous;
+      }
+      return {
+        ...previous,
+        [selectedProjectId]: folderPaths,
+      };
+    });
+  }, [folders, selectedProjectId, setImportFolderOptionsByProject]);
+
+  useEffect(() => {
+    if (!selectedProjectId || !hasProcessingSequences) return;
+    const intervalId = window.setInterval(() => {
+      void refetchFolders(selectedProjectId);
+      void refetchAssets(selectedProjectId);
+      if (currentSequenceId) void refetchSequence();
+    }, 2000);
+    return () => window.clearInterval(intervalId);
+  }, [currentSequenceId, hasProcessingSequences, refetchAssets, refetchFolders, refetchSequence, selectedProjectId]);
+
+  useEffect(() => {
     if (annotationMode === "labels") return;
     if (selectedObjectId) {
       const selectedObject = currentObjects.find((item) => item.id === selectedObjectId);
@@ -363,8 +451,11 @@ export default function ProjectAssetsWorkspace() {
     annotationMode,
     assetRowsLength: treeState.assetRows.length,
     selectedObjectId,
-    onPrev: treeState.handlePrevAsset,
-    onNext: treeState.handleNextAsset,
+    onPrev: isSequenceMode ? sequenceNavigation.goToPrev : treeState.handlePrevAsset,
+    onNext: isSequenceMode ? sequenceNavigation.goToNext : treeState.handleNextAsset,
+    onJumpPrev: isSequenceMode ? () => sequenceNavigation.jumpBy(-10) : undefined,
+    onJumpNext: isSequenceMode ? () => sequenceNavigation.jumpBy(10) : undefined,
+    onTogglePlayback: isSequenceMode ? sequenceNavigation.togglePlayback : undefined,
     onLabelHotkey: (labelId, selectedHotkeyObjectId) => {
       if (annotationMode === "labels") {
         handleToggleLabel(labelId);
@@ -647,6 +738,31 @@ export default function ProjectAssetsWorkspace() {
     picker.click();
   }
 
+  async function handleImportVideoSubmit(file: File, payload: { fps: number; max_frames: number; resize_mode: "original" | "width" | "height"; resize_width?: number | null; resize_height?: number | null; name?: string | null }) {
+    if (!selectedProjectId) {
+      setVideoImportError("Select a project before importing a video.");
+      return;
+    }
+
+    try {
+      setIsVideoImporting(true);
+      setVideoImportError(null);
+      setMessage(null);
+      const response = await importVideo(selectedProjectId, file, {
+        ...payload,
+        task_id: selectedTaskId,
+      });
+      await Promise.all([refetchFolders(selectedProjectId), refetchAssets(selectedProjectId)]);
+      if (response.sequence.folder_path) treeState.handleSelectFolderScope(response.sequence.folder_path);
+      setIsVideoImportModalOpen(false);
+      setMessage(`Processing video "${response.sequence.name}"...`);
+    } catch (error) {
+      setVideoImportError(error instanceof Error ? error.message : "Failed to import video.");
+    } finally {
+      setIsVideoImporting(false);
+    }
+  }
+
   function handleCreateDataset() {
     if (!selectedProjectId) {
       setMessage("Select a project before creating a dataset.");
@@ -700,7 +816,12 @@ export default function ProjectAssetsWorkspace() {
             selectedDeleteAssets={selectedDeleteAssets}
             currentAssetId={treeState.currentAsset?.id ?? null}
             assetReviewStateById={assetReviewStateById}
-            onImport={handleImport}
+            onImportImages={handleImport}
+            onImportVideo={() => {
+              setVideoImportError(null);
+              setIsVideoImportModalOpen(true);
+            }}
+            onOpenWebcam={() => setIsWebcamModalOpen(true)}
             onCollapseAllFolders={treeState.handleCollapseAllFolders}
             onExpandAllFolders={treeState.handleExpandAllFolders}
             onSelectFolderScope={treeState.handleSelectFolderScope}
@@ -746,16 +867,50 @@ export default function ProjectAssetsWorkspace() {
               onUpsertObject={upsertGeometryObject}
               onDeleteSelectedObject={deleteSelectedGeometryObject}
               onImageBasisChange={setCurrentImageBasis}
+              onCanvasInteraction={() => setSequencePauseSignal((value) => value + 1)}
             />
-            <AssetFilmstrip
-              assetRows={treeState.assetRows}
-              currentIndex={treeState.safeAssetIndex}
-              pageStatuses={pageStatuses}
-              pageDirtyFlags={pageDirtyFlags}
-              onSelectIndex={treeState.setAssetIndex}
-              onPrev={treeState.handlePrevAsset}
-              onNext={treeState.handleNextAsset}
-            />
+            {isSequenceMode ? (
+              <section className="sequence-filmstrip" aria-label="Frame navigator" data-testid="sequence-filmstrip">
+                {currentSequence ? (
+                  <>
+                    <SequenceToolbar
+                      currentFrameLabel={currentSequenceFrameLabel}
+                      currentTimestampLabel={currentSequenceTimestampLabel}
+                      isPlaying={sequenceNavigation.isPlaying}
+                      onFirst={sequenceNavigation.goToFirst}
+                      onPrev={sequenceNavigation.goToPrev}
+                      onTogglePlayback={sequenceNavigation.togglePlayback}
+                      onNext={sequenceNavigation.goToNext}
+                      onLast={sequenceNavigation.goToLast}
+                    />
+                    <SequenceTimeline
+                      assets={currentSequence.assets}
+                      currentAssetId={treeState.currentAsset?.id ?? null}
+                      onSelectAsset={selectSequenceAsset}
+                    />
+                    <SequenceThumbnailStrip
+                      assets={sequenceNavigation.thumbnailAssets}
+                      currentAssetId={treeState.currentAsset?.id ?? null}
+                      onSelectAsset={selectSequenceAsset}
+                    />
+                  </>
+                ) : (
+                  <div className="sequence-filmstrip-empty">
+                    {isSequenceLoading ? "Loading sequence…" : currentSequenceError?.message ?? "Sequence unavailable."}
+                  </div>
+                )}
+              </section>
+            ) : (
+              <AssetFilmstrip
+                assetRows={treeState.assetRows}
+                currentIndex={treeState.safeAssetIndex}
+                pageStatuses={pageStatuses}
+                pageDirtyFlags={pageDirtyFlags}
+                onSelectIndex={treeState.setAssetIndex}
+                onPrev={treeState.handlePrevAsset}
+                onNext={treeState.handleNextAsset}
+              />
+            )}
           </div>
 
           <LabelPanel
@@ -836,6 +991,44 @@ export default function ProjectAssetsWorkspace() {
         onSetImportFolderName={setImportFolderName}
         onClose={closeImportDialog}
         onConfirm={confirmImportFromDialog}
+      />
+      <VideoImportModal
+        open={isVideoImportModalOpen}
+        defaultName={videoImportDefaultName}
+        isImporting={isVideoImporting}
+        errorMessage={videoImportError}
+        onClose={() => {
+          if (isVideoImporting) return;
+          setIsVideoImportModalOpen(false);
+          setVideoImportError(null);
+        }}
+        onSubmit={(file, payload) => void handleImportVideoSubmit(file, payload)}
+      />
+      <WebcamCaptureModal
+        open={isWebcamModalOpen}
+        projectId={selectedProjectId}
+        taskId={selectedTaskId}
+        defaultName={webcamDefaultName}
+        onClose={() => setIsWebcamModalOpen(false)}
+        onSequenceCreated={(sequence) => {
+          if (sequence.folder_path) treeState.handleSelectFolderScope(sequence.folder_path);
+          void refetchFolders(selectedProjectId);
+        }}
+        onFrameUploaded={(asset, sequence) => {
+          void refetchAssets(selectedProjectId);
+          void refetchFolders(selectedProjectId);
+          if (currentSequenceId === sequence.id) void refetchSequence();
+          if (!treeState.currentAsset && sequence.folder_path) treeState.handleSelectFolderScope(sequence.folder_path);
+          if (asset.id && currentSequenceId === sequence.id) {
+            treeState.handleSelectTreeAsset(asset.id, sequence.folder_path ?? undefined);
+          }
+        }}
+        onFinished={(sequence) => {
+          void Promise.all([refetchAssets(selectedProjectId), refetchFolders(selectedProjectId)]).then(() => {
+            if (sequence?.folder_path) treeState.handleSelectFolderScope(sequence.folder_path);
+            if (sequence?.id) void refetchSequence();
+          });
+        }}
       />
     </>
   );

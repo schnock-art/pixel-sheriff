@@ -86,10 +86,21 @@ def build_export_bundle(
                 "width": asset.width,
                 "height": asset.height,
                 "checksum": asset.checksum,
-                "relative_path": _asset_metadata(asset).get("relative_path"),
-                "original_filename": _asset_metadata(asset).get("original_filename"),
+                "relative_path": getattr(asset, "relative_path", None) or _asset_metadata(asset).get("relative_path"),
+                "original_filename": _asset_metadata(asset).get("original_filename") or getattr(asset, "resolved_file_name", None),
                 "storage_uri": _asset_metadata(asset).get("storage_uri"),
                 "extension": _asset_extension(asset),
+                "source_meta": (
+                    {
+                        "kind": asset.source_kind,
+                        "sequence_id": asset.sequence_id,
+                        "sequence_name": _asset_metadata(asset).get("sequence_name"),
+                        "frame_index": asset.frame_index,
+                        "timestamp_seconds": asset.timestamp_seconds,
+                    }
+                    if asset.source_kind in {"video_frame", "webcam_frame"}
+                    else None
+                ),
             }
             for asset in inputs.assets
         ],

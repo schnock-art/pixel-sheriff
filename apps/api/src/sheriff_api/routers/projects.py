@@ -5,7 +5,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sheriff_api.config import get_settings
-from sheriff_api.db.models import Annotation, Asset, Category, Project, Suggestion, Task, TaskKind, TaskLabelMode, TaskType
+from sheriff_api.db.models import Annotation, Asset, AssetSequence, Category, Folder, Project, Suggestion, Task, TaskKind, TaskLabelMode, TaskType
 from sheriff_api.db.session import get_db
 from sheriff_api.errors import api_error
 from sheriff_api.schemas.projects import ProjectCreate, ProjectRead
@@ -130,6 +130,8 @@ async def delete_project(project_id: str, db: AsyncSession = Depends(get_db)) ->
     await db.execute(delete(Category).where(Category.project_id == project_id))
     await db.execute(delete(Task).where(Task.project_id == project_id))
     await db.execute(delete(Asset).where(Asset.project_id == project_id))
+    await db.execute(delete(AssetSequence).where(AssetSequence.project_id == project_id))
+    await db.execute(delete(Folder).where(Folder.project_id == project_id))
     await db.delete(project)
     await db.commit()
 
@@ -142,6 +144,7 @@ async def delete_project(project_id: str, db: AsyncSession = Depends(get_db)) ->
     for relative_dir in (
         f"assets/{project_id}",
         f"exports/{project_id}",
+        f"imports/{project_id}",
         f"models/{project_id}",
         f"experiments/{project_id}",
         f"datasets/{project_id}",

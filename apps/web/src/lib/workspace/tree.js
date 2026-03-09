@@ -1,4 +1,9 @@
 function asRelativePath(asset) {
+  if (typeof asset.relative_path === "string" && asset.relative_path.trim() !== "") return asset.relative_path;
+  if (typeof asset.file_name === "string" && asset.file_name.trim() !== "") {
+    const folderPath = typeof asset.folder_path === "string" ? asset.folder_path.replaceAll("\\", "/").trim() : "";
+    return folderPath ? `${folderPath.replace(/^\/+|\/+$/g, "")}/${asset.file_name}` : asset.file_name;
+  }
   const fromMetadata = asset.metadata_json.relative_path;
   if (typeof fromMetadata === "string" && fromMetadata.trim() !== "") return fromMetadata;
   const original = asset.metadata_json.original_filename;
@@ -6,8 +11,11 @@ function asRelativePath(asset) {
   return asset.uri;
 }
 
-function collectFolderPaths(assets) {
-  return collectFolderPathsFromRelativePaths(assets.map((asset) => asRelativePath(asset)));
+function collectFolderPaths(assets, folders = []) {
+  const explicit = folders
+    .map((folder) => (typeof folder.path === "string" ? folder.path.replaceAll("\\", "/").trim().replace(/^\/+|\/+$/g, "") : ""))
+    .filter(Boolean);
+  return collectFolderPathsFromRelativePaths([...assets.map((asset) => asRelativePath(asset)), ...explicit]);
 }
 
 function collectFolderPathsFromRelativePaths(relativePaths) {
@@ -36,8 +44,54 @@ function folderChain(path) {
   return chain;
 }
 
-function buildTreeEntries(assets) {
+function buildTreeEntries(assets, folders = []) {
   const root = { name: "", path: "", folders: new Map(), files: [] };
+
+  function ensureFolderNode(path, folder = null) {
+    const normalized = String(path || "").replaceAll("\\", "/").replace(/^\/+|\/+$/g, "");
+    if (!normalized) return root;
+    const segments = normalized.split("/").filter(Boolean);
+    let cursor = root;
+    let prefix = "";
+    for (const part of segments) {
+      prefix = prefix ? `${prefix}/${part}` : part;
+      const existing = cursor.folders.get(part);
+      if (existing) {
+        cursor = existing;
+      } else {
+        const next = {
+          name: part,
+          path: prefix,
+          folderId: null,
+          sequenceId: null,
+          sequenceStatus: null,
+          sequenceSourceType: null,
+          sequenceName: null,
+          sequenceFrameCount: null,
+          folders: new Map(),
+          files: [],
+        };
+        cursor.folders.set(part, next);
+        cursor = next;
+      }
+    }
+    if (folder) {
+      cursor.folderId = folder.id ?? cursor.folderId ?? null;
+      cursor.sequenceId = folder.sequence_id ?? cursor.sequenceId ?? null;
+      cursor.sequenceStatus = folder.sequence_status ?? cursor.sequenceStatus ?? null;
+      cursor.sequenceSourceType = folder.sequence_source_type ?? cursor.sequenceSourceType ?? null;
+      cursor.sequenceName = folder.sequence_name ?? cursor.sequenceName ?? null;
+      cursor.sequenceFrameCount = folder.sequence_frame_count ?? cursor.sequenceFrameCount ?? null;
+    }
+    return cursor;
+  }
+
+  const sortedFolders = folders.slice().sort((a, b) => {
+    const left = String(a.path || "");
+    const right = String(b.path || "");
+    return left.localeCompare(right);
+  });
+  for (const folder of sortedFolders) ensureFolderNode(folder.path, folder);
 
   for (const asset of assets) {
     const rel = asRelativePath(asset).replaceAll("\\", "/");
@@ -45,19 +99,7 @@ function buildTreeEntries(assets) {
     const filename = segments[segments.length - 1] ?? rel;
     const folderParts = segments.slice(0, -1);
 
-    let cursor = root;
-    let prefix = "";
-    for (const part of folderParts) {
-      prefix = prefix ? `${prefix}/${part}` : part;
-      const existing = cursor.folders.get(part);
-      if (existing) {
-        cursor = existing;
-      } else {
-        const next = { name: part, path: prefix, folders: new Map(), files: [] };
-        cursor.folders.set(part, next);
-        cursor = next;
-      }
-    }
+    const cursor = ensureFolderNode(folderParts.join("/"));
 
     cursor.files.push({ id: asset.id, name: filename, path: rel });
   }
@@ -71,11 +113,17 @@ function buildTreeEntries(assets) {
     const folders = Array.from(node.folders.values()).sort((a, b) => a.name.localeCompare(b.name));
     for (const folder of folders) {
       result.push({
-        key: `folder:${folder.path}`,
+        key: `folder:${folder.folderId ?? folder.path}`,
         name: folder.name,
         depth,
         kind: "folder",
         path: folder.path,
+        folderId: folder.folderId ?? undefined,
+        sequenceId: folder.sequenceId ?? undefined,
+        sequenceStatus: folder.sequenceStatus ?? undefined,
+        sequenceSourceType: folder.sequenceSourceType ?? undefined,
+        sequenceName: folder.sequenceName ?? undefined,
+        sequenceFrameCount: folder.sequenceFrameCount ?? undefined,
       });
       const childAssetIds = visit(folder, depth + 1);
       folderAssetIds.set(folder.path, childAssetIds);

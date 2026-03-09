@@ -566,18 +566,29 @@ async def ensure_dataset_export_zip(
                     "width": asset.width,
                     "height": asset.height,
                     "checksum": asset.checksum,
-                    "relative_path": (asset.metadata_json or {}).get("relative_path")
-                    if isinstance(asset.metadata_json, dict)
-                    else None,
+                    "relative_path": asset.relative_path,
                     "original_filename": (asset.metadata_json or {}).get("original_filename")
                     if isinstance(asset.metadata_json, dict)
-                    else None,
+                    else asset.resolved_file_name,
                     "storage_uri": (asset.metadata_json or {}).get("storage_uri")
                     if isinstance(asset.metadata_json, dict)
                     else None,
                     "extension": Path(str((asset.metadata_json or {}).get("storage_uri", ""))).suffix.lower()
                     if isinstance(asset.metadata_json, dict)
                     else "",
+                    "source_meta": (
+                        {
+                            "kind": asset.source_kind,
+                            "sequence_id": asset.sequence_id,
+                            "sequence_name": (asset.metadata_json or {}).get("sequence_name")
+                            if isinstance(asset.metadata_json, dict)
+                            else None,
+                            "frame_index": asset.frame_index,
+                            "timestamp_seconds": asset.timestamp_seconds,
+                        }
+                        if asset.source_kind in {"video_frame", "webcam_frame"}
+                        else None
+                    ),
                 }
                 for asset in selected_assets
             ],

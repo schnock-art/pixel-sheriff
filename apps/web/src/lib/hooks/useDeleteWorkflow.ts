@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
 
-import { deleteAsset, deleteProject, type Annotation } from "../api";
+import { deleteAsset, deleteFolder, deleteProject, type Annotation } from "../api";
 import {
   clearSelectedDeleteAssets,
   pruneCollapsedFoldersForDeletedPath,
@@ -20,11 +20,11 @@ interface UseDeleteWorkflowParams {
   currentAsset: { id: string; uri: string; metadata_json: Record<string, unknown> } | null;
   assetRows: Array<{ id: string }>;
   assets: Array<{ id: string }>;
+  folderIdByPath: Map<string, string>;
   treeFolderAssetIds: Record<string, string[]>;
   assetById: Map<string, { id: string }>;
   annotations: Annotation[];
   setAnnotations: Dispatch<SetStateAction<Annotation[]>>;
-  pendingAnnotations: Record<string, PendingAnnotation>;
   setPendingAnnotations: Dispatch<SetStateAction<Record<string, PendingAnnotation>>>;
   setAssetIndex: Dispatch<SetStateAction<number>>;
   setCollapsedFolders: Dispatch<SetStateAction<Record<string, boolean>>>;
@@ -35,6 +35,7 @@ interface UseDeleteWorkflowParams {
   resetAnnotationWorkflow: () => void;
   setEditMode: Dispatch<SetStateAction<boolean>>;
   refetchAssets: (projectIdOverride?: string | null) => Promise<unknown>;
+  refetchFolders: (projectIdOverride?: string | null) => Promise<unknown>;
   refetchProjects: () => Promise<unknown>;
   onProjectDeleted?: (projectId: string) => Promise<unknown> | unknown;
 }
@@ -47,11 +48,11 @@ export function useDeleteWorkflow({
   currentAsset,
   assetRows,
   assets,
+  folderIdByPath,
   treeFolderAssetIds,
   assetById,
   annotations,
   setAnnotations,
-  pendingAnnotations,
   setPendingAnnotations,
   setAssetIndex,
   setCollapsedFolders,
@@ -62,6 +63,7 @@ export function useDeleteWorkflow({
   resetAnnotationWorkflow,
   setEditMode,
   refetchAssets,
+  refetchFolders,
   refetchProjects,
   onProjectDeleted,
 }: UseDeleteWorkflowParams) {
@@ -79,6 +81,37 @@ export function useDeleteWorkflow({
     setSelectedDeleteAssets((previous) => pruneSelectedDeleteAssets(previous, (assetId) => assetById.has(assetId)));
   }, [assetById]);
 
+  function removeFolderOptions(folderPath: string) {
+    if (!selectedProjectId) return;
+    setImportFolderOptionsByProject((previous) => {
+      const existing = previous[selectedProjectId];
+      if (!existing?.length) return previous;
+      const nextFolders = existing.filter((path) => path !== folderPath && !path.startsWith(`${folderPath}/`));
+      if (nextFolders.length === existing.length) return previous;
+      return {
+        ...previous,
+        [selectedProjectId]: nextFolders,
+      };
+    });
+  }
+
+  function applyRemovedAssetState(assetIds: string[]): number {
+    if (assetIds.length === 0) return 0;
+    const removedAssetSet = new Set(assetIds);
+    const removedAnnotationCount = annotations.reduce(
+      (count, annotation) => (removedAssetSet.has(annotation.asset_id) ? count + 1 : count),
+      0,
+    );
+    setPendingAnnotations((previous) => {
+      const next = { ...previous };
+      for (const assetId of assetIds) delete next[assetId];
+      return next;
+    });
+    setAnnotations((previous) => previous.filter((annotation) => !removedAssetSet.has(annotation.asset_id)));
+    setSelectedDeleteAssets((previous) => clearSelectedDeleteAssets(previous, assetIds));
+    return removedAnnotationCount;
+  }
+
   async function deleteAssetsWithSummary(assetIds: string[], contextLabel: string) {
     if (!selectedProjectId) {
       setMessage("Select a dataset before deleting assets.");
@@ -91,7 +124,6 @@ export function useDeleteWorkflow({
       return { removed: 0, failed: 0 };
     }
 
-    const targetSet = new Set(uniqueIds);
     const removedAssetIds: string[] = [];
     let removed = 0;
     let failed = 0;
@@ -111,18 +143,8 @@ export function useDeleteWorkflow({
       }
 
       if (removed > 0) {
-        const removedAssetSet = new Set(removedAssetIds);
-        const removedAnnotationCount = annotations.reduce(
-          (count, annotation) => (removedAssetSet.has(annotation.asset_id) ? count + 1 : count),
-          0,
-        );
-        setPendingAnnotations((previous) => {
-          const next = { ...previous };
-          for (const assetId of uniqueIds) delete next[assetId];
-          return next;
-        });
-        setAnnotations((previous) => previous.filter((annotation) => !targetSet.has(annotation.asset_id)));
-        await refetchAssets(selectedProjectId);
+        const removedAnnotationCount = applyRemovedAssetState(removedAssetIds);
+        await Promise.all([refetchAssets(selectedProjectId), refetchFolders(selectedProjectId)]);
         setMessage(
           `Deleted ${removed}/${uniqueIds.length} images from ${contextLabel} (annotations removed: ${removedAnnotationCount}${
             failed > 0 ? `, failed: ${failed}` : ""
@@ -131,9 +153,6 @@ export function useDeleteWorkflow({
       } else {
         setMessage(`Deleted 0/${uniqueIds.length} images from ${contextLabel}${failed > 0 ? ` (failed: ${failed}).` : "."}`);
       }
-      setSelectedDeleteAssets((previous) => {
-        return clearSelectedDeleteAssets(previous, uniqueIds);
-      });
       return { removed, failed };
     } finally {
       setIsDeletingAssets(false);
@@ -197,39 +216,64 @@ export function useDeleteWorkflow({
       setMessage("Select a folder before deleting it.");
       return;
     }
-    const folderAssetIds = treeFolderAssetIds[selectedTreeFolderPath] ?? [];
-    if (folderAssetIds.length === 0) {
-      setMessage(`Folder "${selectedTreeFolderPath}" has no images to delete.`);
-      return;
-    }
-
-    const confirmed = window.confirm(`Delete folder "${selectedTreeFolderPath}" and ${folderAssetIds.length} image(s) in this subtree?`);
-    if (!confirmed) return;
-
-    const result = await deleteAssetsWithSummary(folderAssetIds, `folder "${selectedTreeFolderPath}"`);
-    if (result.removed > 0) {
-      setSelectedTreeFolderPath(null);
-      setAssetIndex(0);
-    }
+    await handleDeleteFolderPath(selectedTreeFolderPath);
   }
 
   async function handleDeleteFolderPath(folderPath: string) {
     const folderAssetIds = treeFolderAssetIds[folderPath] ?? [];
-    if (folderAssetIds.length === 0) {
-      setMessage(`Folder "${folderPath}" has no images to delete.`);
+    const folderId = folderIdByPath.get(folderPath);
+    if (!folderId) {
+      if (folderAssetIds.length === 0) {
+        setMessage(`Folder "${folderPath}" has no images to delete.`);
+        return;
+      }
+      const confirmed = window.confirm(`Delete folder "${folderPath}" and ${folderAssetIds.length} image(s) in this subtree?`);
+      if (!confirmed) return;
+      const result = await deleteAssetsWithSummary(folderAssetIds, `folder "${folderPath}"`);
+      if (result.removed > 0) {
+        if (shouldResetSelectedFolderAfterDeletion(selectedTreeFolderPath, folderPath)) {
+          setSelectedTreeFolderPath(null);
+          setAssetIndex(0);
+        }
+        setCollapsedFolders((previous) => pruneCollapsedFoldersForDeletedPath(previous, folderPath));
+        removeFolderOptions(folderPath);
+      }
       return;
     }
 
-    const confirmed = window.confirm(`Delete folder "${folderPath}" and ${folderAssetIds.length} image(s) in this subtree?`);
+    const confirmed = window.confirm(
+      `Delete folder "${folderPath}"${folderAssetIds.length > 0 ? ` and ${folderAssetIds.length} image(s) in this subtree` : ""}?`,
+    );
     if (!confirmed) return;
+    if (!selectedProjectId) {
+      setMessage("Select a dataset before deleting folders.");
+      return;
+    }
 
-    const result = await deleteAssetsWithSummary(folderAssetIds, `folder "${folderPath}"`);
-    if (result.removed > 0) {
+    try {
+      setIsDeletingAssets(true);
+      setMessage(null);
+      await deleteFolder(selectedProjectId, folderId);
+      const removedAnnotationCount = applyRemovedAssetState(folderAssetIds);
+      await Promise.all([refetchAssets(selectedProjectId), refetchFolders(selectedProjectId)]);
       if (shouldResetSelectedFolderAfterDeletion(selectedTreeFolderPath, folderPath)) {
         setSelectedTreeFolderPath(null);
         setAssetIndex(0);
       }
       setCollapsedFolders((previous) => pruneCollapsedFoldersForDeletedPath(previous, folderPath));
+      removeFolderOptions(folderPath);
+      setSelectedImportExistingFolder((previous) =>
+        previous === folderPath || previous.startsWith(`${folderPath}/`) ? "" : previous,
+      );
+      setMessage(
+        folderAssetIds.length > 0
+          ? `Deleted folder "${folderPath}" (images removed: ${folderAssetIds.length}, annotations removed: ${removedAnnotationCount}).`
+          : `Deleted empty folder "${folderPath}".`,
+      );
+    } catch (error) {
+      setMessage(error instanceof Error ? `Failed to delete folder: ${error.message}` : "Failed to delete folder.");
+    } finally {
+      setIsDeletingAssets(false);
     }
   }
 

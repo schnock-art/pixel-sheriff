@@ -19,6 +19,18 @@ test("resolveWorkspaceHotkeyAction handles navigation and label shortcuts", () =
     { type: "navigate_next" },
   );
   assert.deepEqual(
+    resolveWorkspaceHotkeyAction({ key: "ArrowLeft", code: "ArrowLeft", shiftKey: true }, { activeLabelCount: 3 }),
+    { type: "navigate_jump_prev" },
+  );
+  assert.deepEqual(
+    resolveWorkspaceHotkeyAction({ key: "ArrowRight", code: "ArrowRight", shiftKey: true }, { activeLabelCount: 3 }),
+    { type: "navigate_jump_next" },
+  );
+  assert.deepEqual(
+    resolveWorkspaceHotkeyAction({ key: " ", code: "Space" }, { activeLabelCount: 3 }),
+    { type: "toggle_playback" },
+  );
+  assert.deepEqual(
     resolveWorkspaceHotkeyAction({ key: "1", code: "Digit1" }, { activeLabelCount: 3 }),
     { type: "toggle_label", labelIndex: 0 },
   );

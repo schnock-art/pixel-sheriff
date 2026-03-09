@@ -287,7 +287,7 @@ def build_export_result(
             "meta": {
                 "original_filename": asset.get("original_filename"),
                 "captured_at": None,
-                "source": None,
+                "source": asset.get("source_meta"),
             },
             "coco": {"image_id": asset_id},
         }

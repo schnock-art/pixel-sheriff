@@ -2,6 +2,8 @@ import { useMemo, useState } from "react";
 
 import type { AnnotationStatus } from "../../../lib/api";
 import { type TreeEntry } from "../../../lib/workspace/tree";
+import { ImportMenu } from "./ImportMenu";
+import { SequenceStatusBadge } from "./SequenceStatusBadge";
 
 interface FilterLabelRow {
   id: string;
@@ -25,7 +27,9 @@ interface AssetBrowserProps {
   filterStatus: "all" | AnnotationStatus;
   filterCategoryId: string;
   filterLabelRows: FilterLabelRow[];
-  onImport: () => void;
+  onImportImages: () => void;
+  onImportVideo: () => void;
+  onOpenWebcam: () => void;
   onCollapseAllFolders: () => void;
   onExpandAllFolders: () => void;
   onSelectFolderScope: (folderPath: string | null) => void;
@@ -61,7 +65,9 @@ export function AssetBrowser({
   filterStatus,
   filterCategoryId,
   filterLabelRows,
-  onImport,
+  onImportImages,
+  onImportVideo,
+  onOpenWebcam,
   onCollapseAllFolders,
   onExpandAllFolders,
   onSelectFolderScope,
@@ -95,9 +101,7 @@ export function AssetBrowser({
             <p>Browse folders, import images, and manage the current labeling scope.</p>
           </div>
           <div className="asset-browser-head-actions">
-            <button type="button" className="primary-button" onClick={onImport} data-testid="asset-browser-import">
-              Import Images
-            </button>
+            <ImportMenu onImportImages={onImportImages} onImportVideo={onImportVideo} onImportWebcam={onOpenWebcam} />
             <button type="button" className="ghost-button" disabled title="Folder creation is not wired yet">
               New Folder
             </button>
@@ -188,7 +192,12 @@ export function AssetBrowser({
                     data-testid="folder-tree-folder"
                     data-demo-path={entry.path}
                   >
-                    {entry.name}
+                    <span>{entry.name}</span>
+                    <SequenceStatusBadge
+                      sourceType={entry.sequenceSourceType}
+                      status={entry.sequenceStatus}
+                      frameCount={entry.sequenceFrameCount}
+                    />
                   </button>
                   <button
                     type="button"

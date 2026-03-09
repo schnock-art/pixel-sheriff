@@ -14,8 +14,9 @@ function resolveWorkspaceHotkeyAction(event, context) {
   if (shouldIgnoreKeyboardTarget(event.target)) return null;
   if (event.altKey || event.ctrlKey || event.metaKey) return null;
 
-  if (event.key === "ArrowLeft") return { type: "navigate_prev" };
-  if (event.key === "ArrowRight") return { type: "navigate_next" };
+  if (event.key === "ArrowLeft") return { type: event.shiftKey ? "navigate_jump_prev" : "navigate_prev" };
+  if (event.key === "ArrowRight") return { type: event.shiftKey ? "navigate_jump_next" : "navigate_next" };
+  if (event.key === " " || event.code === "Space") return { type: "toggle_playback" };
 
   const digit = parseLabelShortcutDigit(event);
   if (digit === null || digit > context.activeLabelCount) return null;

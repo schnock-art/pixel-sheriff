@@ -17,6 +17,7 @@ class LocalStorage:
     def ensure_project_dirs(self, project_id: str) -> None:
         (self.root / "assets" / project_id).mkdir(parents=True, exist_ok=True)
         (self.root / "exports" / project_id).mkdir(parents=True, exist_ok=True)
+        (self.root / "imports" / project_id).mkdir(parents=True, exist_ok=True)
 
     def write_bytes(self, relative_uri: str, content: bytes) -> Path:
         target = self.resolve(relative_uri)

@@ -58,7 +58,7 @@ down:
 	docker compose down
 
 logs:
-	docker compose logs -f web api trainer
+	docker compose logs -f web api worker trainer
 
 ps:
 	docker compose ps
@@ -83,7 +83,7 @@ up-trainer:
 	docker compose up -d trainer
 
 build-all:
-	docker compose build api web trainer
+	docker compose build api web worker trainer
 
 up-all:
 	docker compose up -d

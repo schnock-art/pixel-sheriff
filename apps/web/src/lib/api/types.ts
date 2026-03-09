@@ -41,6 +41,14 @@ export interface Asset {
   id: string;
   project_id: string;
   type: string;
+  folder_id: string | null;
+  folder_path: string | null;
+  file_name: string | null;
+  relative_path: string | null;
+  sequence_id: string | null;
+  source_kind: "image" | "video_frame" | "webcam_frame";
+  frame_index: number | null;
+  timestamp_seconds: number | null;
   uri: string;
   mime_type: string;
   width: number | null;
@@ -51,12 +59,101 @@ export interface Asset {
 
 export interface AssetCreatePayload {
   type?: "image" | "video" | "frame";
+  folder_id?: string | null;
+  file_name?: string | null;
+  sequence_id?: string | null;
+  source_kind?: "image" | "video_frame" | "webcam_frame";
+  frame_index?: number | null;
+  timestamp_seconds?: number | null;
   uri: string;
   mime_type: string;
   width?: number | null;
   height?: number | null;
   checksum: string;
   metadata_json?: Record<string, unknown>;
+}
+
+export interface Folder {
+  id: string;
+  project_id: string;
+  parent_id: string | null;
+  name: string;
+  path: string;
+  asset_count: number;
+  sequence_id: string | null;
+  sequence_name: string | null;
+  sequence_source_type: "video_file" | "webcam" | null;
+  sequence_status: "processing" | "ready" | "failed" | null;
+  sequence_frame_count: number | null;
+  sequence_processed_frames: number | null;
+}
+
+export interface SequenceFrameAsset {
+  id: string;
+  file_name: string;
+  folder_id: string | null;
+  folder_path: string | null;
+  relative_path: string;
+  source_kind: "image" | "video_frame" | "webcam_frame";
+  frame_index: number | null;
+  timestamp_seconds: number | null;
+  image_url: string;
+  thumbnail_url: string;
+  has_annotations: boolean;
+}
+
+export interface AssetSequence {
+  id: string;
+  project_id: string;
+  task_id: string | null;
+  folder_id: string | null;
+  folder_path: string | null;
+  name: string;
+  source_type: "video_file" | "webcam";
+  source_filename: string | null;
+  status: "processing" | "ready" | "failed";
+  frame_count: number;
+  processed_frames: number;
+  fps: number | null;
+  duration_seconds: number | null;
+  width: number | null;
+  height: number | null;
+  error_message: string | null;
+  assets: SequenceFrameAsset[];
+}
+
+export interface SequenceStatus {
+  id: string;
+  status: "processing" | "ready" | "failed";
+  frame_count: number;
+  processed_frames: number;
+  error_message: string | null;
+}
+
+export interface WebcamSessionCreatePayload {
+  task_id?: string | null;
+  folder_id?: string | null;
+  name: string;
+  fps: number;
+}
+
+export interface VideoImportPayload {
+  task_id?: string | null;
+  folder_id?: string | null;
+  name?: string | null;
+  fps: number;
+  max_frames: number;
+  resize_mode: "original" | "width" | "height";
+  resize_width?: number | null;
+  resize_height?: number | null;
+}
+
+export interface VideoImportResponse {
+  sequence: AssetSequence;
+}
+
+export interface WebcamSessionCreateResponse {
+  sequence: AssetSequence;
 }
 
 export interface Annotation {

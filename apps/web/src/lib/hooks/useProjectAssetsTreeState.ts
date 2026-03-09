@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 
-import type { Annotation, AnnotationStatus, Asset } from "../api";
+import type { Annotation, AnnotationStatus, Asset, Folder } from "../api";
 import { buildVisibleTreeEntries } from "../workspace/projectAssetsDerived";
 import { asRelativePath, buildTreeEntries, folderChain } from "../workspace/tree";
 
@@ -8,11 +8,13 @@ type WorkspaceAnnotationMode = "labels" | "bbox" | "segmentation";
 
 export function useProjectAssetsTreeState({
   assets,
+  folders,
   annotations,
   assetById,
   projectAnnotationMode,
 }: {
   assets: Asset[];
+  folders: Folder[];
   annotations: Annotation[];
   assetById: Map<string, Asset>;
   projectAnnotationMode: WorkspaceAnnotationMode;
@@ -23,7 +25,7 @@ export function useProjectAssetsTreeState({
   const [selectedTreeFolderPath, setSelectedTreeFolderPath] = useState<string | null>(null);
   const [collapsedFolders, setCollapsedFolders] = useState<Record<string, boolean>>({});
 
-  const treeBuild = useMemo(() => buildTreeEntries(assets), [assets]);
+  const treeBuild = useMemo(() => buildTreeEntries(assets, folders), [assets, folders]);
   const treeEntries = treeBuild.entries;
   const treeFolderPaths = useMemo(() => Object.keys(treeBuild.folderAssetIds), [treeBuild.folderAssetIds]);
   const visibleTreeEntries = useMemo(() => buildVisibleTreeEntries(treeEntries, collapsedFolders), [collapsedFolders, treeEntries]);

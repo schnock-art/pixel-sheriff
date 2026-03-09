@@ -33,6 +33,45 @@ test("buildTreeEntries preserves folder hierarchy and deterministic ordering", (
   assert.deepEqual(tree.folderAssetIds.zeta, ["3"]);
 });
 
+test("buildTreeEntries includes explicit empty folders and sequence metadata", () => {
+  const tree = buildTreeEntries(
+    [{ id: "1", uri: "/x1", relative_path: "captures/frame_000001.jpg", metadata_json: {} }],
+    [
+      {
+        id: "folder-empty",
+        path: "imports/pending",
+        sequence_id: "seq-pending",
+        sequence_status: "processing",
+        sequence_source_type: "video_file",
+        sequence_name: "pending",
+        sequence_frame_count: 0,
+      },
+      {
+        id: "folder-captures",
+        path: "captures",
+        sequence_id: "seq-cam",
+        sequence_status: "ready",
+        sequence_source_type: "webcam",
+        sequence_name: "cam-01",
+        sequence_frame_count: 1,
+      },
+    ],
+  );
+
+  const folderEntries = tree.entries.filter((entry) => entry.kind === "folder");
+  assert.equal(folderEntries.some((entry) => entry.path === "imports/pending"), true);
+  assert.equal(folderEntries.some((entry) => entry.path === "captures"), true);
+
+  const capturesEntry = folderEntries.find((entry) => entry.path === "captures");
+  assert.equal(capturesEntry.sequenceId, "seq-cam");
+  assert.equal(capturesEntry.sequenceStatus, "ready");
+  assert.equal(capturesEntry.sequenceSourceType, "webcam");
+  assert.equal(capturesEntry.sequenceFrameCount, 1);
+
+  assert.deepEqual(tree.folderAssetIds["imports/pending"], []);
+  assert.deepEqual(tree.folderAssetIds.captures, ["1"]);
+});
+
 test("folderChain returns ancestor chain from shallow to deep", () => {
   assert.deepEqual(folderChain("a/b/c"), ["a", "a/b", "a/b/c"]);
   assert.deepEqual(folderChain("single"), ["single"]);

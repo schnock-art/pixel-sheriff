@@ -70,11 +70,31 @@ services:
       DB_NAME: ${DB_NAME:-pixel_sheriff}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       JOB_QUEUE_KEY: ${JOB_QUEUE_KEY:-pixel_sheriff:train_jobs:v1}
+      MEDIA_QUEUE_KEY: ${MEDIA_QUEUE_KEY:-pixel_sheriff:media_jobs:v1}
       STORAGE_ROOT: /app/data
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://localhost:3010,http://web-demo:3000}
       TRAINER_INFERENCE_BASE_URL: ${TRAINER_INFERENCE_BASE_URL:-http://trainer:8020}
     ports:
       - "${API_PORT:-8000}:8000"
+    depends_on:
+      - db
+      - redis
+    volumes:
+      - ./data:/app/data
+
+  worker:
+    build:
+      context: .
+      dockerfile: apps/worker/Dockerfile
+    environment:
+      DB_HOST: ${DB_HOST:-db}
+      DB_PORT: ${DB_PORT:-5432}
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASS: ${DB_PASS:-postgres}
+      DB_NAME: ${DB_NAME:-pixel_sheriff}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      MEDIA_QUEUE_KEY: ${MEDIA_QUEUE_KEY:-pixel_sheriff:media_jobs:v1}
+      STORAGE_ROOT: /app/data
     depends_on:
       - db
       - redis
@@ -93,6 +113,7 @@ services:
       DB_NAME: ${TEST_DB_NAME:-pixel_sheriff_test}
       REDIS_URL: redis://redis-test:6379/0
       JOB_QUEUE_KEY: ${JOB_QUEUE_KEY:-pixel_sheriff:test_jobs:v1}
+      MEDIA_QUEUE_KEY: ${MEDIA_QUEUE_KEY:-pixel_sheriff:test_media_jobs:v1}
       STORAGE_ROOT: ${TEST_STORAGE_ROOT:-/tmp/pixel_sheriff_test_data}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://localhost:3010,http://web-demo:3000}
       TRAINER_INFERENCE_BASE_URL: ${TRAINER_INFERENCE_BASE_URL:-http://trainer:8020}
@@ -183,6 +204,7 @@ services:
       DB_NAME: ${DEMO_DB_NAME:-pixel_sheriff_demo}
       REDIS_URL: redis://redis-demo:6379/0
       JOB_QUEUE_KEY: ${DEMO_JOB_QUEUE_KEY:-pixel_sheriff:demo_train_jobs:v1}
+      MEDIA_QUEUE_KEY: ${DEMO_MEDIA_QUEUE_KEY:-pixel_sheriff:demo_media_jobs:v1}
       STORAGE_ROOT: /app/data
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://localhost:3010,http://web-demo:3000}
       TRAINER_INFERENCE_BASE_URL: http://trainer-demo:8020

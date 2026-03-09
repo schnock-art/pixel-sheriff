@@ -57,6 +57,7 @@ interface ViewerProps {
   onUpsertObject: (object: GeometryObject) => void;
   onDeleteSelectedObject: () => void;
   onImageBasisChange: (imageBasis: ImageBasis | null) => void;
+  onCanvasInteraction?: () => void;
 }
 
 function createObjectId(prefix: string) {
@@ -181,6 +182,7 @@ export function Viewer({
   onUpsertObject,
   onDeleteSelectedObject,
   onImageBasisChange,
+  onCanvasInteraction,
 }: ViewerProps) {
   const [imageLoadError, setImageLoadError] = useState(false);
   const hasImage = Boolean(currentAsset?.uri) && !imageLoadError;
@@ -312,8 +314,9 @@ export function Viewer({
   }, [annotationMode, canDrawPolygon, finalizePolygon, onDeleteSelectedObject, onHoverObject, selectedObjectId]);
 
   function handlePointerDown(event: PointerEvent<SVGSVGElement>) {
-    if (!canInteractWithGeometry || !imageBasis || !viewport) return;
     if (event.button !== 0) return;
+    onCanvasInteraction?.();
+    if (!canInteractWithGeometry || !imageBasis || !viewport) return;
     const point = toImagePoint(event);
     if (!point) return;
 
