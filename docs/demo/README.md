@@ -32,7 +32,7 @@ make demo-assets
 ## Behavior
 
 - The pipeline deletes and recreates a dedicated `README Demo` project on every run.
-- It seeds deterministic bbox fixture data through the public API from the committed source images under `demo/images`.
+- It seeds deterministic bbox fixture data through the public API from the committed source images under `docs/demo/source-images`.
 - The hero walkthrough is generated with Playwright and copied into `docs/demo/`.
 - Screenshots are captured programmatically with a fixed viewport and stable filenames.
 - Raw capture artifacts are stored under `artifacts/demo/`.

@@ -37,7 +37,7 @@
   ],
   "assets": [
     {
-      "source_file": "demo/images/cat_01.jpg",
+      "source_file": "docs/demo/source-images/cat_01.jpg",
       "relative_path": "cats/cat_01.jpg",
       "mime_type": "image/jpeg",
       "width": 5360,
@@ -50,7 +50,7 @@
       }
     },
     {
-      "source_file": "demo/images/cat_02.jpg",
+      "source_file": "docs/demo/source-images/cat_02.jpg",
       "relative_path": "cats/cat_02.jpg",
       "mime_type": "image/jpeg",
       "width": 5631,
@@ -63,7 +63,7 @@
       }
     },
     {
-      "source_file": "demo/images/cat_03.jpg",
+      "source_file": "docs/demo/source-images/cat_03.jpg",
       "relative_path": "cats/cat_03.jpg",
       "mime_type": "image/jpeg",
       "width": 2010,
@@ -76,7 +76,7 @@
       }
     },
     {
-      "source_file": "demo/images/dog_01.jpg",
+      "source_file": "docs/demo/source-images/dog_01.jpg",
       "relative_path": "dogs/dog_01.jpg",
       "mime_type": "image/jpeg",
       "width": 3024,
@@ -89,7 +89,7 @@
       }
     },
     {
-      "source_file": "demo/images/dog_02.jpg",
+      "source_file": "docs/demo/source-images/dog_02.jpg",
       "relative_path": "dogs/dog_02.jpg",
       "mime_type": "image/jpeg",
       "width": 4160,
@@ -102,7 +102,7 @@
       }
     },
     {
-      "source_file": "demo/images/dog_03.jpg",
+      "source_file": "docs/demo/source-images/dog_03.jpg",
       "relative_path": "dogs/dog_03.jpg",
       "mime_type": "image/jpeg",
       "width": 1728,
