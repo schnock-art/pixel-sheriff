@@ -292,6 +292,7 @@ export function LabelPanel({
                       data-testid="geometry-object-item"
                       data-object-id={object.id}
                       data-category-id={object.categoryId}
+                      data-selected={isSelected ? "true" : "false"}
                     >
                       <span className="geometry-object-index">{index + 1}</span>
                       <span>{`${index + 1} ${object.categoryName}`}</span>
@@ -395,6 +396,7 @@ export function LabelPanel({
                     }
                     data-testid="label-chip"
                     data-category-id={label.id}
+                    data-selected={isActive ? "true" : "false"}
                   >
                     <span className="label-index">{index + 1}</span>
                     <span>{label.name}</span>

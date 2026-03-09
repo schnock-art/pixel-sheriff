@@ -38,10 +38,10 @@ test("records the README hero walkthrough", async ({ browser }) => {
   await pause(page, 650);
 
   for (const asset of demo.assets) {
-    await selectAsset(page, asset.relativePath);
+    await selectAsset(page, asset.relativePath, asset.objectId, asset.categoryId);
     await pause(page, 550);
-    await selectGeometryObject(page, asset.objectId);
-    await pause(page, 700);
+    await selectGeometryObject(page, asset);
+    await pause(page, 950);
   }
 
   await smoothClick(page, page.locator("[data-testid='create-dataset-button']"));

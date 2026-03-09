@@ -18,8 +18,12 @@ test("captures deterministic README screenshots", async ({ page }) => {
   await waitForLabelingReady(page);
   await saveViewportScreenshot(page, "screenshot-01-assets.png");
 
-  await selectAsset(page, demo.hero.assetRelativePath);
-  await selectGeometryObject(page, demo.hero.objectId);
+  const heroAsset = demo.assets.find((asset) => asset.objectId === demo.hero.objectId);
+  if (!heroAsset) {
+    throw new Error(`Hero asset ${demo.hero.objectId} is missing from seeded demo metadata`);
+  }
+  await selectAsset(page, demo.hero.assetRelativePath, demo.hero.objectId, demo.hero.categoryId);
+  await selectGeometryObject(page, heroAsset);
   await saveViewportScreenshot(page, "screenshot-02-labeling.png");
 
   await page.goto(demo.urls.dataset, { waitUntil: "domcontentloaded" });
@@ -34,4 +38,3 @@ test("captures deterministic README screenshots", async ({ page }) => {
   await waitForBuilderReady(page);
   await saveViewportScreenshot(page, "screenshot-05-builder.png");
 });
-

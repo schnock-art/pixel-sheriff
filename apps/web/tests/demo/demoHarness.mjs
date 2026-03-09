@@ -25,6 +25,30 @@ export async function waitForImageReady(page) {
   });
 }
 
+export async function waitForAssetAnnotationReady(page, objectId, categoryId) {
+  await page.locator(attrSelector("geometry-object-item", "data-object-id", objectId)).waitFor();
+  await page.locator(attrSelector("geometry-object", "data-object-id", objectId)).waitFor();
+  await page.locator(attrSelector("label-chip", "data-category-id", categoryId)).waitFor();
+}
+
+async function clickCanvasPoint(page, imagePoint, imageSize) {
+  const canvas = page.locator("[data-testid='viewer-canvas']");
+  const box = await canvas.boundingBox();
+  if (!box) {
+    throw new Error("Viewer canvas is not visible");
+  }
+
+  const scale = Math.min(box.width / imageSize.width, box.height / imageSize.height);
+  const renderedWidth = imageSize.width * scale;
+  const renderedHeight = imageSize.height * scale;
+  const offsetX = box.x + (box.width - renderedWidth) / 2;
+  const offsetY = box.y + (box.height - renderedHeight) / 2;
+  const clickX = offsetX + imagePoint.x * scale;
+  const clickY = offsetY + imagePoint.y * scale;
+  await page.mouse.move(clickX, clickY, { steps: 12 });
+  await page.mouse.click(clickX, clickY);
+}
+
 export async function waitForLabelingReady(page) {
   await page.locator("[data-testid='project-ribbon']").waitFor();
   await page.locator("[data-testid='asset-browser']").waitFor();
@@ -60,19 +84,36 @@ export async function smoothClick(page, locator, pauseBeforeClick = 140) {
   await locator.click();
 }
 
-export async function selectAsset(page, relativePath) {
+export async function selectAsset(page, relativePath, objectId = null, categoryId = null) {
   const assetButton = page.locator(attrSelector("folder-tree-asset", "data-demo-path", relativePath));
   await smoothClick(page, assetButton);
   await waitForImageReady(page);
+  if (objectId && categoryId) {
+    await waitForAssetAnnotationReady(page, objectId, categoryId);
+  }
 }
 
-export async function selectGeometryObject(page, objectId) {
-  const objectButton = page.locator(attrSelector("geometry-object-item", "data-object-id", objectId));
-  await objectButton.scrollIntoViewIfNeeded();
-  await moveMouseToCenter(page, objectButton);
-  await pause(page, 120);
-  await objectButton.click({ force: true });
-  await page.locator(attrSelector("geometry-object", "data-object-id", objectId)).waitFor();
+export async function selectGeometryObject(page, asset) {
+  const objectButton = page.locator(attrSelector("geometry-object-item", "data-object-id", asset.objectId));
+  await objectButton.waitFor();
+  await clickCanvasPoint(
+    page,
+    {
+      x: asset.bbox[0] + asset.bbox[2] / 2,
+      y: asset.bbox[1] + asset.bbox[3] / 2,
+    },
+    {
+      width: asset.width,
+      height: asset.height,
+    },
+  );
+  await page.locator(
+    `${attrSelector("geometry-object-item", "data-object-id", asset.objectId)}[data-selected="true"]`,
+  ).waitFor();
+  const labelChip = page.locator(attrSelector("label-chip", "data-category-id", asset.categoryId));
+  await labelChip.waitFor();
+  await labelChip.click({ force: true });
+  await page.locator(`${attrSelector("label-chip", "data-category-id", asset.categoryId)}[data-selected="true"]`).waitFor();
 }
 
 export async function saveViewportScreenshot(page, fileName) {

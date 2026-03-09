@@ -129,6 +129,7 @@ export async function seedDemoProject(options = {}) {
       objectId: assetFixture.annotation.object_id,
       categoryName: assetFixture.annotation.category,
       categoryId: categoryIdsByName[assetFixture.annotation.category],
+      bbox: assetFixture.annotation.bbox,
     };
     uploadedAssets.push(assetRecord);
 

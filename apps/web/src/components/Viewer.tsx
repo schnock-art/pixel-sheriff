@@ -573,7 +573,13 @@ export function Viewer({
         viewport: toViewportCoords(handlePoint.x, handlePoint.y, viewport!),
       }));
       return (
-        <g key={object.id} className={className} data-testid="geometry-object" data-object-id={object.id}>
+        <g
+          key={object.id}
+          className={className}
+          data-testid="geometry-object"
+          data-object-id={object.id}
+          data-selected={isSelected ? "true" : "false"}
+        >
           <rect x={topLeft.x} y={topLeft.y} width={width} height={height} style={overlayStyle} />
           {annotationMode === "bbox" && isSelected
             ? handles.map((handlePoint) => (
@@ -600,7 +606,13 @@ export function Viewer({
         points.push(`${point.x},${point.y}`);
       }
       return (
-        <g key={`${object.id}-${index}`} className={className} data-testid="geometry-object" data-object-id={object.id}>
+        <g
+          key={`${object.id}-${index}`}
+          className={className}
+          data-testid="geometry-object"
+          data-object-id={object.id}
+          data-selected={isSelected ? "true" : "false"}
+        >
           <polygon points={points.join(" ")} style={overlayStyle} />
         </g>
       );
