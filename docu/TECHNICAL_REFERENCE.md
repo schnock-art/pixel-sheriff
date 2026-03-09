@@ -1,5 +1,7 @@
 # Technical Reference
 
+Current codebase note: this file is a historical deep-dive and may lag implementation details. For the current architecture and media flow overview, start with `README.md` and `docs/architecture.md`.
+
 Detailed implementation notes, API surface, runtime behavior, and troubleshooting details.
 
 For product overview and quickstart, see `README.md`.

@@ -1,5 +1,7 @@
 # Pixel Sheriff Architecture
 
+Current codebase note: this file is a historical reference and may lag implementation details. For the current high-signal overview, start with `README.md` and `docs/architecture.md`.
+
 ## 1. System Overview
 
 Pixel Sheriff is a local-first image annotation system with four active runtime layers:

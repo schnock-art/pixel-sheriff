@@ -1,18 +1,31 @@
 # pixel-sheriff
 
-Local-first computer vision annotation and training platform.
+Local-first annotation, dataset, and training platform for images and frame-based video workflows.
 
 ## Overview
 
-Pixel Sheriff helps you go from raw images to trained models in one workspace:
+Pixel Sheriff keeps labeling image-first, even when the source is a video file or webcam session:
 
-- Import images into projects and folder trees
-- Create/select project tasks (`classification`, `bbox`, `segmentation`) and keep labels scoped per task
-- Annotate for classification, bounding boxes, or segmentation
-- Build task-scoped versioned datasets with saved split membership (`train`/`val`/`test`)
-- Train experiments and monitor live metrics/logs
-- Export datasets and model artifacts
-- Run deployment + suggestion workflows
+- Organize assets in project folders with task-scoped labels
+- Import images directly, or turn videos and webcam captures into normal frame assets
+- Reuse the same annotation canvas for classification, bounding boxes, and polygon segmentation
+- Show sequence navigation only when the selected asset belongs to a video/webcam-backed frame sequence
+- Build immutable dataset versions with frozen split membership
+- Export datasets and train, compare, and deploy models from the same workspace
+
+## Product Model
+
+Video is not labeled as raw video. Imported videos and webcam sessions create ordinary image assets grouped by folders and asset sequences:
+
+```text
+video file or webcam stream
+-> frame extraction / capture
+-> normal image assets in a folder
+-> existing labeling canvas + tools
+-> dataset export stays frame-based
+```
+
+That keeps the storage, annotation, and export pipelines coherent across image-only and sequence-backed projects.
 
 ## Product Tour
 
@@ -61,9 +74,10 @@ Model builder view for editing task, dataset version, and model configuration fo
 
 ## Tech Stack
 
-- `apps/web`: Next.js frontend
-- `apps/api`: FastAPI backend
-- `apps/trainer`: Redis worker for training/inference tasks
+- `apps/web`: Next.js 14 frontend
+- `apps/api`: FastAPI backend with startup migrations and local storage services
+- `apps/worker`: Redis-backed media worker for video frame extraction
+- `apps/trainer`: training + inference service for experiments and deployment-assisted suggestions
 - `db`: PostgreSQL
 - `redis`: queue/event backend
 - local storage under `./data`
@@ -73,6 +87,11 @@ Model builder view for editing task, dataset version, and model configuration fo
 - Docker + Docker Compose
 - Make
 
+Optional for local non-Docker iteration:
+
+- Node.js for `apps/web`
+- Python for `apps/api`
+
 ## Install
 
 1. Copy environment defaults:
@@ -81,7 +100,7 @@ Model builder view for editing task, dataset version, and model configuration fo
 cp .env.example .env
 ```
 
-2. Start the app:
+2. Start the full stack:
 
 ```bash
 make up
@@ -93,33 +112,35 @@ make up
 - API docs: `http://localhost:8010/docs`
 - API base: `http://localhost:8010/api/v1`
 
+`make up` starts `web`, `api`, `worker`, `trainer`, `db`, and `redis`. That is the simplest way to get image import, video import, webcam capture, training, and deployment suggestions working together.
+
+If you use `make up-web-api` for a faster UI/API loop, note that it does not start the media worker or trainer. Bring them up separately when you need them:
+
+```bash
+docker compose up -d worker
+make up-trainer
+```
+
 ## How to Use
 
 1. Create or select a project.
-2. Select or create a task from the project ribbon (`Task` selector at the top of project pages).
-3. Import images (existing/new project target).
-4. Label assets in `Labeling`.
-5. Click `Create Dataset` to move into `Dataset`, then create a dataset version.
-6. Click `Train Model` from `Dataset` or use `+ New Model` in `Models`.
-7. Create/update a model in `Models`.
-   For smaller bbox training runs, switch the family to `ssdlite320_mobilenet_v3_large`; it is the lighter detector and is the better default choice for 16 GB VRAM-class GPUs.
-   Family metadata now declares allowed/required input sizes and the model editor enforces them. `ssdlite320_mobilenet_v3_large` requires `320x320`; other current families accept only their documented square-size ranges.
-   Detection training defaults to `training.drop_last=true`, which avoids SSD Lite BatchNorm failures on singleton tail batches.
-   On GPUs where CUDA `torchvision` NMS is not available yet, detection evaluation falls back to CPU automatically while training stays on CUDA.
-   Detection ONNX export now also falls back to the legacy TorchScript-based exporter when the default `torch.export` path fails on torchvision postprocessing (`batched_nms`).
-   Detection ONNX exports currently validate as fixed-batch (`batch=1`) artifacts; dynamic batch is disabled for torchvision detection graphs because ONNX Runtime validation fails on their exported postprocessing graph.
-   Detection ONNX validation is task-aware, so postprocessed outputs such as `[300, 4]` are accepted instead of failing dynamic-batch checks.
-8. Start training in `Experiments` and monitor metrics/logs.
-   Detection experiment pages now expose `Loss`, `mAP`, and `Runtime` dashboard tabs with `train_loss`, `val mAP@50`, `val mAP@50:95`, `epoch_seconds`, and `eta_seconds`.
-9. Export dataset zip or model artifacts as needed.
+2. Select or create a task from the project ribbon. Tasks lock the annotation mode to `classification`, `bbox`, or `segmentation`.
+3. Open `Labeling` and use the `Import` menu:
+   - `Images` keeps the current image import flow.
+   - `Video File` uploads a video, creates a dedicated folder/sequence, and queues server-side frame extraction.
+   - `Webcam Stream` opens a browser camera preview and uploads captured snapshots into a dedicated webcam sequence.
+4. Label assets on the existing canvas. Video and webcam frames use the same annotation tools as normal images.
+5. When the current asset belongs to a sequence, the bottom panel switches from plain pagination to sequence controls, a coverage timeline, and nearby frame thumbnails.
+6. Click `Create Dataset` to move into `Dataset`, preview the task-scoped export, and create a dataset version.
+7. Create or update a model in `Models`, then launch runs from `Dataset` or `Models`.
+8. Monitor training in `Experiments`, review evaluation artifacts, and publish trained models from `Deploy`.
+9. Export dataset zips or model artifacts as needed.
 
-Experiment consistency note:
-- Experiments default to the model's recorded `source_dataset.manifest_id`, not simply the latest active dataset version in the project.
-- To train on a newer dataset version, create or refresh the model from that dataset version first.
+Export behavior stays backward-compatible: sequence frames are exported like normal images, with optional lineage metadata (`sequence_id`, `frame_index`, `timestamp_seconds`, and source kind) added only for video/webcam-derived assets.
 
 ## Useful Make Commands
 
-Core workflow:
+Full stack:
 
 ```bash
 make help
@@ -129,14 +150,15 @@ make logs
 make ps
 ```
 
-Web/API iteration:
+Fast web/API loop:
 
 ```bash
 make build-web-api
 make up-web-api
+docker compose up -d worker
 ```
 
-Trainer iteration (optimized):
+Trainer iteration:
 
 ```bash
 make build-trainer-base      # only when torch/cuda base changes
@@ -145,79 +167,67 @@ make build-trainer-bootstrap # one-time base + trainer
 make up-trainer
 ```
 
-Build everything:
+Local dev without Docker for app services:
 
 ```bash
-make build-all
-make up-all
+make infra
+make create-local-db
+make dev-api
+make dev-web
 ```
 
-Focused tests:
+Quality checks:
 
 ```bash
 make test-web
-make test-api-focused
-make test-api-safe
-```
-
-Direct helpers:
-
-```bash
-./scripts/run_web_tests.sh
 ./scripts/run_api_tests.sh
-```
-
-Contract sync:
-
-```bash
+make verify-cross-boundary
 make contracts-sync
 make contracts-check
 ```
 
-## Notes on Efficient Rebuilds
-
-- Use `make up-web-api` for normal UI/API code changes.
-- Use `make build-web-api` only when API/web image rebuild is needed.
-- Keep trainer base separate (`make build-trainer-base`) so large CUDA/PyTorch layers are reused.
-
 ## Documentation
 
-- Technical deep dive: `docu/TECHNICAL_REFERENCE.md`
-- Architecture: `docu/Architecture.md`
-- Changelog: `docu/CHANGELOG.md`
-- Implementation status: `docu/IMPLEMENTATION_TASKS.md`
+Current docs:
 
-## Frontend Structure Notes
+- `docs/architecture.md` - current service topology, folder/sequence model, and media flows
+- `docs/demo/README.md` - automated README/demo asset pipeline
+- `docs/plans/` - current implementation and design plans
 
-- Dataset route orchestration lives in `apps/web/src/lib/hooks/useDatasetPageState.ts`, with rendering split across `apps/web/src/components/workspace/dataset/*`.
-- Labeling workspace orchestration stays in `apps/web/src/components/workspace/ProjectAssetsWorkspace.tsx`, with task/bootstrap, suggestion state, and tree navigation split into dedicated hooks under `apps/web/src/lib/hooks/`.
-- Web API access is now split under `apps/web/src/lib/api/`:
-  - `client.js` for fetch/error/URI primitives
-  - `types.ts` for shared request/response types
-  - domain modules such as `datasets.ts`, `experiments.ts`, `deployments.ts`, `models.ts`
-  - `apps/web/src/lib/api.ts` remains a compatibility barrel for existing imports
-- Experiment logs are now viewed per run attempt:
-  - the API/UI preserve historical `runs/{attempt}/training.log` files
-  - the experiment detail page resets the visible log buffer when a new run starts and labels the current log view with the served run number
-- Cancel requests are cooperative:
-  - queued runs cancel immediately
-  - running jobs are marked `cancel_requested` and the trainer stops at the next batch boundary
-- When changing frontend structure, run both `./scripts/run_web_tests.sh` and `cd apps/web && npx tsc --noEmit`.
+Historical notes:
 
-## Contract Artifacts
+- `docu/` - older architecture/reference docs and planning notes that may lag the current implementation
 
-- Canonical shared schemas and generated metadata live under `packages/contracts`.
-- App-local copies in `apps/api` and `apps/web` are synchronized from that directory for runtime compatibility.
-- Update generated metadata and sync targets with `make contracts-sync`.
-- Verify there is no artifact drift with `make contracts-check`.
+## Codebase Notes
+
+### Frontend
+
+- Project routes live under `apps/web/src/app/projects/[projectId]/`.
+- The labeling workspace orchestration lives in `apps/web/src/components/workspace/ProjectAssetsWorkspace.tsx`.
+- Import, folder tree, and sequence-specific UI are split into focused components under `apps/web/src/components/workspace/project-assets/`.
+- Sequence-aware workspace hooks live under `apps/web/src/lib/hooks/`:
+  - `useFolders`
+  - `useSequence`
+  - `useSequenceNavigation`
+  - `useWebcamCapture`
+- Web API access is split under `apps/web/src/lib/api/`, with `apps/web/src/lib/api.ts` kept as a compatibility barrel.
+
+### Backend
+
+- API entrypoint: `apps/api/src/sheriff_api/main.py`
+- Routers are mounted under `/api/v1`, including `folders`, `video_imports`, and `sequences` for the folder/sequence media flow.
+- Startup schema bootstrapping runs `Base.metadata.create_all` plus `run_startup_migrations`, which also backfills first-class folders and asset sequence fields for legacy assets.
+- Sequence and folder helpers live in `apps/api/src/sheriff_api/services/sequences.py` and `apps/api/src/sheriff_api/services/folders.py`.
+- FFmpeg-based extraction lives in `apps/api/src/sheriff_api/services/video_frames.py`.
+
+### Workers and Contracts
+
+- `apps/worker` consumes `MEDIA_QUEUE_KEY` jobs from Redis and handles background video frame extraction.
+- `apps/trainer` remains the training/inference service for experiments and deployment-assisted suggestions.
+- Shared schemas and generated metadata live under `packages/contracts` and are synchronized into app-local copies as needed.
 
 ## Test Environment Notes
 
 - In WSL, prefer `./scripts/run_web_tests.sh` or `make test-web`; the wrapper avoids the Windows `npm` shim and uses `nvm` when needed.
-- In this repo, API tests are most reliable through `./scripts/run_api_tests.sh`, which runs them against the Docker-backed Postgres test environment and rebuilds the `api-test` image so code/tests are current.
+- API tests are most reliable through `./scripts/run_api_tests.sh`, which runs them against the Docker-backed Postgres test environment and rebuilds the `api-test` image so code/tests are current.
 - For cross-boundary refactor checks, prefer `make verify-cross-boundary`.
-- If `make` is unavailable in the current shell, run the underlying checks directly:
-  - `python3 scripts/sync_contract_artifacts.py --check`
-  - `./scripts/typecheck_web.sh`
-  - `./scripts/run_web_tests.sh tests/apiClient.test.js`
-  - `./scripts/run_api_tests.sh -q tests/test_cross_boundary_contracts.py`
