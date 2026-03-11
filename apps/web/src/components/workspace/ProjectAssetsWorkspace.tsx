@@ -1009,6 +1009,7 @@ export default function ProjectAssetsWorkspace() {
         projectId={selectedProjectId}
         taskId={selectedTaskId}
         defaultName={webcamDefaultName}
+        folderOptions={folders.map((folder) => folder.path)}
         onClose={() => setIsWebcamModalOpen(false)}
         onSequenceCreated={(sequence) => {
           if (sequence.folder_path) treeState.handleSelectFolderScope(sequence.folder_path);
@@ -1023,10 +1024,11 @@ export default function ProjectAssetsWorkspace() {
             treeState.handleSelectTreeAsset(asset.id, sequence.folder_path ?? undefined);
           }
         }}
-        onFinished={(sequence) => {
+        onFinished={(sequences) => {
           void Promise.all([refetchAssets(selectedProjectId), refetchFolders(selectedProjectId)]).then(() => {
-            if (sequence?.folder_path) treeState.handleSelectFolderScope(sequence.folder_path);
-            if (sequence?.id) void refetchSequence();
+            const firstSequence = sequences[0] ?? null;
+            if (firstSequence?.folder_path) treeState.handleSelectFolderScope(firstSequence.folder_path);
+            if (sequences.some((sequence) => sequence.id === currentSequenceId)) void refetchSequence();
           });
         }}
       />

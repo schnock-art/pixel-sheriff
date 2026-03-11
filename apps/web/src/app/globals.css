@@ -2834,7 +2834,67 @@ button {
 }
 
 .webcam-capture-modal {
-  width: min(720px, calc(100vw - 20px));
+  width: min(1120px, calc(100vw - 20px));
+}
+
+.webcam-modal-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.webcam-modal-head h3 {
+  margin: 0 0 4px;
+}
+
+.webcam-modal-head p {
+  margin: 0;
+  color: #58728f;
+  font-size: 14px;
+}
+
+.webcam-preview-grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+}
+
+.webcam-preview-card {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid #d6e0ec;
+  border-radius: 16px;
+  background: linear-gradient(180deg, rgba(249, 251, 254, 0.98), rgba(237, 243, 250, 0.98));
+}
+
+.webcam-preview-card header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.webcam-device-status {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 4px 10px;
+  background: #e7f0fb;
+  color: #315d8e;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.webcam-device-status.is-live {
+  background: #dff4e8;
+  color: #256548;
+}
+
+.webcam-device-status.is-idle {
+  background: #edf1f6;
+  color: #6c8098;
 }
 
 .webcam-preview-shell {
@@ -2850,10 +2910,29 @@ button {
 .webcam-preview {
   width: 100%;
   min-height: 280px;
-  max-height: 420px;
+  height: 280px;
   display: block;
   object-fit: cover;
   background: transparent;
+}
+
+.webcam-preview-meta {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  color: #4e6682;
+}
+
+.webcam-preview-empty {
+  display: grid;
+  place-items: center;
+  min-height: 220px;
+  border: 1px dashed #c8d4e2;
+  border-radius: 16px;
+  color: #667c94;
+  background: rgba(246, 249, 252, 0.96);
+  text-align: center;
+  padding: 24px;
 }
 
 .webcam-capture-count {

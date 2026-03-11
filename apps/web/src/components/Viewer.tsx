@@ -707,11 +707,6 @@ export function Viewer({
         <div className="car car-right" />
         {imageLoadError ? <div className="viewer-load-state">Unable to load the selected image preview.</div> : null}
       </div>
-      {canDrawBBox && bboxDraft ? (
-        <p className="viewer-draft-warning" role="status" aria-live="polite">
-          Draft box not saved yet. Release mouse to create the object. Drag boxes to move; drag corner/edge handles to resize.
-        </p>
-      ) : null}
       {canDrawPolygon && polygonDraft.length > 0 ? (
         <p className="viewer-draft-warning" role="status" aria-live="polite">
           Draft polygon not saved yet. Click near the first point, double-click, or press Enter to close.

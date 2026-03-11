@@ -160,6 +160,7 @@ async def create_sequence_with_folder(
     project_id: str,
     task_id: str | None,
     folder_id: str | None,
+    folder_path: str | None = None,
     requested_name: str,
     source_type: str,
     source_filename: str | None = None,
@@ -177,6 +178,20 @@ async def create_sequence_with_folder(
             raise ValueError("folder_sequence_exists")
         asset_exists = (
             await db.execute(select(Asset.id).where(Asset.folder_id == folder_id).limit(1))
+        ).scalar_one_or_none()
+        if asset_exists is not None:
+            raise ValueError("folder_not_empty")
+    elif folder_path:
+        folder = await ensure_folder_path(db, project_id, folder_path)
+        if folder is None:
+            raise ValueError("folder_create_failed")
+        existing_sequence = (
+            await db.execute(select(AssetSequence).where(AssetSequence.folder_id == folder.id))
+        ).scalar_one_or_none()
+        if existing_sequence is not None:
+            raise ValueError("folder_sequence_exists")
+        asset_exists = (
+            await db.execute(select(Asset.id).where(Asset.folder_id == folder.id).limit(1))
         ).scalar_one_or_none()
         if asset_exists is not None:
             raise ValueError("folder_not_empty")

@@ -120,6 +120,7 @@ async def create_webcam_session(
             project_id=project_id,
             task_id=payload.task_id,
             folder_id=payload.folder_id,
+            folder_path=payload.folder_path,
             requested_name=payload.name,
             source_type="webcam",
             source_filename=None,

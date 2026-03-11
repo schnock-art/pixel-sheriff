@@ -52,6 +52,7 @@ class SequenceStatusRead(BaseModel):
 class WebcamSessionCreate(BaseModel):
     task_id: str | None = None
     folder_id: str | None = None
+    folder_path: str | None = None
     name: str
     fps: float = 2.0
 

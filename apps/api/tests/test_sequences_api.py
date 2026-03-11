@@ -168,6 +168,35 @@ async def test_webcam_sequence_detail_sorts_frames_and_marks_annotation_coverage
 
 
 @pytest.mark.asyncio
+async def test_webcam_session_create_accepts_explicit_folder_path(client: AsyncClient) -> None:
+    project = await _create_project(client, name="webcam-folder-path")
+    project_id = project["id"]
+
+    created = await client.post(
+        f"/api/v1/projects/{project_id}/webcam-sessions",
+        json={
+            "task_id": project["default_task_id"],
+            "name": "line-a",
+            "fps": 2,
+            "folder_path": "captures/loading-bay/cam-a",
+        },
+    )
+    assert created.status_code == 200
+    sequence = created.json()["sequence"]
+
+    assert sequence["folder_path"] == "captures/loading-bay/cam-a"
+
+    folders = await client.get(f"/api/v1/projects/{project_id}/folders")
+    assert folders.status_code == 200
+    assert [folder["path"] for folder in folders.json()] == [
+        "captures",
+        "captures/loading-bay",
+        "captures/loading-bay/cam-a",
+    ]
+    assert folders.json()[-1]["sequence_id"] == sequence["id"]
+
+
+@pytest.mark.asyncio
 async def test_delete_folder_removes_empty_sequence_folder(client: AsyncClient) -> None:
     project = await _create_project(client, name="delete-empty-folder")
     project_id = project["id"]

@@ -133,6 +133,7 @@ export interface SequenceStatus {
 export interface WebcamSessionCreatePayload {
   task_id?: string | null;
   folder_id?: string | null;
+  folder_path?: string | null;
   name: string;
   fps: number;
 }
