@@ -17,6 +17,7 @@ import {
   uploadAsset,
   type ProjectTaskType,
   type TaskKind,
+  type VideoImportPayload,
 } from "../../lib/api";
 import { useAnnotationWorkflow } from "../../lib/hooks/useAnnotationWorkflow";
 import { useAssets } from "../../lib/hooks/useAssets";
@@ -25,6 +26,7 @@ import { useFolders } from "../../lib/hooks/useFolders";
 import { buildTargetRelativePath, isImageCandidate, useImportWorkflow } from "../../lib/hooks/useImportWorkflow";
 import { useLabels } from "../../lib/hooks/useLabels";
 import { useProjectAssetsTreeState } from "../../lib/hooks/useProjectAssetsTreeState";
+import { usePrelabels } from "../../lib/hooks/usePrelabels";
 import { useSequence } from "../../lib/hooks/useSequence";
 import { useSequenceNavigation } from "../../lib/hooks/useSequenceNavigation";
 import { useWorkspaceSuggestions } from "../../lib/hooks/useWorkspaceSuggestions";
@@ -40,6 +42,7 @@ import { ProjectSectionLayout } from "./project-shell/ProjectSectionLayout";
 import { useProjectShell } from "./project-shell/ProjectShellContext";
 import { AssetBrowser } from "./project-assets/AssetBrowser";
 import { AssetFilmstrip } from "./project-assets/AssetFilmstrip";
+import { AiPrelabelsPanel } from "./project-assets/AiPrelabelsPanel";
 import { CanvasToolbar, type CanvasTool } from "./project-assets/CanvasToolbar";
 import { ProjectAssetsImportModal } from "./project-assets/ProjectAssetsImportModal";
 import { ProjectAssetsStatusOverlay } from "./project-assets/ProjectAssetsStatusOverlay";
@@ -302,6 +305,31 @@ export default function ProjectAssetsWorkspace() {
         categoryName: labelNameById.get(object.category_id) ?? `#${object.category_id}`,
       })),
     [currentObjects, labelNameById],
+  );
+  const refreshPrelabelWorkspace = useCallback(async () => {
+    await Promise.all([refetchAssets(selectedProjectId), currentSequenceId ? refetchSequence() : Promise.resolve()]);
+  }, [currentSequenceId, refetchAssets, refetchSequence, selectedProjectId]);
+  const prelabelState = usePrelabels({
+    projectId: selectedProjectId,
+    taskId: selectedTaskId,
+    sessionId: currentSequence?.latest_prelabel_session_id ?? null,
+    sessionStatus: currentSequence?.latest_prelabel_session_status ?? null,
+    currentAssetId: treeState.currentAsset?.id ?? null,
+    currentObjects,
+    onLoadProposalIntoDraft: replaceGeometryObjects,
+    onRefresh: refreshPrelabelWorkspace,
+    setMessage,
+  });
+  const pendingPrelabelObjects = useMemo(
+    () =>
+      prelabelState.proposals.map((proposal) => ({
+        id: proposal.id,
+        category_id: proposal.category_id,
+        bbox: proposal.bbox,
+        label_text: proposal.label_text,
+        confidence: proposal.confidence,
+      })),
+    [prelabelState.proposals],
   );
   const deleteWorkflow = useDeleteWorkflow({
     selectedProjectId,
@@ -738,7 +766,7 @@ export default function ProjectAssetsWorkspace() {
     picker.click();
   }
 
-  async function handleImportVideoSubmit(file: File, payload: { fps: number; max_frames: number; resize_mode: "original" | "width" | "height"; resize_width?: number | null; resize_height?: number | null; name?: string | null }) {
+  async function handleImportVideoSubmit(file: File, payload: VideoImportPayload) {
     if (!selectedProjectId) {
       setVideoImportError("Select a project before importing a video.");
       return;
@@ -859,6 +887,8 @@ export default function ProjectAssetsWorkspace() {
               canvasTool={canvasTool}
               resetToken={viewerResetToken}
               geometryObjects={currentObjects}
+              pendingPrelabelObjects={pendingPrelabelObjects}
+              selectedPendingPrelabelId={prelabelState.selectedProposalId}
               selectedObjectId={selectedObjectId}
               hoveredObjectId={hoveredGeometryObjectId}
               defaultCategoryId={defaultGeometryCategoryId}
@@ -877,11 +907,14 @@ export default function ProjectAssetsWorkspace() {
                       currentFrameLabel={currentSequenceFrameLabel}
                       currentTimestampLabel={currentSequenceTimestampLabel}
                       isPlaying={sequenceNavigation.isPlaying}
+                      pendingFrameCount={sequenceNavigation.pendingFrameCount}
+                      pendingProposalCount={currentSequence.pending_prelabel_count}
                       onFirst={sequenceNavigation.goToFirst}
                       onPrev={sequenceNavigation.goToPrev}
                       onTogglePlayback={sequenceNavigation.togglePlayback}
                       onNext={sequenceNavigation.goToNext}
                       onLast={sequenceNavigation.goToLast}
+                      onNextPending={sequenceNavigation.goToNextPending}
                     />
                     <SequenceTimeline
                       assets={currentSequence.assets}
@@ -913,52 +946,69 @@ export default function ProjectAssetsWorkspace() {
             )}
           </div>
 
-          <LabelPanel
-            labels={activeLabelRows}
-            allLabels={allLabelRows}
-            selectedLabelIds={effectiveSelectedLabelIds}
-            onToggleLabel={handleToggleLabelForCurrentMode}
-            onClearLabels={clearSelectedLabels}
-            onSubmit={handleSubmit}
-            isSaving={isSaving}
-            onCreateLabel={handleCreateLabel}
-            isCreatingLabel={isCreatingLabel}
-            editMode={editMode}
-            onToggleEditMode={() => setEditMode((value) => !value)}
-            pendingCount={pendingCount}
-            onSaveLabelChanges={handleSaveLabelChanges}
-            isSavingLabelChanges={isSavingLabelChanges}
-            onDeleteLabel={handleDeleteLabel}
-            deletingLabelId={deletingLabelId}
-            labelsLocked={isTaskLabelsLocked}
-            canSubmit={canSubmit}
-            multiLabelEnabled={multiLabelEnabled}
-            onToggleMultiLabel={() => setMessage("Classification label mode is controlled by the selected task.")}
-            annotationMode={annotationMode}
-            projectMode={projectAnnotationMode}
-            onChangeAnnotationMode={handleChangeAnnotationMode}
-            selectedObjectId={selectedObjectId}
-            geometryObjectCount={currentObjects.length}
-            geometryObjects={geometryObjectRows}
-            hoveredObjectId={hoveredGeometryObjectId}
-            onHoverObject={setHoveredGeometryObjectId}
-            onSelectObject={handleSelectGeometryObject}
-            onDeleteSelectedObject={deleteSelectedGeometryObject}
-            availableDeployments={suggestionState.availableDeployments}
-            selectedDeploymentId={suggestionState.selectedDeploymentId}
-            selectedDeploymentName={suggestionState.selectedDeployment?.name ?? null}
-            selectedDeploymentDevicePreference={suggestionState.selectedDeployment?.device_preference ?? null}
-            lastInferenceDeviceSelected={suggestionState.lastInferenceDeviceSelected}
-            suggestionPredictions={suggestionState.suggestionPredictions}
-            suggestionBoxes={suggestionState.suggestionBoxes}
-            suggestionScoreThreshold={suggestionState.suggestionScoreThreshold}
-            onChangeSuggestionScoreThreshold={suggestionState.setSuggestionScoreThreshold}
-            isSuggesting={suggestionState.isSuggesting}
-            hasCompatibleDeployment={suggestionState.availableDeployments.length > 0}
-            onChangeSelectedDeploymentId={suggestionState.setSelectedDeploymentId}
-            onSuggest={suggestionState.handleSuggest}
-            onApplySuggestedLabel={handleApplySuggestedLabel}
-          />
+          <div className="label-sidebar-column">
+            <LabelPanel
+              labels={activeLabelRows}
+              allLabels={allLabelRows}
+              selectedLabelIds={effectiveSelectedLabelIds}
+              onToggleLabel={handleToggleLabelForCurrentMode}
+              onClearLabels={clearSelectedLabels}
+              onSubmit={handleSubmit}
+              isSaving={isSaving}
+              onCreateLabel={handleCreateLabel}
+              isCreatingLabel={isCreatingLabel}
+              editMode={editMode}
+              onToggleEditMode={() => setEditMode((value) => !value)}
+              pendingCount={pendingCount}
+              onSaveLabelChanges={handleSaveLabelChanges}
+              isSavingLabelChanges={isSavingLabelChanges}
+              onDeleteLabel={handleDeleteLabel}
+              deletingLabelId={deletingLabelId}
+              labelsLocked={isTaskLabelsLocked}
+              canSubmit={canSubmit}
+              multiLabelEnabled={multiLabelEnabled}
+              onToggleMultiLabel={() => setMessage("Classification label mode is controlled by the selected task.")}
+              annotationMode={annotationMode}
+              projectMode={projectAnnotationMode}
+              onChangeAnnotationMode={handleChangeAnnotationMode}
+              selectedObjectId={selectedObjectId}
+              geometryObjectCount={currentObjects.length}
+              geometryObjects={geometryObjectRows}
+              hoveredObjectId={hoveredGeometryObjectId}
+              onHoverObject={setHoveredGeometryObjectId}
+              onSelectObject={handleSelectGeometryObject}
+              onDeleteSelectedObject={deleteSelectedGeometryObject}
+              availableDeployments={suggestionState.availableDeployments}
+              selectedDeploymentId={suggestionState.selectedDeploymentId}
+              selectedDeploymentName={suggestionState.selectedDeployment?.name ?? null}
+              selectedDeploymentDevicePreference={suggestionState.selectedDeployment?.device_preference ?? null}
+              lastInferenceDeviceSelected={suggestionState.lastInferenceDeviceSelected}
+              suggestionPredictions={suggestionState.suggestionPredictions}
+              suggestionBoxes={suggestionState.suggestionBoxes}
+              suggestionScoreThreshold={suggestionState.suggestionScoreThreshold}
+              onChangeSuggestionScoreThreshold={suggestionState.setSuggestionScoreThreshold}
+              isSuggesting={suggestionState.isSuggesting}
+              hasCompatibleDeployment={suggestionState.availableDeployments.length > 0}
+              onChangeSelectedDeploymentId={suggestionState.setSelectedDeploymentId}
+              onSuggest={suggestionState.handleSuggest}
+              onApplySuggestedLabel={handleApplySuggestedLabel}
+            />
+            <AiPrelabelsPanel
+              session={prelabelState.session}
+              proposals={prelabelState.proposals}
+              selectedProposalId={prelabelState.selectedProposalId}
+              onSelectProposal={prelabelState.setSelectedProposalId}
+              onAcceptSelected={prelabelState.acceptSelectedProposal}
+              onRejectSelected={prelabelState.rejectSelectedProposal}
+              onAcceptCurrentFrame={prelabelState.acceptCurrentFrame}
+              onRejectCurrentFrame={prelabelState.rejectCurrentFrame}
+              onAcceptFullSession={prelabelState.acceptFullSession}
+              onEditSelected={prelabelState.editSelectedProposal}
+              isLoading={prelabelState.isLoading}
+              isApplying={prelabelState.isApplying}
+              errorMessage={prelabelState.error?.message ?? null}
+            />
+          </div>
           </div>
         </div>
       </ProjectSectionLayout>
@@ -997,6 +1047,8 @@ export default function ProjectAssetsWorkspace() {
         defaultName={videoImportDefaultName}
         isImporting={isVideoImporting}
         errorMessage={videoImportError}
+        enablePrelabels={selectedTask?.kind === "bbox"}
+        defaultPrompts={activeLabelRows.map((label) => label.name)}
         onClose={() => {
           if (isVideoImporting) return;
           setIsVideoImportModalOpen(false);
@@ -1010,6 +1062,8 @@ export default function ProjectAssetsWorkspace() {
         taskId={selectedTaskId}
         defaultName={webcamDefaultName}
         folderOptions={folders.map((folder) => folder.path)}
+        enablePrelabels={selectedTask?.kind === "bbox"}
+        defaultPrompts={activeLabelRows.map((label) => label.name)}
         onClose={() => setIsWebcamModalOpen(false)}
         onSequenceCreated={(sequence) => {
           if (sequence.folder_path) treeState.handleSelectFolderScope(sequence.folder_path);

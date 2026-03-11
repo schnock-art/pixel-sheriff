@@ -17,11 +17,22 @@ class LegacyClassificationPayload(BaseModel):
     source: str | None = None
 
 
+class AnnotationObjectProvenance(BaseModel):
+    origin_kind: str
+    session_id: str | None = None
+    proposal_id: str | None = None
+    source_model: str | None = None
+    prompt_text: str | None = None
+    confidence: float | None = None
+    review_decision: str | None = None
+
+
 class GeometryBBoxObject(BaseModel):
     id: str
     kind: Literal["bbox"]
     category_id: str
     bbox: list[float]
+    provenance: AnnotationObjectProvenance | None = None
 
 
 class GeometryPolygonObject(BaseModel):
@@ -29,6 +40,7 @@ class GeometryPolygonObject(BaseModel):
     kind: Literal["polygon"]
     category_id: str
     segmentation: list[list[float]]
+    provenance: AnnotationObjectProvenance | None = None
 
 
 class AnnotationImageBasis(BaseModel):

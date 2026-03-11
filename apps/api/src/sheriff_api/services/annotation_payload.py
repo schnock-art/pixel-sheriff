@@ -90,6 +90,48 @@ def _validate_in_basis(x: float, y: float, basis: dict[str, int], object_id: str
         )
 
 
+def _normalize_object_provenance(raw_provenance: Any) -> dict[str, Any] | None:
+    if raw_provenance is None:
+        return None
+    if not isinstance(raw_provenance, dict):
+        raise PayloadValidationError(
+            code="annotation_geometry_invalid",
+            message="Geometry object provenance must be an object when provided",
+        )
+
+    origin_kind = raw_provenance.get("origin_kind")
+    if not isinstance(origin_kind, str) or not origin_kind.strip():
+        raise PayloadValidationError(
+            code="annotation_geometry_invalid",
+            message="Geometry object provenance.origin_kind is required",
+        )
+
+    normalized: dict[str, Any] = {"origin_kind": origin_kind.strip()}
+    for field_name in ("session_id", "proposal_id", "source_model", "prompt_text", "review_decision"):
+        value = raw_provenance.get(field_name)
+        if value is None:
+            continue
+        if not isinstance(value, str):
+            raise PayloadValidationError(
+                code="annotation_geometry_invalid",
+                message=f"Geometry object provenance.{field_name} must be a string when provided",
+            )
+        stripped = value.strip()
+        if stripped:
+            normalized[field_name] = stripped
+
+    confidence = raw_provenance.get("confidence")
+    if confidence is not None:
+        if not _valid_number(confidence):
+            raise PayloadValidationError(
+                code="annotation_geometry_invalid",
+                message="Geometry object provenance.confidence must be numeric when provided",
+            )
+        normalized["confidence"] = float(confidence)
+
+    return normalized
+
+
 def _normalize_geometry_objects(
     raw_objects: Any,
     *,
@@ -142,6 +184,7 @@ def _normalize_geometry_objects(
 
         if kind == "bbox":
             raw_bbox = raw.get("bbox")
+            normalized_provenance = _normalize_object_provenance(raw.get("provenance"))
             if not isinstance(raw_bbox, list) or len(raw_bbox) != 4 or not all(_valid_number(value) for value in raw_bbox):
                 raise PayloadValidationError(
                     code="annotation_bbox_invalid",
@@ -165,12 +208,14 @@ def _normalize_geometry_objects(
                     "kind": "bbox",
                     "category_id": category_id,
                     "bbox": [x, y, width, height],
+                    **({"provenance": normalized_provenance} if normalized_provenance is not None else {}),
                 }
             )
             continue
 
         if kind == "polygon":
             raw_segmentation = raw.get("segmentation")
+            normalized_provenance = _normalize_object_provenance(raw.get("provenance"))
             if not isinstance(raw_segmentation, list) or len(raw_segmentation) == 0:
                 raise PayloadValidationError(
                     code="annotation_polygon_invalid",
@@ -211,6 +256,7 @@ def _normalize_geometry_objects(
                     "kind": "polygon",
                     "category_id": category_id,
                     "segmentation": normalized_segments,
+                    **({"provenance": normalized_provenance} if normalized_provenance is not None else {}),
                 }
             )
             continue

@@ -88,3 +88,26 @@ class SegmentationObject(BaseModel):
 class InferSegmentationResponse(BaseModel):
     device_selected: Literal["cuda", "cpu"]
     objects: list[SegmentationObject]
+
+
+class FlorenceWarmupRequest(BaseModel):
+    model_name: str = "microsoft/Florence-2-base-ft"
+
+
+class FlorenceDetectRequest(BaseModel):
+    asset_relpath: str
+    model_name: str = "microsoft/Florence-2-base-ft"
+    prompts: list[str] = Field(default_factory=list)
+    score_threshold: float = Field(default=0.25, ge=0.0, le=1.0)
+    max_detections: int = Field(default=20, ge=1, le=200)
+
+
+class FlorenceDetectionBox(BaseModel):
+    label_text: str
+    score: float
+    bbox: list[float] = Field(description="[x1, y1, x2, y2] in pixel coordinates")
+
+
+class FlorenceDetectResponse(BaseModel):
+    device_selected: Literal["cuda", "cpu"]
+    boxes: list[FlorenceDetectionBox]

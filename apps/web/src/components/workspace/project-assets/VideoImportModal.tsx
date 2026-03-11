@@ -1,22 +1,35 @@
 import { useEffect, useMemo, useState } from "react";
 
-import type { VideoImportPayload } from "../../../lib/api";
+import type { PrelabelConfig, VideoImportPayload } from "../../../lib/api";
+import { PrelabelSettingsSection } from "./PrelabelSettingsSection";
 
 interface VideoImportModalProps {
   open: boolean;
   defaultName: string;
   isImporting: boolean;
   errorMessage: string | null;
+  enablePrelabels: boolean;
+  defaultPrompts: string[];
   onClose: () => void;
   onSubmit: (file: File, payload: VideoImportPayload) => void;
 }
 
-export function VideoImportModal({ open, defaultName, isImporting, errorMessage, onClose, onSubmit }: VideoImportModalProps) {
+export function VideoImportModal({
+  open,
+  defaultName,
+  isImporting,
+  errorMessage,
+  enablePrelabels,
+  defaultPrompts,
+  onClose,
+  onSubmit,
+}: VideoImportModalProps) {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [name, setName] = useState(defaultName);
   const [fps, setFps] = useState("2");
   const [maxFrames, setMaxFrames] = useState("500");
   const [resolution, setResolution] = useState<"original" | "1280" | "720">("original");
+  const [prelabelConfig, setPrelabelConfig] = useState<PrelabelConfig | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -25,7 +38,18 @@ export function VideoImportModal({ open, defaultName, isImporting, errorMessage,
     setFps("2");
     setMaxFrames("500");
     setResolution("original");
-  }, [defaultName, open]);
+    setPrelabelConfig(
+      enablePrelabels
+        ? {
+            source_type: "florence2",
+            prompts: defaultPrompts,
+            frame_sampling: { mode: "every_n_frames", value: 15 },
+            confidence_threshold: 0.25,
+            max_detections_per_frame: 20,
+          }
+        : null,
+    );
+  }, [defaultName, defaultPrompts, enablePrelabels, open]);
 
   const canSubmit = useMemo(() => Boolean(selectedFile) && Number(fps) > 0 && Number(maxFrames) > 0, [fps, maxFrames, selectedFile]);
 
@@ -41,6 +65,7 @@ export function VideoImportModal({ open, defaultName, isImporting, errorMessage,
       resize_mode: resizeMode,
       resize_width: resolution === "1280" ? 1280 : resolution === "720" ? 720 : null,
       resize_height: null,
+      prelabel_config: prelabelConfig,
     });
   }
 
@@ -78,6 +103,14 @@ export function VideoImportModal({ open, defaultName, isImporting, errorMessage,
             <option value="720">720px wide</option>
           </select>
         </label>
+        <PrelabelSettingsSection
+          enabled={enablePrelabels}
+          value={prelabelConfig}
+          defaultPrompts={defaultPrompts}
+          onChange={setPrelabelConfig}
+          samplingLabel="Sample every N frames"
+          samplingHint="Default is every 15 frames."
+        />
         {errorMessage ? <p className="import-field-error">{errorMessage}</p> : null}
         <div className="import-modal-actions">
           <button type="button" className="ghost-button" onClick={onClose} disabled={isImporting}>

@@ -7,6 +7,7 @@ from sheriff_api.db.session import get_db
 from sheriff_api.errors import api_error
 from sheriff_api.schemas.annotations import AnnotationRead, AnnotationUpsert
 from sheriff_api.services.annotation_payload import PayloadValidationError, normalize_annotation_payload
+from sheriff_api.services.prelabels import sync_annotation_prelabel_proposals
 
 router = APIRouter(tags=["annotations"])
 
@@ -71,6 +72,8 @@ async def upsert_annotation(project_id: str, payload: AnnotationUpsert, db: Asyn
         annotation.status = payload.status
         annotation.payload_json = normalized_payload
         annotation.annotated_by = payload.annotated_by
+    await db.flush()
+    await sync_annotation_prelabel_proposals(db, annotation=annotation)
     await db.commit()
     await db.refresh(annotation)
     return annotation

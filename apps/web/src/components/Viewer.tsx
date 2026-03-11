@@ -26,6 +26,15 @@ interface GeometryBBoxObject {
   kind: "bbox";
   category_id: string;
   bbox: number[];
+  provenance?: {
+    origin_kind: string;
+    session_id?: string;
+    proposal_id?: string;
+    source_model?: string;
+    prompt_text?: string;
+    confidence?: number;
+    review_decision?: string;
+  };
 }
 
 interface GeometryPolygonObject {
@@ -49,6 +58,14 @@ interface ViewerProps {
   canvasTool: CanvasTool;
   resetToken?: number;
   geometryObjects: GeometryObject[];
+  pendingPrelabelObjects?: Array<{
+    id: string;
+    category_id: string;
+    bbox: number[];
+    label_text: string;
+    confidence: number;
+  }>;
+  selectedPendingPrelabelId?: string | null;
   selectedObjectId: string | null;
   hoveredObjectId: string | null;
   defaultCategoryId: string | null;
@@ -174,6 +191,8 @@ export function Viewer({
   canvasTool,
   resetToken = 0,
   geometryObjects,
+  pendingPrelabelObjects = [],
+  selectedPendingPrelabelId = null,
   selectedObjectId,
   hoveredObjectId,
   defaultCategoryId,
@@ -622,6 +641,42 @@ export function Viewer({
     });
   }
 
+  function renderPendingPrelabelObject(object: NonNullable<ViewerProps["pendingPrelabelObjects"]>[number]) {
+    if (!viewport) return null;
+    const isSelected = object.id === selectedPendingPrelabelId;
+    const color = getClassColor(object.category_id);
+    const topLeft = toViewportCoords(object.bbox[0], object.bbox[1], viewport);
+    const width = object.bbox[2] * viewport.scale;
+    const height = object.bbox[3] * viewport.scale;
+    return (
+      <g
+        key={object.id}
+        className={`prelabel-shape${isSelected ? " is-selected" : ""}`}
+        data-testid="pending-prelabel-object"
+        data-proposal-id={object.id}
+      >
+        <rect
+          x={topLeft.x}
+          y={topLeft.y}
+          width={width}
+          height={height}
+          style={{
+            fill: `hsl(${color.hue} 85% 55% / ${isSelected ? "0.18" : "0.10"})`,
+            stroke: color.overlayStroke,
+            strokeWidth: isSelected ? 2.5 : 2,
+            strokeDasharray: "8 6",
+          }}
+        />
+        <g className="prelabel-badge">
+          <rect x={topLeft.x + 8} y={Math.max(8, topLeft.y + 8)} rx={10} ry={10} width={84} height={22} />
+          <text x={topLeft.x + 18} y={Math.max(22, topLeft.y + 23)}>
+            AI {object.label_text}
+          </text>
+        </g>
+      </g>
+    );
+  }
+
   function renderDraft() {
     if (!viewport) return null;
     const draftColor = getClassColor(defaultCategoryId ?? 1);
@@ -696,6 +751,7 @@ export function Viewer({
             onDoubleClick={handleDoubleClick}
             onPointerLeave={() => onHoverObject(null)}
           >
+            {pendingPrelabelObjects.map((object) => renderPendingPrelabelObject(object))}
             {geometryObjects.map((object) => renderGeometryObject(object))}
             {renderDraft()}
           </svg>

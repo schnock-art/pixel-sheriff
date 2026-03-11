@@ -1,10 +1,21 @@
 import type { AnnotationStatus } from "../api";
 
+export interface GeometryObjectProvenance {
+  origin_kind: string;
+  session_id?: string;
+  proposal_id?: string;
+  source_model?: string;
+  prompt_text?: string;
+  confidence?: number;
+  review_decision?: string;
+}
+
 export interface GeometryBBoxObject {
   id: string;
   kind: "bbox";
   category_id: string;
   bbox: number[];
+  provenance?: GeometryObjectProvenance;
 }
 
 export interface GeometryPolygonObject {
@@ -12,6 +23,7 @@ export interface GeometryPolygonObject {
   kind: "polygon";
   category_id: string;
   segmentation: number[][];
+  provenance?: GeometryObjectProvenance;
 }
 
 export type GeometryObject = GeometryBBoxObject | GeometryPolygonObject;

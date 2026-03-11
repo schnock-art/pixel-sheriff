@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from sheriff_api.db.models import Annotation, Asset, AssetSequence, Folder
 from sheriff_api.services.folders import ensure_folder_path, ensure_unique_folder_path, sanitize_folder_name
+from sheriff_api.services.prelabels import get_latest_sequence_prelabel_session, pending_prelabel_counts_for_assets, sequence_pending_total_from_counts
 from sheriff_api.schemas.assets import AssetRead
 from sheriff_api.schemas.folders import FolderRead
 from sheriff_api.schemas.sequences import AssetSequenceRead, SequenceFrameAssetRead, SequenceStatusRead
@@ -38,7 +39,12 @@ def asset_to_read(asset: Asset) -> AssetRead:
     )
 
 
-def sequence_frame_to_read(asset: Asset, *, has_annotations: bool = False) -> SequenceFrameAssetRead:
+def sequence_frame_to_read(
+    asset: Asset,
+    *,
+    has_annotations: bool = False,
+    pending_prelabel_count: int = 0,
+) -> SequenceFrameAssetRead:
     return SequenceFrameAssetRead(
         id=asset.id,
         file_name=asset.resolved_file_name,
@@ -51,6 +57,7 @@ def sequence_frame_to_read(asset: Asset, *, has_annotations: bool = False) -> Se
         image_url=asset.uri,
         thumbnail_url=asset.uri,
         has_annotations=has_annotations,
+        pending_prelabel_count=int(pending_prelabel_count or 0),
     )
 
 
@@ -60,9 +67,12 @@ def sequence_to_read(
     folder: Folder | None = None,
     assets: Iterable[Asset] = (),
     annotated_asset_ids: set[str] | None = None,
+    pending_prelabel_counts: dict[str, int] | None = None,
+    latest_prelabel_session=None,
 ) -> AssetSequenceRead:
     folder_path = folder.path if folder is not None else sequence.folder.path if sequence.folder is not None else None
     annotations = annotated_asset_ids or set()
+    pending_counts = pending_prelabel_counts or {}
     ordered_assets = sorted(
         list(assets),
         key=lambda asset: (
@@ -88,17 +98,28 @@ def sequence_to_read(
         width=sequence.width,
         height=sequence.height,
         error_message=sequence.error_message,
-        assets=[sequence_frame_to_read(asset, has_annotations=asset.id in annotations) for asset in ordered_assets],
+        pending_prelabel_count=sequence_pending_total_from_counts(pending_counts),
+        latest_prelabel_session_id=latest_prelabel_session.id if latest_prelabel_session is not None else None,
+        latest_prelabel_session_status=str(latest_prelabel_session.status) if latest_prelabel_session is not None else None,
+        assets=[
+            sequence_frame_to_read(
+                asset,
+                has_annotations=asset.id in annotations,
+                pending_prelabel_count=int(pending_counts.get(asset.id, 0)),
+            )
+            for asset in ordered_assets
+        ],
     )
 
 
-def sequence_status_to_read(sequence: AssetSequence) -> SequenceStatusRead:
+def sequence_status_to_read(sequence: AssetSequence, *, pending_prelabel_count: int = 0) -> SequenceStatusRead:
     return SequenceStatusRead(
         id=sequence.id,
         status=sequence.status,
         frame_count=sequence.frame_count,
         processed_frames=sequence.processed_frames,
         error_message=sequence.error_message,
+        pending_prelabel_count=int(pending_prelabel_count or 0),
     )
 
 
@@ -152,6 +173,24 @@ async def annotated_asset_ids_for_sequence(db: AsyncSession, *, task_id: str | N
         )
     )
     return {str(value) for value in result.scalars().all()}
+
+
+async def pending_prelabel_counts_for_sequence(
+    db: AsyncSession,
+    *,
+    task_id: str | None,
+    asset_ids: list[str],
+) -> dict[str, int]:
+    return await pending_prelabel_counts_for_assets(db, task_id=task_id, asset_ids=asset_ids)
+
+
+async def latest_prelabel_session_for_sequence(
+    db: AsyncSession,
+    *,
+    sequence_id: str,
+    task_id: str | None,
+):
+    return await get_latest_sequence_prelabel_session(db, sequence_id=sequence_id, task_id=task_id)
 
 
 async def create_sequence_with_folder(

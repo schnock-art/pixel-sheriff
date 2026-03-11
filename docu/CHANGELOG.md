@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- Sequence media + AI prelabels:
+  - video imports can now create frame sequences and optional bbox prelabel sessions from `prelabel_config`
+  - webcam capture can now create live frame sequences with sampled prelabel enqueue during capture
+  - API now exposes prelabel session lifecycle and review endpoints under `/api/v1/projects/{project_id}/tasks/{task_id}/prelabels*`
+  - trainer-backed Florence2 prelabel inference is now available through the API adapter registry
+  - labeling workspace now includes a dedicated AI Prelabels panel, pending dashed overlay, bulk review actions, and next-pending navigation
+  - annotation objects can now persist optional AI provenance without affecting export geometry generation
+- Sequence-aware labeling UX:
+  - frame-backed assets now surface pending AI counts in timeline and sequence responses
+  - video and webcam modals now share bbox-only prelabel settings
+  - webcam capture preview remains visible during recording and the modal surfaces clearer recording state
+- Documentation refresh for the current repository behavior:
+  - refreshed `README.md`, `docs/architecture.md`, `docu/Architecture.md`, `docu/TECHNICAL_REFERENCE.md`, `docu/Roadplan.md`, and `docu/VLM_COLD_START_PRELABELING_TASKS.md`
 - Experiment storage reduction + test-path fallback:
   - API now supports `DELETE /api/v1/projects/{project_id}/experiments/{experiment_id}`
   - delete is blocked for `queued` / `running` experiments and for experiments referenced by non-archived deployments (`experiment_in_use`)
@@ -248,6 +261,9 @@ All notable changes to this project will be documented in this file.
   - web helper tests for analytics shaping, confusion normalization, and prediction drill-down filtering
 
 ### Changed
+- Asset-browser and modal layout polish:
+  - import and webcam modals now stay within the viewport and scroll internally
+  - the asset tree sidebar now keeps a dedicated scroll region so collapsed trees still allow access to lower controls such as delete actions
 - Experiment dataset export now preserves saved dataset-version split membership:
   - experiments start flow passes stored `splits.items` into export build
   - export manifest no longer collapses all selected assets into `train`
@@ -255,8 +271,11 @@ All notable changes to this project will be documented in this file.
 - `apps/web/src/components/workspace/ProjectAssetsWorkspace.tsx` was reduced to orchestration/composition wiring while preserving behavior and existing CSS/UX contracts.
 - Docs refreshed to align with current implementation:
   - `README.md`
+  - `docs/architecture.md`
   - `docu/Architecture.md`
+  - `docu/TECHNICAL_REFERENCE.md`
   - `docu/Roadplan.md`
+  - `docu/VLM_COLD_START_PRELABELING_TASKS.md`
 - Model detail page behavior evolved from read-only scaffold to editable builder with live summary updates.
 - Model builder footer now uses active Save state handling; `Train Model` remains disabled placeholder.
 - Web datasets workspace was moved into `apps/web/src/components/workspace/ProjectAssetsWorkspace.tsx`.

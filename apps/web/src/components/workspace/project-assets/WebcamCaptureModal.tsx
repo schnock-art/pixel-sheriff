@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 
-import type { Asset, AssetSequence } from "../../../lib/api";
+import { closePrelabelInput, type Asset, type AssetSequence, type PrelabelConfig } from "../../../lib/api";
 import { useWebcamCapture } from "../../../lib/hooks/useWebcamCapture";
 import { buildCameraDestinations } from "../../../lib/workspace/webcamCapture";
+import { PrelabelSettingsSection } from "./PrelabelSettingsSection";
 
 interface CameraDestinationView {
   deviceId: string;
@@ -18,6 +19,8 @@ interface WebcamCaptureModalProps {
   defaultName: string;
   folderOptions: string[];
   defaultRootFolderPath?: string | null;
+  enablePrelabels?: boolean;
+  defaultPrompts?: string[];
   onClose: () => void;
   onSequenceCreated?: (sequence: AssetSequence) => void;
   onFrameUploaded?: (asset: Asset, sequence: AssetSequence) => void;
@@ -31,6 +34,8 @@ export function WebcamCaptureModal({
   defaultName,
   folderOptions,
   defaultRootFolderPath,
+  enablePrelabels = false,
+  defaultPrompts = [],
   onClose,
   onSequenceCreated,
   onFrameUploaded,
@@ -39,6 +44,7 @@ export function WebcamCaptureModal({
   const [name, setName] = useState(defaultName);
   const [fps, setFps] = useState("2");
   const [rootFolderPath, setRootFolderPath] = useState("");
+  const [prelabelConfig, setPrelabelConfig] = useState<PrelabelConfig | null>(null);
   const capture = useWebcamCapture({
     projectId,
     taskId,
@@ -52,9 +58,20 @@ export function WebcamCaptureModal({
     setName(defaultName);
     setFps("2");
     setRootFolderPath(defaultRootFolderPath ?? "");
+    setPrelabelConfig(
+      enablePrelabels
+        ? {
+            source_type: "florence2",
+            prompts: defaultPrompts,
+            frame_sampling: { mode: "every_n_frames", value: 2 },
+            confidence_threshold: 0.25,
+            max_detections_per_frame: 20,
+          }
+        : null,
+    );
     reset();
     void refreshDevices();
-  }, [defaultName, defaultRootFolderPath, open, refreshDevices, reset]);
+  }, [defaultName, defaultPrompts, defaultRootFolderPath, enablePrelabels, open, refreshDevices, reset]);
 
   const selectedDevices = useMemo(
     () => capture.devices.filter((device) => capture.selectedDeviceIds.includes(device.deviceId)),
@@ -87,9 +104,15 @@ export function WebcamCaptureModal({
     capture.setSelectedDeviceIds(values);
   }
 
-  function handleFinish() {
+  async function handleFinish() {
     capture.stopCapture();
     capture.stopPreview();
+    const prelabelSessionIds = capture.devices
+      .map((device) => device.prelabelSessionId)
+      .filter((value): value is string => Boolean(value));
+    if (projectId && taskId) {
+      await Promise.allSettled(prelabelSessionIds.map((sessionId) => closePrelabelInput(projectId, taskId, sessionId)));
+    }
     onFinished?.(capture.sequences);
     onClose();
   }
@@ -149,8 +172,19 @@ export function WebcamCaptureModal({
             <span className="import-field-hint">Each camera gets its own subfolder under this root.</span>
           </label>
         </div>
+        <PrelabelSettingsSection
+          enabled={enablePrelabels}
+          value={prelabelConfig}
+          defaultPrompts={defaultPrompts}
+          onChange={setPrelabelConfig}
+          samplingLabel="Sample every N frames"
+          samplingHint="Use 2 for roughly one box pass every second at 2 FPS."
+        />
         {capture.error ? <p className="import-field-error">{capture.error}</p> : null}
-        <p className="webcam-capture-count">Captured frames: {capture.captureCount}</p>
+        <p className="webcam-capture-count">
+          Captured frames: {capture.captureCount}
+          {capture.isCapturing ? " • Recording live, preview stays active while frames upload." : ""}
+        </p>
         <div className="webcam-preview-grid">
           {selectedDevices.length === 0 ? (
             <div className="webcam-preview-empty">Select at least one camera to preview it here.</div>
@@ -166,6 +200,7 @@ export function WebcamCaptureModal({
                     </span>
                   </header>
                   <div className="webcam-preview-shell">
+                    {device.isCapturing ? <span className="webcam-preview-live-badge">REC</span> : null}
                     <video
                       ref={(node) => capture.attachVideoRef(device.deviceId, node)}
                       className="webcam-preview"
@@ -177,7 +212,8 @@ export function WebcamCaptureModal({
                   <div className="webcam-preview-meta">
                     <span>Sequence: {destination?.sequenceName ?? "Pending"}</span>
                     <span>Folder: {destination?.folderPath ?? "Pending"}</span>
-                    <span>Frames: {device.captureCount}</span>
+                    <span>{device.isCapturing ? "Recording" : device.isPreviewing ? "Preview active" : "Idle"}</span>
+                    <span>Frames written: {device.captureCount}</span>
                   </div>
                   {device.error ? <p className="import-field-error">{device.error}</p> : null}
                 </article>
@@ -197,7 +233,7 @@ export function WebcamCaptureModal({
           <button
             type="button"
             className="primary-button"
-            onClick={() => void capture.startCapture({ fps: Number(fps), destinations })}
+            onClick={() => void capture.startCapture({ fps: Number(fps), destinations, prelabelConfig })}
             disabled={!canStart || capture.isCapturing}
           >
             Start Capture
@@ -205,7 +241,7 @@ export function WebcamCaptureModal({
           <button type="button" className="ghost-button" onClick={() => capture.stopCapture()} disabled={!capture.isCapturing}>
             Stop
           </button>
-          <button type="button" className="ghost-button" onClick={handleFinish}>
+          <button type="button" className="ghost-button" onClick={() => void handleFinish()}>
             Finish
           </button>
         </div>

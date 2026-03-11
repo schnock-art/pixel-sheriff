@@ -105,3 +105,35 @@ test("readAnnotationObjects resolves bbox and polygon objects", () => {
   });
   assert.equal(objects.length, 2);
 });
+
+test("readAnnotationObjects preserves valid AI prelabel provenance", () => {
+  const objects = readAnnotationObjects({
+    objects: [
+      {
+        id: "bbox-1",
+        kind: "bbox",
+        category_id: "3",
+        bbox: [1, 2, 3, 4],
+        provenance: {
+          origin_kind: "ai_prelabel",
+          session_id: "session-1",
+          proposal_id: "proposal-1",
+          source_model: "florence2",
+          prompt_text: "person",
+          confidence: 0.87,
+          review_decision: "edited",
+        },
+      },
+    ],
+  });
+
+  assert.deepEqual(objects[0].provenance, {
+    origin_kind: "ai_prelabel",
+    session_id: "session-1",
+    proposal_id: "proposal-1",
+    source_model: "florence2",
+    prompt_text: "person",
+    confidence: 0.87,
+    review_decision: "edited",
+  });
+});

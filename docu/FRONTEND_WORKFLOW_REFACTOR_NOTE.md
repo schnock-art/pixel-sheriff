@@ -1,33 +1,37 @@
 # Frontend Workflow Refactor Note
 
-## Introduced components
-- `ProjectRibbon`
-- `ProjectShellProvider`
-- `ProjectSectionLayout`
-- `AssetBrowser`
-- `CanvasToolbar`
-- `AssetFilmstrip`
-- `ModelTable`
-- `modelList` helper utilities for dataset-version/status enrichment
+Historical note for the shell/workspace split that established the current frontend structure.
 
-## Pages changed
-- `projects/[projectId]/layout.tsx`
-- `projects/[projectId]/dataset/page.tsx`
-- `projects/[projectId]/models/page.tsx`
-- `projects/[projectId]/models/new/page.tsx`
-- `projects/[projectId]/models/[modelId]/page.tsx`
-- `ProjectAssetsWorkspace`
-- `Viewer`
-- `LabelPanel`
+## Landed structure
+- Shared project shell:
+  - `ProjectRibbon`
+  - `ProjectShellProvider`
+  - `ProjectSectionLayout`
+- Labeling workspace composition:
+  - `ProjectAssetsWorkspace`
+  - `Viewer`
+  - labeling sidebar and filmstrip subcomponents under `apps/web/src/components/workspace/project-assets/`
+- Model list/detail scaffolding:
+  - `ModelTable`
+  - model-list enrichment helpers
 
-## Route and CTA changes
-- Labeling now routes to Dataset via `Create Dataset`
-- Dataset now routes to prefilled model creation via `Train Model`
-- Models list now routes to `/models/new` instead of immediately creating a draft
-- `/models/new` accepts `taskId` and `datasetVersionId` query params for preselection
+## Routes affected
+- `apps/web/src/app/projects/[projectId]/layout.tsx`
+- `apps/web/src/app/projects/[projectId]/datasets/page.tsx`
+- `apps/web/src/app/projects/[projectId]/dataset/page.tsx`
+- `apps/web/src/app/projects/[projectId]/models/page.tsx`
+- `apps/web/src/app/projects/[projectId]/models/new/page.tsx`
+- `apps/web/src/app/projects/[projectId]/models/[modelId]/page.tsx`
+- `apps/web/src/app/projects/[projectId]/experiments/page.tsx`
+- `apps/web/src/app/projects/[projectId]/deploy/page.tsx`
 
-## Follow-up work
-- Replace the current filmstrip chips with real thumbnails if asset preview loading is worth the added complexity
-- Add task-aware filtering to experiments and deploy pages beyond the shared global context
-- Expose canonical model status and dataset-version fields from the backend to remove client-side enrichment heuristics
-- Add true pan/zoom interactions to the annotation canvas toolbar
+## Current behavior this note refers to
+- Labeling routes to dataset creation via `Create Dataset`.
+- Dataset routes to prefilled model creation via `Train Model`.
+- The workspace now supports image review plus sequence-backed video/webcam frames.
+- The shell owns the shared project/task selectors and top-level section navigation.
+
+## Remaining follow-up
+- Reduce client-side enrichment heuristics as more canonical dataset/model status fields move server-side.
+- Continue expanding focused UI automation around sequence review and AI prelabels.
+- Improve webcam capture diagnostics for intermittent browser/device write failures.

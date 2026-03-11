@@ -25,6 +25,15 @@ export interface GeometryBBoxObject {
   kind: "bbox";
   category_id: string;
   bbox: number[];
+  provenance?: {
+    origin_kind: string;
+    session_id?: string;
+    proposal_id?: string;
+    source_model?: string;
+    prompt_text?: string;
+    confidence?: number;
+    review_decision?: string;
+  };
 }
 
 export interface GeometryPolygonObject {
@@ -32,6 +41,15 @@ export interface GeometryPolygonObject {
   kind: "polygon";
   category_id: string;
   segmentation: number[][];
+  provenance?: {
+    origin_kind: string;
+    session_id?: string;
+    proposal_id?: string;
+    source_model?: string;
+    prompt_text?: string;
+    confidence?: number;
+    review_decision?: string;
+  };
 }
 
 export type GeometryObject = GeometryBBoxObject | GeometryPolygonObject;

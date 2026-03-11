@@ -3,13 +3,20 @@ from __future__ import annotations
 import asyncio
 import os
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 from fastapi import FastAPI, HTTPException
+from PIL import Image
+import torch
 
 from .preprocess import load_metadata, preprocess_asset
 from .schemas import (
     DetectionBox,
+    FlorenceDetectRequest,
+    FlorenceDetectResponse,
+    FlorenceDetectionBox,
+    FlorenceWarmupRequest,
     InferClassificationRequest,
     InferClassificationResponse,
     InferClassificationWarmupRequest,
@@ -23,6 +30,9 @@ from .schemas import (
     SegmentationObject,
 )
 from .session_cache import CacheBusyError, SessionCache, sha256_file
+
+
+_FLORENCE_CACHE: dict[str, tuple[object, object, str]] = {}
 
 
 def _top_k_predictions(logits: np.ndarray, top_k: int) -> tuple[list[PredictionRow], int]:
@@ -47,6 +57,13 @@ def _resolve_paths(storage_root: Path, *, onnx_relpath: str, metadata_relpath: s
     if asset_path is not None and not asset_path.is_relative_to(storage_root.resolve()):
         raise ValueError("path escapes storage root")
     return onnx_path, metadata_path, asset_path
+
+
+def _resolve_asset_path(storage_root: Path, *, asset_relpath: str) -> Path:
+    asset_path = (storage_root / asset_relpath).resolve()
+    if not asset_path.is_relative_to(storage_root.resolve()):
+        raise ValueError("path escapes storage root")
+    return asset_path
 
 
 def _run_onnx(session: object, tensor: np.ndarray) -> np.ndarray:
@@ -265,6 +282,40 @@ def create_app() -> FastAPI:
         finally:
             await cache.release(model_key, device_selected)
 
+    @app.post("/infer/florence/warmup", response_model=InferWarmupResponse)
+    async def warmup_florence(payload: FlorenceWarmupRequest) -> InferWarmupResponse:
+        try:
+            _model, _processor, device_selected = await asyncio.to_thread(_load_florence_runtime, payload.model_name)
+        except Exception as exc:
+            raise HTTPException(status_code=503, detail={"code": "florence_load_failed", "message": str(exc)}) from exc
+        return InferWarmupResponse(device_selected=device_selected, warmed=True)
+
+    @app.post("/infer/florence/detect", response_model=FlorenceDetectResponse)
+    async def florence_detect(payload: FlorenceDetectRequest) -> FlorenceDetectResponse:
+        try:
+            asset_path = _resolve_asset_path(storage_root, asset_relpath=payload.asset_relpath)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail={"code": "path_invalid", "message": str(exc)}) from exc
+        if not asset_path.exists():
+            raise HTTPException(status_code=404, detail={"code": "artifact_not_found", "message": "Asset not found"})
+        try:
+            model, processor, device_selected = await asyncio.to_thread(_load_florence_runtime, payload.model_name)
+            boxes = await asyncio.to_thread(
+                _run_florence_detection,
+                model,
+                processor,
+                device_selected,
+                asset_path,
+                payload.prompts,
+                payload.score_threshold,
+                payload.max_detections,
+            )
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(status_code=503, detail={"code": "florence_inference_failed", "message": str(exc)}) from exc
+        return FlorenceDetectResponse(device_selected=device_selected, boxes=boxes)
+
     return app
 
 
@@ -351,3 +402,112 @@ def _parse_segmentation_output(
             class_index=fg_idx, class_name=name, score=score, polygon=polygon,
         ))
     return objects
+
+
+def _load_florence_runtime(model_name: str) -> tuple[object, object, str]:
+    normalized_name = str(model_name or "microsoft/Florence-2-base-ft").strip() or "microsoft/Florence-2-base-ft"
+    cached = _FLORENCE_CACHE.get(normalized_name)
+    if cached is not None:
+        return cached
+    try:
+        from transformers import AutoModelForCausalLM, AutoProcessor
+    except Exception as exc:
+        raise RuntimeError("transformers is not available for Florence-2 inference") from exc
+
+    device_selected = "cuda" if torch.cuda.is_available() else "cpu"
+    model = AutoModelForCausalLM.from_pretrained(normalized_name, trust_remote_code=True)
+    model = model.to(device_selected)
+    model.eval()
+    processor = AutoProcessor.from_pretrained(normalized_name, trust_remote_code=True)
+    cached = (model, processor, device_selected)
+    _FLORENCE_CACHE[normalized_name] = cached
+    return cached
+
+
+def _normalize_florence_prompt_text(prompts: list[str]) -> tuple[str, str]:
+    normalized_prompts = [" ".join(str(value or "").strip().split()) for value in prompts]
+    normalized_prompts = [value for value in normalized_prompts if value]
+    task = "<OPEN_VOCABULARY_DETECTION>"
+    prompt_text = ", ".join(normalized_prompts) if normalized_prompts else "object"
+    return task, f"{task} {prompt_text}"
+
+
+def _parse_florence_generation(
+    processor: object,
+    *,
+    generated_text: str,
+    task: str,
+    image_size: tuple[int, int],
+    score_threshold: float,
+    max_detections: int,
+) -> list[FlorenceDetectionBox]:
+    post_process = getattr(processor, "post_process_generation", None)
+    if not callable(post_process):
+        raise RuntimeError("Florence processor does not support post_process_generation")
+    parsed = post_process(generated_text, task=task, image_size=image_size)
+    if isinstance(parsed, dict) and len(parsed) == 1:
+        only_value = next(iter(parsed.values()))
+        if isinstance(only_value, dict):
+            parsed = only_value
+    if not isinstance(parsed, dict):
+        return []
+
+    raw_boxes = parsed.get("bboxes") or parsed.get("boxes") or []
+    raw_labels = parsed.get("labels") or parsed.get("label_texts") or []
+    raw_scores = parsed.get("scores") or []
+    detections: list[FlorenceDetectionBox] = []
+    for index, raw_box in enumerate(raw_boxes):
+        if not isinstance(raw_box, (list, tuple)) or len(raw_box) != 4:
+            continue
+        if not all(isinstance(value, (int, float)) for value in raw_box):
+            continue
+        label_text = str(raw_labels[index] if index < len(raw_labels) else "").strip()
+        if not label_text:
+            continue
+        score = float(raw_scores[index]) if index < len(raw_scores) and isinstance(raw_scores[index], (int, float)) else 1.0
+        if score < score_threshold:
+            continue
+        detections.append(
+            FlorenceDetectionBox(
+                label_text=label_text,
+                score=score,
+                bbox=[float(raw_box[0]), float(raw_box[1]), float(raw_box[2]), float(raw_box[3])],
+            )
+        )
+        if len(detections) >= max_detections:
+            break
+    return detections
+
+
+def _run_florence_detection(
+    model: object,
+    processor: object,
+    device_selected: str,
+    asset_path: Path,
+    prompts: list[str],
+    score_threshold: float,
+    max_detections: int,
+) -> list[FlorenceDetectionBox]:
+    with Image.open(asset_path) as image:
+        rgb_image = image.convert("RGB")
+        task, prompt_text = _normalize_florence_prompt_text(prompts)
+        processor_inputs = processor(text=prompt_text, images=rgb_image, return_tensors="pt")
+        if hasattr(processor_inputs, "to"):
+            processor_inputs = processor_inputs.to(device_selected)
+        generated_ids = model.generate(
+            input_ids=processor_inputs["input_ids"],
+            pixel_values=processor_inputs["pixel_values"],
+            max_new_tokens=256,
+            num_beams=3,
+            do_sample=False,
+        )
+        decoded = processor.batch_decode(generated_ids, skip_special_tokens=False)
+        generated_text = decoded[0] if isinstance(decoded, list) and decoded else ""
+        return _parse_florence_generation(
+            processor,
+            generated_text=generated_text,
+            task=task,
+            image_size=(rgb_image.width, rgb_image.height),
+            score_threshold=score_threshold,
+            max_detections=max_detections,
+        )

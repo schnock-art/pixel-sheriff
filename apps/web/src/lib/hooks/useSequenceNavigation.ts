@@ -40,6 +40,19 @@ export function useSequenceNavigation({
   const goToPrev = useCallback(() => goToIndex(Math.max(safeIndex - 1, 0)), [goToIndex, safeIndex]);
   const goToNext = useCallback(() => goToIndex(Math.min(safeIndex + 1, Math.max(assets.length - 1, 0))), [assets.length, goToIndex, safeIndex]);
   const jumpBy = useCallback((delta: number) => goToIndex(safeIndex + delta), [goToIndex, safeIndex]);
+  const pendingAssetIndices = useMemo(
+    () =>
+      assets
+        .map((asset, index) => ({ asset, index }))
+        .filter(({ asset }) => Number(asset.pending_prelabel_count ?? 0) > 0)
+        .map(({ index }) => index),
+    [assets],
+  );
+  const goToNextPending = useCallback(() => {
+    if (pendingAssetIndices.length === 0) return;
+    const nextIndex = pendingAssetIndices.find((index) => index > safeIndex) ?? pendingAssetIndices[0];
+    goToIndex(nextIndex);
+  }, [goToIndex, pendingAssetIndices, safeIndex]);
 
   const togglePlayback = useCallback(() => {
     if (assets.length <= 1) return;
@@ -90,8 +103,10 @@ export function useSequenceNavigation({
     goToPrev,
     goToNext,
     jumpBy,
+    goToNextPending,
     togglePlayback,
     pausePlayback,
     thumbnailAssets,
+    pendingFrameCount: pendingAssetIndices.length,
   };
 }

@@ -77,6 +77,21 @@ function normalizeSegmentation(rawSegmentation) {
   return segments;
 }
 
+function normalizeProvenance(rawProvenance) {
+  if (!rawProvenance || typeof rawProvenance !== "object") return null;
+  const originKind = typeof rawProvenance.origin_kind === "string" ? rawProvenance.origin_kind.trim() : "";
+  if (!originKind) return null;
+  const normalized = { origin_kind: originKind };
+  for (const fieldName of ["session_id", "proposal_id", "source_model", "prompt_text", "review_decision"]) {
+    const value = rawProvenance[fieldName];
+    if (typeof value === "string" && value.trim() !== "") normalized[fieldName] = value.trim();
+  }
+  if (typeof rawProvenance.confidence === "number" && Number.isFinite(rawProvenance.confidence)) {
+    normalized.confidence = rawProvenance.confidence;
+  }
+  return normalized;
+}
+
 function normalizeAnnotationObjects(objects) {
   if (!Array.isArray(objects)) return [];
   const result = [];
@@ -104,6 +119,7 @@ function normalizeAnnotationObjects(objects) {
         kind: "bbox",
         category_id: categoryId,
         bbox: normalized,
+        ...(normalizeProvenance(item.provenance) ? { provenance: normalizeProvenance(item.provenance) } : {}),
       });
       continue;
     }
@@ -117,6 +133,7 @@ function normalizeAnnotationObjects(objects) {
         kind: "polygon",
         category_id: categoryId,
         segmentation,
+        ...(normalizeProvenance(item.provenance) ? { provenance: normalizeProvenance(item.provenance) } : {}),
       });
     }
   }
@@ -166,6 +183,7 @@ function comparableObjectValue(objectValue) {
       kind: "bbox",
       category_id: objectValue.category_id,
       bbox: objectValue.bbox.map((value) => Number(value.toFixed(6))),
+      provenance: normalizeProvenance(objectValue.provenance),
     });
   }
   if (objectValue.kind === "polygon" && Array.isArray(objectValue.segmentation)) {
@@ -174,6 +192,7 @@ function comparableObjectValue(objectValue) {
       kind: "polygon",
       category_id: objectValue.category_id,
       segmentation: objectValue.segmentation.map((segment) => segment.map((value) => Number(value.toFixed(6)))),
+      provenance: normalizeProvenance(objectValue.provenance),
     });
   }
   return "";

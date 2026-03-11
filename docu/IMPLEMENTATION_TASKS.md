@@ -4,6 +4,42 @@ Status reflects current repository behavior.
 
 ## Completed
 
+### Documentation / Current Snapshot
+- [x] Core docs refreshed for the current repository structure and workflow surface:
+  - [x] `README.md`
+  - [x] `docs/architecture.md`
+  - [x] `docu/Architecture.md`
+  - [x] `docu/TECHNICAL_REFERENCE.md`
+  - [x] `docu/Roadplan.md`
+  - [x] `docu/VLM_COLD_START_PRELABELING_TASKS.md`
+
+### Sequence Media + AI Prelabels
+- [x] Video import pipeline:
+  - [x] `POST /projects/{project_id}/video-imports`
+  - [x] extracted frame assets persisted as ordinary assets
+  - [x] `asset_sequences` rows track source video imports and ordered frames
+- [x] Webcam capture pipeline:
+  - [x] `POST /projects/{project_id}/webcam-sessions`
+  - [x] `POST /projects/{project_id}/sequences/{sequence_id}/frames`
+  - [x] one sequence per selected camera destination
+  - [x] live preview kept available while capture is running
+- [x] Sequence review UI:
+  - [x] timeline + thumbnails for frame-backed assets
+  - [x] per-frame and per-sequence pending AI counts
+  - [x] next-pending-frame navigation
+- [x] Sequence-first bbox prelabels:
+  - [x] dedicated `prelabel_sessions` and `prelabel_proposals` storage
+  - [x] source adapters for `active_deployment` and `florence2`
+  - [x] sampled video auto-start after extraction
+  - [x] sampled webcam enqueue during live capture
+  - [x] explicit close-input session lifecycle for webcam capture
+  - [x] pending proposals remain separate from normal annotations until accepted or edited
+- [x] Labeling workspace AI review flow:
+  - [x] dedicated AI Prelabels panel
+  - [x] read-only dashed pending overlay with AI badge
+  - [x] accept, reject, bulk accept/reject, and edit-selected actions
+  - [x] provenance-preserving promotion into saved annotation objects
+
 ### Infra / Compose
 - [x] Docker compose services for `web`, `api`, `trainer`, `db`, `redis`
 - [x] Configurable host ports via `.env`

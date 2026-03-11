@@ -2,6 +2,10 @@ export type AnnotationStatus = "unlabeled" | "labeled" | "skipped" | "needs_revi
 export type ProjectTaskType = "classification" | "classification_single" | "bbox" | "segmentation";
 export type TaskKind = "classification" | "bbox" | "segmentation";
 export type TaskLabelMode = "single_label" | "multi_label";
+export type PrelabelSourceType = "active_deployment" | "florence2";
+export type PrelabelSamplingMode = "every_n_frames" | "every_n_seconds";
+export type PrelabelSessionStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
+export type PrelabelProposalStatus = "pending" | "accepted" | "edited" | "rejected";
 
 export interface Project {
   id: string;
@@ -100,6 +104,7 @@ export interface SequenceFrameAsset {
   image_url: string;
   thumbnail_url: string;
   has_annotations: boolean;
+  pending_prelabel_count: number;
 }
 
 export interface AssetSequence {
@@ -119,6 +124,9 @@ export interface AssetSequence {
   width: number | null;
   height: number | null;
   error_message: string | null;
+  pending_prelabel_count: number;
+  latest_prelabel_session_id: string | null;
+  latest_prelabel_session_status: PrelabelSessionStatus | null;
   assets: SequenceFrameAsset[];
 }
 
@@ -128,6 +136,64 @@ export interface SequenceStatus {
   frame_count: number;
   processed_frames: number;
   error_message: string | null;
+  pending_prelabel_count: number;
+}
+
+export interface PrelabelFrameSampling {
+  mode: PrelabelSamplingMode;
+  value: number;
+}
+
+export interface PrelabelConfig {
+  source_type: PrelabelSourceType;
+  prompts: string[];
+  frame_sampling: PrelabelFrameSampling;
+  confidence_threshold: number;
+  max_detections_per_frame: number;
+}
+
+export interface PrelabelSession {
+  id: string;
+  project_id: string;
+  task_id: string;
+  sequence_id: string;
+  source_type: PrelabelSourceType;
+  source_ref: string | null;
+  prompts: string[];
+  sampling_mode: PrelabelSamplingMode;
+  sampling_value: number;
+  confidence_threshold: number;
+  max_detections_per_frame: number;
+  live_mode: boolean;
+  status: PrelabelSessionStatus;
+  input_closed_at: string | null;
+  enqueued_assets: number;
+  processed_assets: number;
+  generated_proposals: number;
+  skipped_unmatched: number;
+  error_message: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface PrelabelProposal {
+  id: string;
+  session_id: string;
+  asset_id: string;
+  project_id: string;
+  task_id: string;
+  category_id: string;
+  label_text: string;
+  prompt_text: string | null;
+  confidence: number;
+  bbox: number[];
+  status: PrelabelProposalStatus;
+  reviewed_bbox: number[] | null;
+  reviewed_category_id: string | null;
+  promoted_annotation_id: string | null;
+  promoted_object_id: string | null;
+  created_at: string | null;
+  updated_at: string | null;
 }
 
 export interface WebcamSessionCreatePayload {
@@ -136,6 +202,7 @@ export interface WebcamSessionCreatePayload {
   folder_path?: string | null;
   name: string;
   fps: number;
+  prelabel_config?: PrelabelConfig | null;
 }
 
 export interface VideoImportPayload {
@@ -147,14 +214,17 @@ export interface VideoImportPayload {
   resize_mode: "original" | "width" | "height";
   resize_width?: number | null;
   resize_height?: number | null;
+  prelabel_config?: PrelabelConfig | null;
 }
 
 export interface VideoImportResponse {
   sequence: AssetSequence;
+  prelabel_session_id: string | null;
 }
 
 export interface WebcamSessionCreateResponse {
   sequence: AssetSequence;
+  prelabel_session_id: string | null;
 }
 
 export interface Annotation {

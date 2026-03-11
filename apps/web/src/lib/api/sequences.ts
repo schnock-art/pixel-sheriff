@@ -58,5 +58,6 @@ export function importVideo(projectId: string, file: File, payload: VideoImportP
   formData.append("resize_mode", payload.resize_mode);
   if (typeof payload.resize_width === "number") formData.append("resize_width", String(payload.resize_width));
   if (typeof payload.resize_height === "number") formData.append("resize_height", String(payload.resize_height));
+   if (payload.prelabel_config) formData.append("prelabel_config", JSON.stringify(payload.prelabel_config));
   return apiPostForm<VideoImportResponse>(`/projects/${projectId}/video-imports`, formData);
 }

@@ -14,6 +14,7 @@ from sheriff_api.config import get_settings
 from sheriff_api.db.models import Annotation, Asset, AssetSequence, AssetType, Folder, Suggestion
 from sheriff_api.db.session import SessionLocal
 from sheriff_api.services.asset_ingest import build_asset_record
+from sheriff_api.services.prelabels import enqueue_existing_sequence_assets_for_session, mark_prelabel_session_failed
 from sheriff_api.services.storage import LocalStorage
 
 ALLOWED_VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv"}
@@ -345,6 +346,19 @@ async def extract_video_sequence_job(
                 raise
 
     effective_storage.delete_file(video_storage_uri)
+    prelabel_session_id = str(payload.get("prelabel_session_id") or "").strip()
+    if prelabel_session_id:
+        try:
+            await enqueue_existing_sequence_assets_for_session(
+                prelabel_session_id,
+                session_factory=effective_session_factory,
+            )
+        except Exception as exc:
+            await mark_prelabel_session_failed(
+                prelabel_session_id,
+                message=str(exc) or "Failed to enqueue prelabel jobs",
+                session_factory=effective_session_factory,
+            )
     return {
         "status": "ready",
         "sequence_id": sequence_id,

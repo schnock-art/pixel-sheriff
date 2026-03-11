@@ -5,16 +5,22 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sheriff_api.config import get_settings
-from sheriff_api.db.models import Asset, AssetSequence, AssetType, Folder, Project, Task
+from sheriff_api.db.models import Asset, AssetSequence, AssetType, Folder, PrelabelSession, Project, Task
 from sheriff_api.db.session import get_db
 from sheriff_api.errors import api_error
 from sheriff_api.schemas.assets import AssetRead
 from sheriff_api.schemas.sequences import AssetSequenceRead, SequenceStatusRead, WebcamSessionCreate, WebcamSessionCreateResponse
+from sheriff_api.services.prelabels import (
+    create_prelabel_session,
+    enqueue_live_prelabel_jobs_for_asset,
+)
 from sheriff_api.services.asset_ingest import persist_asset_bytes
 from sheriff_api.services.sequences import (
     annotated_asset_ids_for_sequence,
     asset_to_read,
     create_sequence_with_folder,
+    latest_prelabel_session_for_sequence as latest_prelabel_session_for_sequence_alias,
+    pending_prelabel_counts_for_sequence as pending_prelabel_counts_for_sequence_alias,
     refresh_sequence_counts,
     sequence_status_to_read,
     sequence_to_read,
@@ -74,7 +80,25 @@ async def list_sequences(
         for folder in (await db.execute(select(Folder).where(Folder.project_id == project_id))).scalars().all()
     }
     sequences.sort(key=lambda sequence: (sequence.created_at, sequence.id))
-    return [sequence_to_read(sequence, folder=folders.get(sequence.folder_id)) for sequence in sequences]
+    items: list[AssetSequenceRead] = []
+    for sequence in sequences:
+        assets = list((await db.execute(select(Asset).where(Asset.sequence_id == sequence.id))).scalars().all())
+        asset_ids = [asset.id for asset in assets]
+        pending_counts = await pending_prelabel_counts_for_sequence_alias(db, task_id=task_id or sequence.task_id, asset_ids=asset_ids)
+        latest_session = await latest_prelabel_session_for_sequence_alias(
+            db,
+            sequence_id=sequence.id,
+            task_id=task_id or sequence.task_id,
+        )
+        items.append(
+            sequence_to_read(
+                sequence,
+                folder=folders.get(sequence.folder_id),
+                pending_prelabel_counts=pending_counts,
+                latest_prelabel_session=latest_session,
+            )
+        )
+    return items
 
 
 @router.get("/projects/{project_id}/sequences/{sequence_id}", response_model=AssetSequenceRead)
@@ -90,11 +114,19 @@ async def get_sequence(
     assets = list((await db.execute(select(Asset).where(Asset.sequence_id == sequence.id))).scalars().all())
     asset_ids = [asset.id for asset in assets]
     annotated_asset_ids = await annotated_asset_ids_for_sequence(db, task_id=task_id, asset_ids=asset_ids)
+    pending_counts = await pending_prelabel_counts_for_sequence_alias(db, task_id=task_id or sequence.task_id, asset_ids=asset_ids)
+    latest_session = await latest_prelabel_session_for_sequence_alias(
+        db,
+        sequence_id=sequence.id,
+        task_id=task_id or sequence.task_id,
+    )
     return sequence_to_read(
         sequence,
         folder=folder,
         assets=assets,
         annotated_asset_ids=annotated_asset_ids,
+        pending_prelabel_counts=pending_counts,
+        latest_prelabel_session=latest_session,
     )
 
 
@@ -102,7 +134,9 @@ async def get_sequence(
 async def get_sequence_status(project_id: str, sequence_id: str, db: AsyncSession = Depends(get_db)) -> SequenceStatusRead:
     await _require_project(db, project_id)
     sequence = await _require_sequence(db, project_id, sequence_id)
-    return sequence_status_to_read(sequence)
+    assets = list((await db.execute(select(Asset.id).where(Asset.sequence_id == sequence.id))).scalars().all())
+    pending_counts = await pending_prelabel_counts_for_sequence_alias(db, task_id=sequence.task_id, asset_ids=assets)
+    return sequence_status_to_read(sequence, pending_prelabel_count=sum(pending_counts.values()))
 
 
 @router.post("/projects/{project_id}/webcam-sessions", response_model=WebcamSessionCreateResponse)
@@ -137,9 +171,37 @@ async def create_webcam_session(
             raise api_error(status.HTTP_409_CONFLICT, code=code, message="Folder already contains assets") from exc
         raise api_error(status.HTTP_500_INTERNAL_SERVER_ERROR, code="sequence_create_failed", message="Failed to create webcam session") from exc
 
+    prelabel_session: PrelabelSession | None = None
+    if payload.prelabel_config is not None:
+        if payload.task_id is None:
+            raise api_error(status.HTTP_422_UNPROCESSABLE_ENTITY, code="task_id_required", message="task_id is required for prelabels")
+        task = await db.get(Task, payload.task_id)
+        if task is None:
+            raise api_error(status.HTTP_404_NOT_FOUND, code="task_not_found", message="Task not found in project")
+        try:
+            prelabel_session = await create_prelabel_session(
+                db,
+                project_id=project_id,
+                task=task,
+                sequence=sequence,
+                config=payload.prelabel_config,
+                live_mode=True,
+            )
+        except ValueError as exc:
+            code = str(exc)
+            if code in {"active_deployment_not_found", "active_deployment_incompatible"}:
+                raise api_error(status.HTTP_409_CONFLICT, code=code, message="Active deployment is unavailable for this task") from exc
+            if code == "task_kind_unsupported":
+                raise api_error(status.HTTP_409_CONFLICT, code=code, message="Prelabels are supported only for bbox tasks") from exc
+            raise
+
     await db.commit()
     await db.refresh(sequence)
-    return WebcamSessionCreateResponse(sequence=sequence_to_read(sequence, folder=folder))
+    latest_session = prelabel_session
+    return WebcamSessionCreateResponse(
+        sequence=sequence_to_read(sequence, folder=folder, latest_prelabel_session=latest_session),
+        prelabel_session_id=prelabel_session.id if prelabel_session is not None else None,
+    )
 
 
 @router.post("/projects/{project_id}/sequences/{sequence_id}/frames", response_model=AssetRead)
@@ -217,6 +279,7 @@ async def upload_webcam_frame(
             sequence.height = asset.height
         if timestamp_seconds is not None:
             sequence.duration_seconds = max(float(sequence.duration_seconds or 0.0), float(timestamp_seconds))
+        await enqueue_live_prelabel_jobs_for_asset(db, sequence=sequence, asset=asset)
         await db.commit()
         await db.refresh(asset)
     except Exception as exc:

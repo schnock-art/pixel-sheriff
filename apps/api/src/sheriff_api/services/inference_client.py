@@ -44,6 +44,20 @@ class InferenceClient:
     async def infer_segmentation(self, payload: dict[str, Any]) -> dict[str, Any]:
         return await self.infer("segmentation", payload)
 
+    async def florence_detect(self, payload: dict[str, Any]) -> dict[str, Any]:
+        async with httpx.AsyncClient(timeout=self._timeout) as client:
+            response = await client.post(f"{self._base_url}/infer/florence/detect", json=payload)
+        response.raise_for_status()
+        parsed = response.json()
+        return parsed if isinstance(parsed, dict) else {}
+
+    async def warmup_florence(self, payload: dict[str, Any]) -> dict[str, Any]:
+        async with httpx.AsyncClient(timeout=self._timeout) as client:
+            response = await client.post(f"{self._base_url}/infer/florence/warmup", json=payload)
+        response.raise_for_status()
+        parsed = response.json()
+        return parsed if isinstance(parsed, dict) else {}
+
     async def warmup(self, task_kind: str, payload: dict[str, Any]) -> dict[str, Any]:
         endpoint = _TASK_WARMUP_ENDPOINT.get(task_kind)
         if endpoint is None:

@@ -1,88 +1,91 @@
 # Architecture Overview
 
-This is the current high-signal architecture reference for the codebase. The root [README](../README.md) is the quickstart; older notes under `docu/` are historical and may lag current implementation.
+This is the current architecture reference for the implemented system.
 
 ## Product Shape
 
-Pixel Sheriff is image-first:
+Pixel Sheriff is an image-first system:
 
-- Images are first-class assets.
-- Video files and webcam sessions are frame sources, not a separate annotation engine.
-- Extracted or captured frames become ordinary image assets inside a dedicated folder and asset sequence.
-- The existing labeling canvas remains the only editor for images, video frames, and webcam frames.
+- images are the canonical annotation unit
+- videos are imported as extracted frame assets
+- webcam capture uploads frame assets live
+- the labeling workspace is shared across images and sequence frames
+- dataset export remains frame-based
 
-Canonical media flow:
+Task kinds:
 
-```text
-video file / webcam stream
--> frame extraction or capture
--> asset rows + files in storage
--> existing annotation workflow
--> dataset export stays frame-based
-```
+- `classification`
+- `bbox`
+- `segmentation`
+
+AI-assisted paths:
+
+- active deployment suggestions for single-asset review
+- sequence-first AI prelabels for bbox video and webcam workflows
 
 ## Runtime Topology
 
 Default Docker services:
 
-- `web` (`apps/web`) on `WEB_PORT`, default `3010`
-- `api` (`apps/api`) on `API_PORT`, default `8010`
-- `worker` (`apps/worker`) for background media jobs
-- `trainer` (`apps/trainer`) for training runs and inference-backed suggestions
-- `db` (PostgreSQL) on `POSTGRES_PORT`, default `5433`
+- `web` on `WEB_PORT`, default `3010`
+- `api` on `API_PORT`, default `8010`
+- `worker`
+- `trainer`
+- `db` on `POSTGRES_PORT`, default `5433`
 - `redis` on `REDIS_PORT`, default `6380`
 
-Data flow:
+Flow:
 
 ```text
 browser
 -> web
 -> api
    -> postgres
-   -> redis -> worker   (video frame extraction)
-   -> trainer           (training/inference flows)
+   -> redis -> worker
+   -> trainer
 ```
 
-Important operational note:
+Current queue separation:
 
-- `make up` starts the full stack.
-- `make up-web-api` does not start `worker` or `trainer`.
-- Video import requires `worker`.
-- Training and deployment-assisted suggestions require `trainer`.
+- media extraction queue
+- prelabel queue
+- training queue
+- suggestion queue
 
 ## Storage Model
 
-Mutable application state lives in PostgreSQL:
+Mutable state in PostgreSQL:
 
 - `projects`
 - `tasks`
+- `categories`
 - `folders`
 - `asset_sequences`
 - `assets`
 - `annotations`
-- supporting tables such as categories, suggestions, and deployments
+- `prelabel_sessions`
+- `prelabel_proposals`
+- `suggestions`
 
-Immutable or artifact-heavy data is file-backed under `./data`:
+File-backed data under `./data`:
 
-- `data/assets/`
-- `data/imports/`
-- `data/datasets/`
-- `data/exports/`
-- `data/models/`
-- `data/experiments/`
+- `assets/`
+- `imports/`
+- `datasets/`
+- `exports/`
+- `models/`
+- `experiments/`
 
-The API bootstraps schema on startup with:
+Startup bootstrapping:
 
-- `Base.metadata.create_all`
-- `run_startup_migrations`
+- SQLAlchemy `Base.metadata.create_all`
+- startup migration runner in `apps/api/src/sheriff_api/services/migrations.py`
 
-The startup migration layer also backfills first-class folders and sequence-related asset columns for legacy assets that only had `metadata_json.relative_path`.
-
-## Core Data Concepts
+## Core Domain Concepts
 
 ### Folder
 
-Folders are now first-class rows. They drive the sidebar tree and make empty processing folders visible before any extracted frames exist.
+First-class row used for tree navigation and sequence ownership.
 
 Key fields:
 
@@ -94,12 +97,7 @@ Key fields:
 
 ### AssetSequence
 
-An asset sequence groups time-ordered assets that came from the same source.
-
-Examples:
-
-- imported video
-- webcam capture session
+Time-ordered asset group for one video import or webcam session.
 
 Key fields:
 
@@ -108,8 +106,8 @@ Key fields:
 - `task_id`
 - `folder_id`
 - `name`
-- `source_type` (`video_file` or `webcam`)
-- `status` (`processing`, `ready`, `failed`)
+- `source_type`
+- `status`
 - `frame_count`
 - `processed_frames`
 - `fps`
@@ -120,74 +118,145 @@ Key fields:
 
 ### Asset
 
-Assets remain the canonical unit for annotation and export.
+Canonical annotation/export unit.
 
-Relevant asset fields for the media flow:
+Relevant sequence fields:
 
 - `folder_id`
 - `file_name`
 - `sequence_id`
-- `source_kind` (`image`, `video_frame`, `webcam_frame`)
+- `source_kind`
 - `frame_index`
 - `timestamp_seconds`
 
-Sequence-backed assets are still normal assets. They are not special-cased by the annotation canvas.
+### Annotation
 
-## Current Media Flows
+One annotation row per `(asset_id, task_id)`.
+
+Current payload model:
+
+- classification block
+- object geometry list for bbox or polygon tasks
+- optional per-object provenance
+
+### PrelabelSession
+
+Sequence-level AI prelabel job orchestration record.
+
+Current fields include:
+
+- source selection
+- prompts
+- sampling mode/value
+- confidence threshold
+- live-mode flag
+- enqueue/process/proposal counters
+- input-closed timestamp
+- terminal status and error message
+
+### PrelabelProposal
+
+Pending AI-generated bbox proposal stored separately from normal annotations.
+
+Current fields include:
+
+- source session
+- asset/task/project/category references
+- label text and prompt text
+- confidence
+- bbox in `xywh`
+- proposal review status
+- reviewed bbox/category
+- promoted annotation/object references
+
+## Current Flows
 
 ### Image Import
 
-The image import flow still uploads files into a project/folder destination and creates asset rows. Existing image-only workflows remain unchanged.
+Browser uploads image bytes to the API, which persists local storage files and asset rows.
 
 ### Video Import
 
-API surface:
+API:
 
-- `POST /api/v1/projects/{project_id}/video-imports`
-- `GET /api/v1/projects/{project_id}/sequences`
-- `GET /api/v1/projects/{project_id}/sequences/{sequence_id}`
-- `GET /api/v1/projects/{project_id}/sequences/{sequence_id}/status`
+- creates folder and `asset_sequences` row
+- stores uploaded video in `imports/`
+- enqueues extraction job
 
-Flow:
+Worker:
 
-1. The API validates upload parameters and file type.
-2. It creates a dedicated folder and `asset_sequences` row with `status=processing`.
-3. The raw uploaded video is written under `data/imports/`.
-4. A Redis media job is pushed to `MEDIA_QUEUE_KEY`.
-5. `apps/worker` consumes the job and runs FFmpeg-based extraction.
-6. Extracted frames are stored as normal assets, linked to the folder and sequence.
-7. The sequence is marked `ready` or `failed`.
+- extracts JPEG frames with FFmpeg
+- persists frame assets
+- marks the sequence `ready` or `failed`
 
-V1 behavior:
+If `prelabel_config` is present:
 
-- one sequence owns one dedicated folder
-- no raw video asset is stored in the normal asset table
-- extracted frames are named deterministically (`frame_000001.jpg`, etc.)
-- exports stay frame-based
+- a `PrelabelSession` is created at import time
+- once extraction completes, sampled frame jobs are enqueued on the prelabel queue
 
 ### Webcam Capture
 
-API surface:
+Browser:
 
-- `POST /api/v1/projects/{project_id}/webcam-sessions`
-- `POST /api/v1/projects/{project_id}/sequences/{sequence_id}/frames`
+- gets camera access with `getUserMedia`
+- previews the selected devices
+- captures JPEG frames from a live video element
 
-Flow:
+API:
 
-1. The browser requests camera access with `getUserMedia`.
-2. The UI creates a webcam session only when capture starts.
-3. Frames are drawn into an offscreen canvas, encoded as JPEG, and uploaded sequentially.
-4. Each uploaded frame becomes a normal asset linked to the sequence.
+- creates one sequence per camera destination
+- accepts uploaded frames through `/sequences/{sequence_id}/frames`
+
+If `prelabel_config` is present:
+
+- one live `PrelabelSession` is created per webcam sequence
+- sampled frames are enqueued for prelabel work while capture is active
+- modal finish triggers `close-input`
+
+### AI Prelabels
+
+Supported sources:
+
+- `active_deployment`
+- `florence2`
+
+Source behavior:
+
+- active deployment is resolved at session creation time
+- Florence runs in `apps/trainer`
+- API owns adapter selection and session orchestration
+- worker owns background `prelabel_asset` execution
+
+Review behavior:
+
+- pending proposals do not enter normal annotations
+- accept merges proposals into the annotation payload without overwriting unrelated manual objects
+- edit loads a provenance-backed bbox into the normal annotation draft
+- saved provenance-backed objects mark proposals as `accepted` or `edited`
+
+### Suggestions
+
+Separate from prelabels:
+
+- deployment suggestions are current-asset, deployment-driven review helpers
+- prelabels are sequence/session-driven pending proposals for frame review
 
 ## Labeling Workspace
 
-Main orchestration:
+Main composition:
 
 - `apps/web/src/components/workspace/ProjectAssetsWorkspace.tsx`
 
-Sequence-aware workspace pieces:
+Major UI regions:
 
-- `ImportMenu.tsx`
+- asset browser and folder tree
+- canvas and geometry tools
+- right-side labeling panel
+- dedicated AI prelabels panel
+- image pagination or sequence controls depending on current asset
+
+Sequence-aware pieces:
+
 - `VideoImportModal.tsx`
 - `WebcamCaptureModal.tsx`
 - `SequenceToolbar.tsx`
@@ -196,59 +265,75 @@ Sequence-aware workspace pieces:
 
 Sequence-aware hooks:
 
-- `useFolders`
 - `useSequence`
 - `useSequenceNavigation`
 - `useWebcamCapture`
-
-Behavior:
-
-- plain image assets keep the existing pagination-first workflow
-- sequence assets switch the bottom panel into frame navigation mode
-- the center canvas and annotation tools stay unchanged
+- `usePrelabels`
 
 ## Export Contract
 
-Dataset export remains consumable as before:
+Exports are still image/frame based.
 
-- frames export exactly like image assets
-- existing training consumers do not need a separate video path
+Current bundle contents:
 
-For sequence-backed assets, export metadata now carries optional lineage details such as:
+- `manifest.json`
+- `coco_instances.json`
+- packaged asset files
 
-- `kind`
-- `sequence_id`
-- `sequence_name`
-- `frame_index`
-- `timestamp_seconds`
+Current behavior:
+
+- UUID asset identity is preserved across manifest and COCO
+- bbox and polygon geometry export into COCO object annotations
+- sequence-derived assets retain lineage metadata such as `sequence_id`, `frame_index`, `timestamp_seconds`, and `source_kind`
+- pending or rejected prelabel proposals are not part of export generation
 
 ## Backend Map
 
 - `apps/api/src/sheriff_api/main.py`
-  - app entrypoint, router mounting, startup schema bootstrapping
 - `apps/api/src/sheriff_api/db/models.py`
-  - SQLAlchemy models including `Folder`, `AssetSequence`, and the updated `Asset` fields
-- `apps/api/src/sheriff_api/services/migrations.py`
-  - startup migration and legacy backfill logic
+- `apps/api/src/sheriff_api/routers/`
 - `apps/api/src/sheriff_api/services/sequences.py`
-  - folder/sequence serializers and helpers
 - `apps/api/src/sheriff_api/services/video_frames.py`
-  - FFmpeg extraction, failure cleanup, sequence state updates
-- `apps/api/src/sheriff_api/routers/folders.py`
-- `apps/api/src/sheriff_api/routers/video_imports.py`
-- `apps/api/src/sheriff_api/routers/sequences.py`
+- `apps/api/src/sheriff_api/services/prelabels.py`
+- `apps/api/src/sheriff_api/services/prelabel_adapters.py`
+- `apps/api/src/sheriff_api/services/prelabel_queue.py`
+
+## Worker and Trainer Map
+
+Worker:
+
+- `apps/worker/src/sheriff_worker/main.py`
+- `apps/worker/src/sheriff_worker/jobs/extract_frames.py`
+- `apps/worker/src/sheriff_worker/jobs/prelabel_asset.py`
+
+Trainer:
+
+- training execution and experiment artifacts
+- deployment-backed inference endpoints
+- Florence warmup and detect endpoints
+
+Key trainer inference endpoints:
+
+- `/infer/classification`
+- `/infer/classification/warmup`
+- `/infer/detection`
+- `/infer/detection/warmup`
+- `/infer/segmentation`
+- `/infer/florence/warmup`
+- `/infer/florence/detect`
 
 ## Frontend Map
 
 - `apps/web/src/app/projects/[projectId]/`
-  - project-scoped routes for labeling, datasets, models, experiments, and deploy
 - `apps/web/src/components/workspace/project-assets/`
-  - asset browser, import modals, sequence controls, and other labeling subcomponents
 - `apps/web/src/lib/hooks/`
-  - workspace, folder, sequence, import, and webcam state
+- `apps/web/src/lib/workspace/`
 - `apps/web/src/lib/api/`
-  - domain-specific API clients and shared request/response types
 
-## Legacy Docs
+## Current Gaps
 
-`docu/` still contains useful historical notes, but it should not be treated as the source of truth for the current codebase. Start with this file and the root README when orienting to the current implementation.
+Implemented system is broader than the original classification-only base, but some work is still intentionally open:
+
+- richer full-flow automated UI coverage for AI prelabel review
+- deeper webcam frame-write diagnostics for intermittent browser/device issues
+- more advanced geometry editing polish

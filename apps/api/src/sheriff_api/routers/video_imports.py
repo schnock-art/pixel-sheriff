@@ -1,5 +1,4 @@
 from __future__ import annotations
-
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, UploadFile, status
@@ -9,8 +8,10 @@ from sheriff_api.config import get_settings
 from sheriff_api.db.models import Project, Task
 from sheriff_api.db.session import get_db
 from sheriff_api.errors import api_error
+from sheriff_api.schemas.prelabels import PrelabelConfigCreate
 from sheriff_api.schemas.video_imports import VideoImportResponse
 from sheriff_api.services.media_queue import MediaQueue
+from sheriff_api.services.prelabels import create_prelabel_session
 from sheriff_api.services.sequences import create_sequence_with_folder, sequence_to_read
 from sheriff_api.services.storage import LocalStorage
 from sheriff_api.services.video_frames import validate_video_import_params, VideoImportValidationError
@@ -54,10 +55,11 @@ async def import_video(
     resize_mode: str = Form(default="original"),
     resize_width: int | None = Form(default=None),
     resize_height: int | None = Form(default=None),
+    prelabel_config: str | None = Form(default=None),
     db: AsyncSession = Depends(get_db),
 ) -> VideoImportResponse:
     await _require_project(db, project_id)
-    await _require_task(db, project_id, task_id)
+    task = await _require_task(db, project_id, task_id)
 
     try:
         params = validate_video_import_params(
@@ -85,6 +87,18 @@ async def import_video(
             details={"filename": file.filename},
         )
 
+    parsed_prelabel_config: PrelabelConfigCreate | None = None
+    if prelabel_config is not None:
+        try:
+            parsed_prelabel_config = PrelabelConfigCreate.model_validate_json(prelabel_config)
+        except Exception as exc:
+            raise api_error(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                code="prelabel_config_invalid",
+                message="Prelabel config is invalid",
+                details={"reason": str(exc)},
+            ) from exc
+
     requested_name = (name or Path(file.filename or "video_session").stem).strip() or "video_session"
     try:
         folder, sequence = await create_sequence_with_folder(
@@ -108,6 +122,28 @@ async def import_video(
             raise api_error(status.HTTP_409_CONFLICT, code=code, message="Folder already contains assets") from exc
         raise api_error(status.HTTP_500_INTERNAL_SERVER_ERROR, code="video_import_create_failed", message="Failed to create video import") from exc
 
+    prelabel_session_id: str | None = None
+    if parsed_prelabel_config is not None:
+        if task is None:
+            raise api_error(status.HTTP_422_UNPROCESSABLE_ENTITY, code="task_id_required", message="task_id is required for prelabels")
+        try:
+            prelabel_session = await create_prelabel_session(
+                db,
+                project_id=project_id,
+                task=task,
+                sequence=sequence,
+                config=parsed_prelabel_config,
+                live_mode=False,
+            )
+            prelabel_session_id = prelabel_session.id
+        except ValueError as exc:
+            code = str(exc)
+            if code in {"active_deployment_not_found", "active_deployment_incompatible"}:
+                raise api_error(status.HTTP_409_CONFLICT, code=code, message="Active deployment is unavailable for this task") from exc
+            if code == "task_kind_unsupported":
+                raise api_error(status.HTTP_409_CONFLICT, code=code, message="Prelabels are supported only for bbox tasks") from exc
+            raise
+
     storage.ensure_project_dirs(project_id)
     import_storage_uri = f"imports/{project_id}/{sequence.id}/{Path(file.filename or 'source.mp4').name}"
     wrote_file = False
@@ -128,6 +164,7 @@ async def import_video(
                 "resize_mode": params["resize_mode"],
                 "resize_width": params["resize_width"],
                 "resize_height": params["resize_height"],
+                "prelabel_session_id": prelabel_session_id,
             }
         )
         await db.commit()
@@ -146,4 +183,4 @@ async def import_video(
             details={"project_id": project_id},
         ) from exc
 
-    return VideoImportResponse(sequence=sequence_to_read(sequence, folder=folder))
+    return VideoImportResponse(sequence=sequence_to_read(sequence, folder=folder), prelabel_session_id=prelabel_session_id)

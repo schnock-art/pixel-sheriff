@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { createWebcamSession, uploadSequenceFrame, type Asset, type AssetSequence } from "../api";
+import { createWebcamSession, uploadSequenceFrame, type Asset, type AssetSequence, type PrelabelConfig } from "../api";
 
 export interface WebcamCaptureDestination {
   deviceId: string;
@@ -16,11 +16,13 @@ export interface WebcamDeviceState {
   isCapturing: boolean;
   captureCount: number;
   sequence: AssetSequence | null;
+  prelabelSessionId: string | null;
 }
 
 interface StartCaptureParams {
   fps: number;
   destinations: WebcamCaptureDestination[];
+  prelabelConfig?: PrelabelConfig | null;
 }
 
 interface UseWebcamCaptureParams {
@@ -73,6 +75,7 @@ export function useWebcamCapture({ projectId, taskId, onSequenceCreated, onFrame
         isCapturing: false,
         captureCount: 0,
         sequence: null,
+        prelabelSessionId: null,
       };
       return {
         ...previous,
@@ -141,6 +144,7 @@ export function useWebcamCapture({ projectId, taskId, onSequenceCreated, onFrame
           isCapturing: false,
           captureCount: 0,
           sequence: null,
+          prelabelSessionId: null,
         };
       }
       return next;
@@ -178,6 +182,7 @@ export function useWebcamCapture({ projectId, taskId, onSequenceCreated, onFrame
             isCapturing: existing?.isCapturing ?? false,
             captureCount: existing?.captureCount ?? 0,
             sequence: existing?.sequence ?? null,
+            prelabelSessionId: existing?.prelabelSessionId ?? null,
           };
         });
         return next;
@@ -288,7 +293,7 @@ export function useWebcamCapture({ projectId, taskId, onSequenceCreated, onFrame
     }
   }, [onFrameUploaded, patchDeviceState, projectId, stopCapture]);
 
-  const startCapture = useCallback(async ({ fps, destinations }: StartCaptureParams) => {
+  const startCapture = useCallback(async ({ fps, destinations, prelabelConfig }: StartCaptureParams) => {
     if (!projectId) {
       setError("Select a project before starting webcam capture.");
       return;
@@ -317,9 +322,15 @@ export function useWebcamCapture({ projectId, taskId, onSequenceCreated, onFrame
             folder_path: folderPath,
             name: sequenceName,
             fps,
+            prelabel_config: prelabelConfig ?? null,
           });
           sequenceRefs.current.set(deviceId, created.sequence);
-          patchDeviceState(deviceId, { sequence: created.sequence, isCapturing: true });
+          patchDeviceState(deviceId, {
+            sequence: created.sequence,
+            isCapturing: true,
+            prelabelSessionId: created.prelabel_session_id ?? null,
+          });
+          await attachStreamToVideo(deviceId);
           onSequenceCreated?.(created.sequence);
           void captureOnce(deviceId);
           const timerId = window.setInterval(() => {
@@ -334,7 +345,7 @@ export function useWebcamCapture({ projectId, taskId, onSequenceCreated, onFrame
         }
       }),
     );
-  }, [captureOnce, deviceStates, onSequenceCreated, patchDeviceState, projectId, taskId]);
+  }, [attachStreamToVideo, captureOnce, deviceStates, onSequenceCreated, patchDeviceState, projectId, taskId]);
 
   const attachVideoRef = useCallback((deviceId: string, node: HTMLVideoElement | null) => {
     videoNodeRefs.current.set(deviceId, node);
@@ -352,6 +363,7 @@ export function useWebcamCapture({ projectId, taskId, onSequenceCreated, onFrame
           isCapturing: false,
           captureCount: 0,
           sequence: null,
+          prelabelSessionId: null,
         };
         return deviceStates[device.deviceId] ?? fallback;
       }),

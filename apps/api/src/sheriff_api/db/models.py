@@ -240,6 +240,78 @@ class Annotation(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class PrelabelSession(Base):
+    __tablename__ = "prelabel_sessions"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    project_id: Mapped[str] = mapped_column(
+        ForeignKey("projects.id", name="fk_prelabel_sessions_project_id", ondelete="CASCADE"),
+        index=True,
+    )
+    task_id: Mapped[str] = mapped_column(
+        ForeignKey("tasks.id", name="fk_prelabel_sessions_task_id", ondelete="CASCADE"),
+        index=True,
+    )
+    sequence_id: Mapped[str] = mapped_column(
+        ForeignKey("asset_sequences.id", name="fk_prelabel_sessions_sequence_id", ondelete="CASCADE"),
+        index=True,
+    )
+    source_type: Mapped[str] = mapped_column(String, nullable=False)
+    source_ref: Mapped[str | None] = mapped_column(String, nullable=True)
+    prompts_json: Mapped[list] = mapped_column(JSON, default=list)
+    sampling_mode: Mapped[str] = mapped_column(String, nullable=False, default="every_n_frames")
+    sampling_value: Mapped[float] = mapped_column(Float, nullable=False, default=15.0)
+    confidence_threshold: Mapped[float] = mapped_column(Float, nullable=False, default=0.25)
+    max_detections_per_frame: Mapped[int] = mapped_column(Integer, nullable=False, default=20)
+    live_mode: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    status: Mapped[str] = mapped_column(String, nullable=False, default="queued")
+    input_closed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    enqueued_assets: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    processed_assets: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    generated_proposals: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    skipped_unmatched: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    error_message: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class PrelabelProposal(Base):
+    __tablename__ = "prelabel_proposals"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    session_id: Mapped[str] = mapped_column(
+        ForeignKey("prelabel_sessions.id", name="fk_prelabel_proposals_session_id", ondelete="CASCADE"),
+        index=True,
+    )
+    asset_id: Mapped[str] = mapped_column(
+        ForeignKey("assets.id", name="fk_prelabel_proposals_asset_id", ondelete="CASCADE"),
+        index=True,
+    )
+    project_id: Mapped[str] = mapped_column(
+        ForeignKey("projects.id", name="fk_prelabel_proposals_project_id", ondelete="CASCADE"),
+        index=True,
+    )
+    task_id: Mapped[str] = mapped_column(
+        ForeignKey("tasks.id", name="fk_prelabel_proposals_task_id", ondelete="CASCADE"),
+        index=True,
+    )
+    category_id: Mapped[str] = mapped_column(
+        ForeignKey("categories.id", name="fk_prelabel_proposals_category_id", ondelete="CASCADE"),
+        index=True,
+    )
+    label_text: Mapped[str] = mapped_column(String, nullable=False)
+    prompt_text: Mapped[str | None] = mapped_column(String, nullable=True)
+    confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    bbox_json: Mapped[list] = mapped_column(JSON, default=list)
+    status: Mapped[str] = mapped_column(String, nullable=False, default="pending", index=True)
+    reviewed_bbox_json: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    reviewed_category_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    promoted_annotation_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    promoted_object_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 class DatasetVersion(Base):
     __tablename__ = "dataset_versions"
 
