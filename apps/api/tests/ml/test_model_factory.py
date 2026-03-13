@@ -17,7 +17,7 @@ def _base_classifier_config() -> dict:
             "manifest_id": "manifest-123",
             "task": "classification",
             "num_classes": 3,
-            "class_order": [10, 11, 12],
+            "class_order": ["10", "11", "12"],
             "class_names": ["car", "bus", "truck"],
         },
         "input": {
@@ -62,6 +62,14 @@ def _base_classifier_config() -> dict:
     }
 
 
+def _efficientnet_classifier_config() -> dict:
+    config = copy.deepcopy(_base_classifier_config())
+    config["input"]["input_size"] = [384, 384]
+    config["architecture"]["family"] = "efficientnet_v2_classifier"
+    config["architecture"]["backbone"]["name"] = "efficientnet_v2_s"
+    return config
+
+
 def test_model_factory_builds_classifier_with_embedding_aux() -> None:
     config = _base_classifier_config()
     built = build_model(config)
@@ -82,6 +90,21 @@ def test_avgpool_alias_resolves_to_global_pool() -> None:
     built = build_model(config, verify_metadata=True)
     outputs = built.model(torch.randn(1, 3, 224, 224))
     assert outputs[1].shape == (1, 128)
+
+
+def test_model_factory_builds_efficientnet_classifier_with_embedding_aux() -> None:
+    config = _efficientnet_classifier_config()
+    built = build_model(config)
+    outputs = built.model(torch.randn(1, 3, 384, 384))
+    assert outputs[0].shape == (1, 3)
+    assert outputs[1].shape == (1, 128)
+
+
+def test_model_factory_rejects_resnet_only_tap_for_efficientnet() -> None:
+    config = _efficientnet_classifier_config()
+    config["outputs"]["aux"][0]["source"]["tap"] = "c4"
+    with pytest.raises(ModelFactoryValidationError, match="Unsupported tap"):
+        build_model(config)
 
 
 def test_model_factory_rejects_invalid_tap_for_family() -> None:

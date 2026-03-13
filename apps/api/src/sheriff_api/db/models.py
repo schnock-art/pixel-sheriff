@@ -271,6 +271,7 @@ class PrelabelSession(Base):
     generated_proposals: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     skipped_unmatched: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     error_message: Mapped[str | None] = mapped_column(String, nullable=True)
+    debug_detections_json: Mapped[list] = mapped_column(JSON, default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

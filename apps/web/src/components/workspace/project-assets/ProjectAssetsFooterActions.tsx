@@ -71,7 +71,7 @@ export function ProjectAssetsFooterActions({
           type="button"
           className="ghost-button danger-button"
           onClick={onDeleteSelectedFolder}
-          disabled={isDeletingAssets || !selectedTreeFolderPath || selectedFolderAssetCount === 0}
+          disabled={isDeletingAssets || !selectedTreeFolderPath}
         >
           Delete Folder
         </button>

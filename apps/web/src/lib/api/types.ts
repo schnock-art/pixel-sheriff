@@ -6,6 +6,7 @@ export type PrelabelSourceType = "active_deployment" | "florence2";
 export type PrelabelSamplingMode = "every_n_frames" | "every_n_seconds";
 export type PrelabelSessionStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
 export type PrelabelProposalStatus = "pending" | "accepted" | "edited" | "rejected";
+export type PrelabelDebugDetectionStatus = "matched" | "unmatched" | "discarded";
 
 export interface Project {
   id: string;
@@ -152,6 +153,15 @@ export interface PrelabelConfig {
   max_detections_per_frame: number;
 }
 
+export interface PrelabelSourceStatus {
+  ok: boolean;
+  source_type: PrelabelSourceType;
+  source_ref: string | null;
+  source_label: string;
+  device_selected: "cuda" | "cpu" | null;
+  device_preference: DeploymentDevicePreference | null;
+}
+
 export interface PrelabelSession {
   id: string;
   project_id: string;
@@ -159,6 +169,8 @@ export interface PrelabelSession {
   sequence_id: string;
   source_type: PrelabelSourceType;
   source_ref: string | null;
+  source_label: string | null;
+  device_preference: DeploymentDevicePreference | null;
   prompts: string[];
   sampling_mode: PrelabelSamplingMode;
   sampling_value: number;
@@ -172,8 +184,20 @@ export interface PrelabelSession {
   generated_proposals: number;
   skipped_unmatched: number;
   error_message: string | null;
+  debug_detections: PrelabelDebugDetection[];
   created_at: string | null;
   updated_at: string | null;
+}
+
+export interface PrelabelDebugDetection {
+  asset_id: string;
+  asset_frame_index: number | null;
+  label_text: string;
+  resolved_category_id: string | null;
+  resolved_category_name: string | null;
+  confidence: number;
+  bbox_xyxy: number[];
+  status: PrelabelDebugDetectionStatus;
 }
 
 export interface PrelabelProposal {

@@ -14,6 +14,12 @@ def _build_resnet_classifier(model_config: dict[str, Any]) -> FamilyAdapter:
     return build_resnet_classifier_adapter(model_config)
 
 
+def _build_efficientnet_v2_classifier(model_config: dict[str, Any]) -> FamilyAdapter:
+    from sheriff_api.ml.adapters.torchvision_efficientnet_v2_classifier import build_efficientnet_v2_classifier_adapter
+
+    return build_efficientnet_v2_classifier_adapter(model_config)
+
+
 def _build_retinanet(model_config: dict[str, Any]) -> FamilyAdapter:
     from sheriff_api.ml.adapters.torchvision_retinanet import build_retinanet_adapter
 
@@ -34,6 +40,7 @@ def _build_deeplabv3(model_config: dict[str, Any]) -> FamilyAdapter:
 
 FAMILY_REGISTRY: dict[str, AdapterBuilder] = {
     "resnet_classifier": _build_resnet_classifier,
+    "efficientnet_v2_classifier": _build_efficientnet_v2_classifier,
     "retinanet": _build_retinanet,
     "ssdlite320_mobilenet_v3_large": _build_ssdlite,
     "deeplabv3": _build_deeplabv3,
@@ -42,6 +49,7 @@ FAMILY_REGISTRY: dict[str, AdapterBuilder] = {
 # Maps each family name to the task it implements.
 FAMILY_TASK_MAP: dict[str, str] = {
     "resnet_classifier": "classification",
+    "efficientnet_v2_classifier": "classification",
     "retinanet": "detection",
     "ssdlite320_mobilenet_v3_large": "detection",
     "deeplabv3": "segmentation",
@@ -51,7 +59,9 @@ FAMILY_TASK_MAP: dict[str, str] = {
 FAMILY_BACKBONES: dict[str, list[str]] = {
     "resnet_classifier": [
         "resnet18", "resnet34", "resnet50", "resnet101",
-        "mobilenet_v3_large", "mobilenet_v3_small",
+    ],
+    "efficientnet_v2_classifier": [
+        "efficientnet_v2_s", "efficientnet_v2_m", "efficientnet_v2_l",
     ],
     "retinanet": ["resnet50", "resnet101"],
     "ssdlite320_mobilenet_v3_large": ["mobilenet_v3_large"],
@@ -69,6 +79,13 @@ FAMILY_INPUT_SIZE_RULES: dict[str, dict[str, int | str]] = {
         "min_square_size": 32,
         "step": 1,
         "recommended_square_size": 224,
+    },
+    "efficientnet_v2_classifier": {
+        "shape": "square",
+        "mode": "range",
+        "min_square_size": 32,
+        "step": 1,
+        "recommended_square_size": 384,
     },
     "retinanet": {
         "shape": "square",

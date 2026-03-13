@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import httpx
+
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -8,9 +10,11 @@ from sheriff_api.db.session import get_db
 from sheriff_api.errors import api_error
 from sheriff_api.schemas.prelabels import (
     PrelabelCloseResponse,
+    PrelabelConfigCreate,
     PrelabelProposalListResponse,
     PrelabelReviewAction,
     PrelabelReviewResponse,
+    PrelabelSourceStatusRead,
     PrelabelSessionCreate,
     PrelabelSessionCreateResponse,
     PrelabelSessionListResponse,
@@ -26,6 +30,7 @@ from sheriff_api.services.prelabels import (
     prelabel_session_to_read,
     reject_prelabel_proposals,
     utc_now_dt,
+    warmup_prelabel_source,
 )
 
 
@@ -115,6 +120,38 @@ async def create_session(
     else:
         await db.refresh(session)
     return PrelabelSessionCreateResponse(session=prelabel_session_to_read(session))
+
+
+@router.post("/projects/{project_id}/tasks/{task_id}/prelabels/source-status", response_model=PrelabelSourceStatusRead)
+async def get_prelabel_source_status(
+    project_id: str,
+    task_id: str,
+    payload: PrelabelConfigCreate,
+    db: AsyncSession = Depends(get_db),
+) -> PrelabelSourceStatusRead:
+    await _require_project(db, project_id)
+    task = await _require_task(db, project_id, task_id)
+    try:
+        status_payload = await warmup_prelabel_source(
+            db,
+            project_id=project_id,
+            task=task,
+            config=payload,
+        )
+    except ValueError as exc:
+        code = str(exc)
+        if code in {"active_deployment_not_found", "active_deployment_incompatible"}:
+            raise api_error(status.HTTP_409_CONFLICT, code=code, message="Active deployment is unavailable for this task") from exc
+        if code == "task_kind_unsupported":
+            raise api_error(status.HTTP_409_CONFLICT, code=code, message="Prelabels are supported only for bbox tasks") from exc
+        raise
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 503:
+            raise api_error(status.HTTP_503_SERVICE_UNAVAILABLE, code="inference_unavailable", message="Inference service unavailable") from exc
+        raise api_error(status.HTTP_502_BAD_GATEWAY, code="inference_failed", message="Inference request failed") from exc
+    except Exception as exc:
+        raise api_error(status.HTTP_503_SERVICE_UNAVAILABLE, code="inference_unavailable", message=str(exc) or "Inference unavailable") from exc
+    return PrelabelSourceStatusRead.model_validate(status_payload)
 
 
 @router.get("/projects/{project_id}/tasks/{task_id}/prelabels/{session_id}", response_model=PrelabelCloseResponse)

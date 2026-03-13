@@ -6,17 +6,23 @@ from sheriff_api.ml.adapters.base import FamilyAdapter
 
 
 class TorchvisionSSDLiteAdapter(FamilyAdapter):
-    def __init__(self, *, backbone_name: str, num_classes: int, _pretrained: bool) -> None:
+    def __init__(self, *, backbone_name: str, num_classes: int, pretrained: bool) -> None:
         import torchvision.models.detection as tv_detection
+        import torchvision.models as tv_models
 
         if backbone_name != "mobilenet_v3_large":
             raise ValueError("ssdlite320_mobilenet_v3_large adapter currently supports only backbone 'mobilenet_v3_large'")
 
-        model = tv_detection.ssdlite320_mobilenet_v3_large(
-            weights=None,
-            weights_backbone=None,
-            num_classes=int(num_classes) + 1,
-        )
+        try:
+            model = tv_detection.ssdlite320_mobilenet_v3_large(
+                weights=None,
+                weights_backbone=tv_models.MobileNet_V3_Large_Weights.DEFAULT if pretrained else None,
+                num_classes=int(num_classes) + 1,
+            )
+        except Exception as exc:
+            if pretrained:
+                raise ValueError(f"pretrained_weights_unavailable:ssdlite320_mobilenet_v3_large/{backbone_name}:{exc}") from exc
+            raise
         super().__init__(
             task="detection",
             family="ssdlite320_mobilenet_v3_large",
@@ -48,5 +54,5 @@ def build_ssdlite_adapter(model_config: dict[str, Any]) -> FamilyAdapter:
     return TorchvisionSSDLiteAdapter(
         backbone_name=str(backbone.get("name", "")).strip().lower(),
         num_classes=int(head.get("num_classes", 0)),
-        _pretrained=bool(backbone.get("pretrained")),
+        pretrained=bool(backbone.get("pretrained")),
     )

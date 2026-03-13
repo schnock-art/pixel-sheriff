@@ -93,6 +93,16 @@ test("validateModelConfigDraft accepts multi-label classification loss type", ()
   assert.equal(result.isValid, true);
 });
 
+test("validateModelConfigDraft accepts EfficientNetV2 classification configs", () => {
+  const config = buildValidConfig();
+  config.input.input_size = [384, 384];
+  config.architecture.family = "efficientnet_v2_classifier";
+  config.architecture.backbone.name = "efficientnet_v2_s";
+
+  const result = validateModelConfigDraft(config);
+  assert.equal(result.isValid, true);
+});
+
 test("validateModelConfigDraft accepts SSD Lite detection configs", () => {
   const config = buildValidConfig();
   config.source_dataset.task = "detection";

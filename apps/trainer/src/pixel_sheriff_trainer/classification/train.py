@@ -9,12 +9,12 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
 
-from pixel_sheriff_ml.model_factory import build_resnet_classifier
+from pixel_sheriff_ml.model_factory import build_classifier_model
 from pixel_sheriff_trainer.classification.eval import ClassifierEvaluation, evaluate_classifier
 
 
 def _build_classifier(model_config: dict[str, Any], num_classes: int) -> nn.Module:
-    return build_resnet_classifier(model_config, num_classes_override=num_classes)
+    return build_classifier_model(model_config, num_classes_override=num_classes)
 
 
 def _as_int(value: Any, default: int) -> int:

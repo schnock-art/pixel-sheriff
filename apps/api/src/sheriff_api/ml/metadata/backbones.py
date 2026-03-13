@@ -29,6 +29,36 @@ _TAP_ALIASES: dict[str, str] = {
 
 
 BACKBONES: dict[str, BackboneMeta] = {
+    "efficientnet_v2_l": BackboneMeta(
+        name="efficientnet_v2_l",
+        family="efficientnet_v2",
+        embedding_dim=1280,
+        taps={
+            "backbone.c5": TapMeta(kind="feature_map", channels=1280, stride=32),
+            "backbone.global_pool": TapMeta(kind="embedding", channels=1280, stride=None),
+        },
+        default_out_strides=(32,),
+    ),
+    "efficientnet_v2_m": BackboneMeta(
+        name="efficientnet_v2_m",
+        family="efficientnet_v2",
+        embedding_dim=1280,
+        taps={
+            "backbone.c5": TapMeta(kind="feature_map", channels=1280, stride=32),
+            "backbone.global_pool": TapMeta(kind="embedding", channels=1280, stride=None),
+        },
+        default_out_strides=(32,),
+    ),
+    "efficientnet_v2_s": BackboneMeta(
+        name="efficientnet_v2_s",
+        family="efficientnet_v2",
+        embedding_dim=1280,
+        taps={
+            "backbone.c5": TapMeta(kind="feature_map", channels=1280, stride=32),
+            "backbone.global_pool": TapMeta(kind="embedding", channels=1280, stride=None),
+        },
+        default_out_strides=(32,),
+    ),
     "resnet18": BackboneMeta(
         name="resnet18",
         family="resnet",

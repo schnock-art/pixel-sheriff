@@ -54,6 +54,7 @@ export function useWebcamCapture({ projectId, taskId, onSequenceCreated, onFrame
   const streamRefs = useRef(new Map<string, MediaStream>());
   const captureTimerRefs = useRef(new Map<string, number>());
   const uploadInFlightRefs = useRef(new Set<string>());
+  const pendingUploadPromisesRef = useRef(new Set<Promise<void>>());
   const frameIndexRefs = useRef(new Map<string, number>());
   const startedAtRefs = useRef(new Map<string, number>());
   const sequenceRefs = useRef(new Map<string, AssetSequence>());
@@ -107,10 +108,15 @@ export function useWebcamCapture({ projectId, taskId, onSequenceCreated, onFrame
         window.clearInterval(timerId);
         captureTimerRefs.current.delete(deviceId);
       }
-      uploadInFlightRefs.current.delete(deviceId);
       patchDeviceState(deviceId, { isCapturing: false });
     }
   }, [patchDeviceState]);
+
+  const waitForPendingUploads = useCallback(async () => {
+    const pending = Array.from(pendingUploadPromisesRef.current);
+    if (pending.length === 0) return;
+    await Promise.allSettled(pending);
+  }, []);
 
   const stopPreview = useCallback((deviceIds?: string[]) => {
     const ids = deviceIds ?? Array.from(new Set([...Array.from(streamRefs.current.keys()), ...selectedDeviceIdsRef.current]));
@@ -263,33 +269,42 @@ export function useWebcamCapture({ projectId, taskId, onSequenceCreated, onFrame
     if (node.videoWidth <= 0 || node.videoHeight <= 0) return;
 
     uploadInFlightRefs.current.add(deviceId);
+    const uploadPromise = (async () => {
+      try {
+        const canvas = document.createElement("canvas");
+        canvas.width = node.videoWidth;
+        canvas.height = node.videoHeight;
+        const context = canvas.getContext("2d");
+        if (!context) throw new Error("Failed to initialize webcam canvas.");
+        context.drawImage(node, 0, 0, canvas.width, canvas.height);
+        const blob = await canvasToBlob(canvas);
+        const frameIndex = frameIndexRefs.current.get(deviceId) ?? 0;
+        const startedAt = startedAtRefs.current.get(deviceId) ?? Date.now();
+        const elapsedMs = Date.now() - startedAt;
+        const uploaded = await uploadSequenceFrame(
+          projectId,
+          sequence.id,
+          blob,
+          `frame_${String(frameIndex + 1).padStart(6, "0")}.jpg`,
+          frameIndex,
+          elapsedMs / 1000,
+        );
+        frameIndexRefs.current.set(deviceId, frameIndex + 1);
+        patchDeviceState(deviceId, { captureCount: frameIndex + 1 });
+        onFrameUploaded?.(uploaded, sequence);
+      } catch (err) {
+        patchDeviceState(deviceId, { error: err instanceof Error ? err.message : "Failed to upload webcam frame." });
+        stopCapture([deviceId]);
+      } finally {
+        uploadInFlightRefs.current.delete(deviceId);
+      }
+    })();
+
+    pendingUploadPromisesRef.current.add(uploadPromise);
     try {
-      const canvas = document.createElement("canvas");
-      canvas.width = node.videoWidth;
-      canvas.height = node.videoHeight;
-      const context = canvas.getContext("2d");
-      if (!context) throw new Error("Failed to initialize webcam canvas.");
-      context.drawImage(node, 0, 0, canvas.width, canvas.height);
-      const blob = await canvasToBlob(canvas);
-      const frameIndex = frameIndexRefs.current.get(deviceId) ?? 0;
-      const startedAt = startedAtRefs.current.get(deviceId) ?? Date.now();
-      const elapsedMs = Date.now() - startedAt;
-      const uploaded = await uploadSequenceFrame(
-        projectId,
-        sequence.id,
-        blob,
-        `frame_${String(frameIndex + 1).padStart(6, "0")}.jpg`,
-        frameIndex,
-        elapsedMs / 1000,
-      );
-      frameIndexRefs.current.set(deviceId, frameIndex + 1);
-      patchDeviceState(deviceId, { captureCount: frameIndex + 1 });
-      onFrameUploaded?.(uploaded, sequence);
-    } catch (err) {
-      patchDeviceState(deviceId, { error: err instanceof Error ? err.message : "Failed to upload webcam frame." });
-      stopCapture([deviceId]);
+      await uploadPromise;
     } finally {
-      uploadInFlightRefs.current.delete(deviceId);
+      pendingUploadPromisesRef.current.delete(uploadPromise);
     }
   }, [onFrameUploaded, patchDeviceState, projectId, stopCapture]);
 
@@ -400,6 +415,7 @@ export function useWebcamCapture({ projectId, taskId, onSequenceCreated, onFrame
     stopPreview,
     startCapture,
     stopCapture,
+    waitForPendingUploads,
     attachVideoRef,
     reset,
   };

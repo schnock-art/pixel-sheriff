@@ -14,6 +14,13 @@ def test_registry_json_generation_snapshotish(tmp_path) -> None:  # type: ignore
     assert taps["backbone.c4"]["channels"] == 1024
     assert taps["backbone.c4"]["stride"] == 16
 
+    efficientnet_v2_s = next(row for row in payload["backbones"] if row["name"] == "efficientnet_v2_s")
+    efficientnet_taps = {tap["name"]: tap for tap in efficientnet_v2_s["taps"]}
+    assert efficientnet_v2_s["family"] == "efficientnet_v2"
+    assert efficientnet_v2_s["embedding_dim"] == 1280
+    assert efficientnet_taps["backbone.c5"]["stride"] == 32
+    assert efficientnet_taps["backbone.global_pool"]["channels"] == 1280
+
     output_path = tmp_path / "backbones.v1.json"
     write_registry_json(output_path, payload)
     written = json.loads(output_path.read_text(encoding="utf-8"))

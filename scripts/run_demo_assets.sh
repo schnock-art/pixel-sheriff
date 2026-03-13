@@ -17,9 +17,9 @@ if [[ -z "$DOCKER_BIN" ]]; then
 fi
 
 case "$MODE" in
-  hero|screenshots|assets) ;;
+  hero|screenshots|assets|prelabels) ;;
   *)
-    echo "Usage: ./scripts/run_demo_assets.sh [hero|screenshots|assets]" >&2
+    echo "Usage: ./scripts/run_demo_assets.sh [hero|screenshots|assets|prelabels]" >&2
     exit 1
     ;;
 esac
@@ -54,5 +54,51 @@ run_demo_assets() {
   )
 }
 
+seed_demo_state() {
+  local metadata_path="$ROOT_DIR/artifacts/demo/metadata/seed-demo-project.json"
+
+  echo "Seeding deterministic demo project..."
+  (
+    cd "$ROOT_DIR"
+    "$DOCKER_BIN" compose --profile demo run --rm demo-runner bash -lc "npm ci --cache /tmp/npm-cache && node ../../scripts/demo/seed-demo-project.mjs --force >/dev/null"
+  )
+
+  if [[ ! -f "$metadata_path" ]]; then
+    echo "Demo seed metadata was not created at $metadata_path" >&2
+    exit 1
+  fi
+
+  if [[ "$MODE" != "prelabels" ]]; then
+    return
+  fi
+
+  local prelabel_metadata_path="$ROOT_DIR/artifacts/demo/metadata/prelabel-demo.json"
+  local project_id
+  local task_id
+  project_id="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["projectId"])' "$metadata_path")"
+  task_id="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["taskId"])' "$metadata_path")"
+
+  echo "Injecting deterministic AI prelabel review data..."
+  (
+    cd "$ROOT_DIR"
+    "$DOCKER_BIN" compose --profile demo exec -T api-demo python -m sheriff_api.demo_prelabel_seed "$project_id" "$task_id" > "$prelabel_metadata_path"
+  )
+
+  python3 - <<'PY' "$metadata_path" "$prelabel_metadata_path"
+import json
+import sys
+
+metadata_path, prelabel_metadata_path = sys.argv[1], sys.argv[2]
+with open(metadata_path, encoding="utf-8") as handle:
+    metadata = json.load(handle)
+with open(prelabel_metadata_path, encoding="utf-8") as handle:
+    metadata["prelabelDemo"] = json.load(handle)
+with open(metadata_path, "w", encoding="utf-8") as handle:
+    json.dump(metadata, handle, indent=2)
+    handle.write("\n")
+PY
+}
+
 ensure_stack
+seed_demo_state
 run_demo_assets

@@ -188,6 +188,7 @@ export function usePrelabels({
     isLoading,
     isApplying,
     error,
+    reload: () => load(),
     acceptSelectedProposal: () => applyReviewAction("accept", selectedProposal ? { proposal_ids: [selectedProposal.id] } : undefined),
     rejectSelectedProposal: () => applyReviewAction("reject", selectedProposal ? { proposal_ids: [selectedProposal.id] } : undefined),
     acceptCurrentFrame: () => applyReviewAction("accept", currentAssetId ? { asset_id: currentAssetId } : undefined),

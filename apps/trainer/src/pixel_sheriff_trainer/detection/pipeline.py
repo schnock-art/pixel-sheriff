@@ -20,6 +20,7 @@ from pixel_sheriff_trainer.pipeline import (
     TaskPipeline,
     TrainingResult,
 )
+from pixel_sheriff_trainer.utils.torchvision_cache import configure_torchvision_cache
 from pixel_sheriff_trainer.utils.time import utc_now_iso
 
 
@@ -172,6 +173,8 @@ class DetectionPipeline(TaskPipeline):
             _as_relative_uri,
             export_model_to_onnx,
         )
+
+        configure_torchvision_cache(str(storage.root))
 
         checkpoint_kind, checkpoint_path = _resolve_best_checkpoint(
             storage, project_id=project_id, experiment_id=experiment_id, attempt=attempt,

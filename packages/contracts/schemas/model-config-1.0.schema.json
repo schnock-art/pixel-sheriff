@@ -116,6 +116,7 @@
           "type": "string",
           "enum": [
             "resnet_classifier",
+            "efficientnet_v2_classifier",
             "retinanet",
             "ssdlite320_mobilenet_v3_large",
             "fasterrcnn",
@@ -148,7 +149,9 @@
             "resnet50",
             "resnet101",
             "mobilenet_v3_large",
-            "mobilenet_v3_small"
+            "efficientnet_v2_s",
+            "efficientnet_v2_m",
+            "efficientnet_v2_l"
           ]
         },
         "pretrained": { "type": "boolean" },

@@ -654,6 +654,7 @@ export function Viewer({
         className={`prelabel-shape${isSelected ? " is-selected" : ""}`}
         data-testid="pending-prelabel-object"
         data-proposal-id={object.id}
+        data-selected={isSelected ? "true" : "false"}
       >
         <rect
           x={topLeft.x}

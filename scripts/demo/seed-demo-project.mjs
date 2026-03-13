@@ -3,6 +3,7 @@ import path from "node:path";
 
 import {
   ensureDemoDirs,
+  fileExists,
   fixtureDir,
   repoRoot,
   readFixtureManifest,
@@ -79,6 +80,10 @@ function buildAnnotationPayload({ categoryId, objectId, bbox, width, height }) {
 }
 
 export async function seedDemoProject(options = {}) {
+  if (options.force !== true && (await fileExists(seedMetadataPath))) {
+    return JSON.parse(await fs.readFile(seedMetadataPath, "utf8"));
+  }
+
   const apiBaseUrl = options.apiBaseUrl ?? resolveDemoApiBaseUrl();
   const webBaseUrl = options.webBaseUrl ?? resolveDemoWebBaseUrl();
   await ensureDemoDirs();
@@ -212,6 +217,6 @@ export async function seedDemoProject(options = {}) {
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  const metadata = await seedDemoProject();
+  const metadata = await seedDemoProject({ force: process.argv.includes("--force") });
   console.log(JSON.stringify(metadata, null, 2));
 }

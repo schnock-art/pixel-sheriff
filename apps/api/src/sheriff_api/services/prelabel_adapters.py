@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 from typing import Any, Callable, Protocol
 
 from sheriff_api.config import get_settings
@@ -146,13 +147,20 @@ class Florence2PrelabelAdapter:
             if not all(isinstance(value, (int, float)) for value in bbox):
                 continue
             x1, y1, x2, y2 = (float(bbox[0]), float(bbox[1]), float(bbox[2]), float(bbox[3]))
+            score = float(row.get("score") or 0.0)
             label_text = str(row.get("label_text") or "").strip()
-            if not label_text:
+            if (
+                not label_text
+                or not all(math.isfinite(value) for value in (x1, y1, x2, y2))
+                or not math.isfinite(score)
+                or (max(x1, x2) - min(x1, x2)) <= 0
+                or (max(y1, y2) - min(y1, y2)) <= 0
+            ):
                 continue
             detections.append(
                 DetectionResult(
                     label_text=label_text,
-                    score=float(row.get("score") or 0.0),
+                    score=score,
                     bbox_xyxy=(x1, y1, x2, y2),
                     raw=row,
                 )

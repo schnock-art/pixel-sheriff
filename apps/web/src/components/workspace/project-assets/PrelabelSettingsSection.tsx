@@ -1,8 +1,12 @@
-import type { PrelabelConfig } from "../../../lib/api";
+import { useEffect, useState } from "react";
+
+import { getPrelabelSourceStatus, type PrelabelConfig, type PrelabelSourceStatus } from "../../../lib/api";
 
 
 interface PrelabelSettingsSectionProps {
   enabled: boolean;
+  projectId: string | null;
+  taskId: string | null;
   value: PrelabelConfig | null;
   defaultPrompts: string[];
   onChange: (value: PrelabelConfig | null) => void;
@@ -21,6 +25,8 @@ function normalizePromptInput(rawValue: string): string[] {
 
 export function PrelabelSettingsSection({
   enabled,
+  projectId,
+  taskId,
   value,
   defaultPrompts,
   onChange,
@@ -38,16 +44,88 @@ export function PrelabelSettingsSection({
       confidence_threshold: 0.25,
       max_detections_per_frame: 20,
     } satisfies PrelabelConfig);
+  const [confidenceInput, setConfidenceInput] = useState(String(resolvedValue.confidence_threshold));
+  const [isEditingConfidence, setIsEditingConfidence] = useState(false);
+  const [sourceStatus, setSourceStatus] = useState<PrelabelSourceStatus | null>(null);
+  const [sourceStatusError, setSourceStatusError] = useState<string | null>(null);
+  const [isCheckingSourceStatus, setIsCheckingSourceStatus] = useState(false);
+
+  useEffect(() => {
+    if (isEditingConfidence) return;
+    setConfidenceInput(String(resolvedValue.confidence_threshold));
+  }, [isEditingConfidence, resolvedValue.confidence_threshold]);
+
+  useEffect(() => {
+    let isMounted = true;
+    async function loadSourceStatus() {
+      if (!enabled || !value || !projectId || !taskId) {
+        if (!isMounted) return;
+        setSourceStatus(null);
+        setSourceStatusError(null);
+        setIsCheckingSourceStatus(false);
+        return;
+      }
+      try {
+        if (isMounted) {
+          setIsCheckingSourceStatus(true);
+          setSourceStatusError(null);
+        }
+        const status = await getPrelabelSourceStatus(projectId, taskId, value);
+        if (!isMounted) return;
+        setSourceStatus(status);
+      } catch (error) {
+        if (!isMounted) return;
+        setSourceStatus(null);
+        setSourceStatusError(error instanceof Error ? error.message : "AI source unavailable");
+      } finally {
+        if (isMounted) setIsCheckingSourceStatus(false);
+      }
+    }
+    void loadSourceStatus();
+    return () => {
+      isMounted = false;
+    };
+  }, [enabled, projectId, taskId, value?.source_type]);
 
   function update(patch: Partial<PrelabelConfig>) {
     onChange({ ...resolvedValue, ...patch });
   }
 
+  function commitConfidenceInput(rawValue: string) {
+    const normalized = rawValue.trim();
+    if (normalized === "") {
+      setConfidenceInput(String(resolvedValue.confidence_threshold));
+      return;
+    }
+
+    const parsed = Number(normalized);
+    if (!Number.isFinite(parsed)) {
+      setConfidenceInput(String(resolvedValue.confidence_threshold));
+      return;
+    }
+
+    const nextValue = Math.min(1, Math.max(0, parsed));
+    update({ confidence_threshold: nextValue });
+    setConfidenceInput(String(nextValue));
+  }
+
+  const sourceStatusTone = sourceStatusError ? "error" : sourceStatus ? "ready" : "idle";
+  const sourceStatusLabel = sourceStatusError
+    ? "Unavailable"
+    : isCheckingSourceStatus
+      ? "Checking…"
+      : sourceStatus?.device_selected
+        ? `Ready on ${sourceStatus.device_selected.toUpperCase()}`
+        : "Idle";
+  const sourceStatusMeta = sourceStatus
+    ? `${sourceStatus.source_label}${sourceStatus.device_preference ? ` • pref ${sourceStatus.device_preference}` : ""}`
+    : null;
+
   return (
     <section className="placeholder-card">
       <h4>Prelabels</h4>
       <label className="project-field">
-        <span>Prelabel source</span>
+        <span>AI model</span>
         <select
           value={value ? resolvedValue.source_type : "none"}
           onChange={(event) => {
@@ -64,10 +142,19 @@ export function PrelabelSettingsSection({
           }}
         >
           <option value="none">None</option>
-          <option value="active_deployment">Project model</option>
-          <option value="florence2">AI prompt assist</option>
+          <option value="florence2">Florence-2 prompt assist</option>
+          <option value="active_deployment">Active project deployment</option>
         </select>
       </label>
+      {value ? (
+        <div className="prelabel-source-status-row">
+          <span className={`prelabel-source-status-badge is-${sourceStatusTone}`}>{sourceStatusLabel}</span>
+          <span className="prelabel-source-status-text">
+            {sourceStatusMeta ?? (value.source_type === "florence2" ? "Florence-2" : "Active project deployment")}
+          </span>
+        </div>
+      ) : null}
+      {sourceStatusError ? <p className="import-field-error">{sourceStatusError}</p> : null}
       {value ? (
         <>
           {resolvedValue.source_type === "florence2" ? (
@@ -103,9 +190,18 @@ export function PrelabelSettingsSection({
             <label className="project-field">
               <span>Confidence threshold</span>
               <input
-                value={String(resolvedValue.confidence_threshold)}
-                onChange={(event) => update({ confidence_threshold: Number(event.target.value) || 0 })}
+                value={confidenceInput}
+                onChange={(event) => setConfidenceInput(event.target.value)}
+                onFocus={() => setIsEditingConfidence(true)}
+                onBlur={(event) => {
+                  setIsEditingConfidence(false);
+                  commitConfidenceInput(event.target.value);
+                }}
+                type="number"
                 inputMode="decimal"
+                step="0.01"
+                min="0"
+                max="1"
               />
             </label>
           </div>
@@ -125,4 +221,3 @@ export function PrelabelSettingsSection({
     </section>
   );
 }
-

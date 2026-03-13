@@ -153,7 +153,7 @@ export function ProjectAssetsTreeSidebar({
               type="button"
               className="tree-scope-button danger"
               onClick={onDeleteSelectedFolder}
-              disabled={isDeletingAssets || selectedFolderAssetCount === 0}
+              disabled={isDeletingAssets}
             >
               Delete folder ({selectedFolderAssetCount})
             </button>

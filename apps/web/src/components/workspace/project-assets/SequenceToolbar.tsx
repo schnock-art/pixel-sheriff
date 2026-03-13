@@ -26,7 +26,7 @@ export function SequenceToolbar({
   onNextPending,
 }: SequenceToolbarProps) {
   return (
-    <div className="sequence-toolbar">
+    <div className="sequence-toolbar" data-testid="sequence-toolbar">
       <div className="sequence-toolbar-controls">
         <button type="button" className="ghost-button" onClick={onFirst}>
           |&lt;&lt;
@@ -43,7 +43,13 @@ export function SequenceToolbar({
         <button type="button" className="ghost-button" onClick={onLast}>
           &gt;&gt;|
         </button>
-        <button type="button" className="ghost-button" onClick={onNextPending} disabled={!onNextPending || pendingFrameCount <= 0}>
+        <button
+          type="button"
+          className="ghost-button"
+          onClick={onNextPending}
+          disabled={!onNextPending || pendingFrameCount <= 0}
+          data-testid="sequence-next-pending-button"
+        >
           Next AI
         </button>
       </div>

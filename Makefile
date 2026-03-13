@@ -25,7 +25,7 @@ PYTHON          := apps/api/.venv/Scripts/python
 help:
 	@echo "Common shortcuts:"
 	@echo "  make up                  # start all services in background"
-	@echo "  make down                # stop all services"
+	@echo "  make down                # stop all compose services, including test/demo profiles"
 	@echo "  make logs                # tail service logs"
 	@echo "  make ps                  # show service status"
 	@echo "  make build-web-api       # rebuild web+api images"
@@ -55,7 +55,7 @@ up:
 	docker compose up -d
 
 down:
-	docker compose down
+	docker compose --profile test --profile demo down --remove-orphans
 
 logs:
 	docker compose logs -f web api worker trainer

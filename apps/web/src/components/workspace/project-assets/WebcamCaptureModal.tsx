@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { closePrelabelInput, type Asset, type AssetSequence, type PrelabelConfig } from "../../../lib/api";
 import { useWebcamCapture } from "../../../lib/hooks/useWebcamCapture";
+import { finishWebcamCapture } from "../../../lib/workspace/webcamCaptureFinish";
 import { buildCameraDestinations } from "../../../lib/workspace/webcamCapture";
 import { PrelabelSettingsSection } from "./PrelabelSettingsSection";
 
@@ -41,6 +42,7 @@ export function WebcamCaptureModal({
   onFrameUploaded,
   onFinished,
 }: WebcamCaptureModalProps) {
+  const wasOpenRef = useRef(false);
   const [name, setName] = useState(defaultName);
   const [fps, setFps] = useState("2");
   const [rootFolderPath, setRootFolderPath] = useState("");
@@ -54,7 +56,13 @@ export function WebcamCaptureModal({
   const { refreshDevices, reset } = capture;
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      wasOpenRef.current = false;
+      return;
+    }
+    if (wasOpenRef.current) return;
+
+    wasOpenRef.current = true;
     setName(defaultName);
     setFps("2");
     setRootFolderPath(defaultRootFolderPath ?? "");
@@ -105,15 +113,17 @@ export function WebcamCaptureModal({
   }
 
   async function handleFinish() {
-    capture.stopCapture();
-    capture.stopPreview();
-    const prelabelSessionIds = capture.devices
-      .map((device) => device.prelabelSessionId)
-      .filter((value): value is string => Boolean(value));
-    if (projectId && taskId) {
-      await Promise.allSettled(prelabelSessionIds.map((sessionId) => closePrelabelInput(projectId, taskId, sessionId)));
-    }
-    onFinished?.(capture.sequences);
+    const result = await finishWebcamCapture({
+      projectId,
+      taskId,
+      devices: capture.devices,
+      sequences: capture.sequences,
+      stopCapture: capture.stopCapture,
+      waitForPendingUploads: capture.waitForPendingUploads,
+      stopPreview: capture.stopPreview,
+      closePrelabelInput,
+    });
+    onFinished?.(result.sequences);
     onClose();
   }
 
@@ -174,6 +184,8 @@ export function WebcamCaptureModal({
         </div>
         <PrelabelSettingsSection
           enabled={enablePrelabels}
+          projectId={projectId}
+          taskId={taskId}
           value={prelabelConfig}
           defaultPrompts={defaultPrompts}
           onChange={setPrelabelConfig}

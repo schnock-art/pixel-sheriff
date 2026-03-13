@@ -22,21 +22,47 @@ class DetectionEpochMetrics:
     evaluated: bool
 
 
-def _build_retinanet(num_classes: int) -> torch.nn.Module:
+def _backbone_pretrained(model_config: dict[str, Any]) -> bool:
+    architecture = model_config.get("architecture")
+    if not isinstance(architecture, dict):
+        return False
+    backbone = architecture.get("backbone")
+    if not isinstance(backbone, dict):
+        return False
+    return bool(backbone.get("pretrained"))
+
+
+def _build_retinanet(num_classes: int, *, pretrained: bool) -> torch.nn.Module:
     import torchvision.models.detection as tv_det
+    import torchvision.models as tv_models
     # num_classes here is foreground classes (background added internally by RetinaNet)
-    model = tv_det.retinanet_resnet50_fpn(weights=None, weights_backbone=None, num_classes=num_classes)
+    try:
+        model = tv_det.retinanet_resnet50_fpn(
+            weights=None,
+            weights_backbone=tv_models.ResNet50_Weights.DEFAULT if pretrained else None,
+            num_classes=num_classes,
+        )
+    except Exception as exc:
+        if pretrained:
+            raise ValueError(f"pretrained_weights_unavailable:retinanet/resnet50:{exc}") from exc
+        raise
     return model
 
 
-def _build_ssdlite320_mobilenet_v3_large(num_classes: int) -> torch.nn.Module:
+def _build_ssdlite320_mobilenet_v3_large(num_classes: int, *, pretrained: bool) -> torch.nn.Module:
     import torchvision.models.detection as tv_det
+    import torchvision.models as tv_models
     # Torchvision SSD expects num_classes including background.
-    model = tv_det.ssdlite320_mobilenet_v3_large(
-        weights=None,
-        weights_backbone=None,
-        num_classes=num_classes + 1,
-    )
+    try:
+        model = tv_det.ssdlite320_mobilenet_v3_large(
+            weights=None,
+            weights_backbone=tv_models.MobileNet_V3_Large_Weights.DEFAULT if pretrained else None,
+            num_classes=num_classes + 1,
+        )
+    except Exception as exc:
+        if pretrained:
+            raise ValueError(f"pretrained_weights_unavailable:ssdlite320_mobilenet_v3_large/mobilenet_v3_large:{exc}") from exc
+        raise
     return model
 
 
@@ -75,10 +101,11 @@ def _is_no_kernel_image_error(exc: Exception) -> bool:
 
 def _build_detection_model(model_config: dict[str, Any], *, num_classes: int) -> torch.nn.Module:
     family = _normalized_detection_family(model_config)
+    pretrained = _backbone_pretrained(model_config)
     if family == "ssdlite320_mobilenet_v3_large":
-        return _build_ssdlite320_mobilenet_v3_large(num_classes)
+        return _build_ssdlite320_mobilenet_v3_large(num_classes, pretrained=pretrained)
     if family == "retinanet":
-        return _build_retinanet(num_classes)
+        return _build_retinanet(num_classes, pretrained=pretrained)
     raise ValueError(f"unsupported_detection_family:{family}")
 
 

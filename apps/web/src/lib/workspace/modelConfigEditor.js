@@ -201,6 +201,36 @@ function buildFamilyDefaults(familyName, config) {
     };
   }
 
+  if (familyName === "efficientnet_v2_classifier") {
+    return {
+      input: {
+        input_size: [384, 384],
+      },
+      architecture: {
+        family: "efficientnet_v2_classifier",
+        framework: "torchvision",
+        precision: "fp32",
+        backbone: { name: "efficientnet_v2_s", pretrained: true },
+        neck: { type: "none" },
+        head: { type: "linear", num_classes: numClasses },
+      },
+      loss: {
+        type: readSourceDatasetLabelMode(config) === "multi_label"
+          ? "classification_bce_with_logits"
+          : "classification_cross_entropy",
+      },
+      outputs: {
+        primary: {
+          name: "classification_logits",
+          type: "task_output",
+          task: "classification",
+          format: "classification_logits",
+        },
+        aux: [],
+      },
+    };
+  }
+
   return {
     architecture: {
       family: "resnet_classifier",
@@ -274,7 +304,11 @@ function setArchitectureFamily(config, familyName, familiesMetadata) {
 
   if (defaults) {
     const defaultArch = stableClone(defaults.architecture);
-    defaultArch.backbone = { name: newBackboneName };
+    const defaultBackbone = isPlainObject(defaultArch.backbone) ? defaultArch.backbone : {};
+    defaultArch.backbone = {
+      ...defaultBackbone,
+      name: newBackboneName,
+    };
     defaultArch.family = familyName;
     nextConfig.architecture = defaultArch;
     if (isPlainObject(defaults.input)) {

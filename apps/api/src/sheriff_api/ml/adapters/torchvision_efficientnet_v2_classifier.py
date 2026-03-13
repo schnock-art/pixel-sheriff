@@ -8,10 +8,9 @@ from sheriff_api.ml.taps.manager import TapManager
 
 
 _WEIGHT_ENUMS: dict[str, str] = {
-    "resnet18": "ResNet18_Weights",
-    "resnet34": "ResNet34_Weights",
-    "resnet50": "ResNet50_Weights",
-    "resnet101": "ResNet101_Weights",
+    "efficientnet_v2_s": "EfficientNet_V2_S_Weights",
+    "efficientnet_v2_m": "EfficientNet_V2_M_Weights",
+    "efficientnet_v2_l": "EfficientNet_V2_L_Weights",
 }
 
 
@@ -27,15 +26,15 @@ def _resolve_weights(tv_models, backbone_name: str, pretrained: bool):  # type: 
     return weights_enum.DEFAULT
 
 
-class TorchvisionResnetClassifierAdapter(FamilyAdapter):
+class TorchvisionEfficientNetV2ClassifierAdapter(FamilyAdapter):
     def __init__(self, *, backbone_name: str, num_classes: int, pretrained: bool) -> None:
         import torch
         import torch.nn as nn
         import torchvision.models as tv_models
 
         metadata = get_backbone_meta(backbone_name)
-        if metadata.family != "resnet":
-            raise ValueError(f"Backbone '{backbone_name}' is not compatible with resnet_classifier")
+        if metadata.family != "efficientnet_v2":
+            raise ValueError(f"Backbone '{backbone_name}' is not compatible with efficientnet_v2_classifier")
 
         ctor = getattr(tv_models, backbone_name, None)
         if ctor is None:
@@ -47,12 +46,16 @@ class TorchvisionResnetClassifierAdapter(FamilyAdapter):
             if pretrained:
                 raise ValueError(f"pretrained_weights_unavailable:{backbone_name}:{exc}") from exc
             raise
-        in_features = int(model.fc.in_features)
-        model.fc = nn.Linear(in_features, int(num_classes))
+
+        classifier = getattr(model, "classifier", None)
+        if not isinstance(classifier, nn.Sequential) or len(classifier) < 2 or not isinstance(classifier[1], nn.Linear):
+            raise ValueError("efficientnet_v2_classifier adapter could not resolve classifier head")
+        in_features = int(classifier[1].in_features)
+        classifier[1] = nn.Linear(in_features, int(num_classes))
 
         super().__init__(
             task="classification",
-            family="resnet_classifier",
+            family="efficientnet_v2_classifier",
             backbone_name=backbone_name,
             model=model,
             supported_taps=list_supported_taps(backbone_name),
@@ -60,9 +63,7 @@ class TorchvisionResnetClassifierAdapter(FamilyAdapter):
 
         self._torch = torch
         self._tap_manager = TapManager(model)
-        self._tap_manager.register_hook("backbone.c3", "layer2")
-        self._tap_manager.register_hook("backbone.c4", "layer3")
-        self._tap_manager.register_hook("backbone.c5", "layer4")
+        self._tap_manager.register_hook("backbone.c5", "features")
         self._tap_manager.register_extractor("backbone.global_pool", self._extract_global_pool)
 
     def _extract_global_pool(self, _x=None):  # type: ignore[no-untyped-def]
@@ -86,7 +87,7 @@ class TorchvisionResnetClassifierAdapter(FamilyAdapter):
         return tensor
 
 
-def build_resnet_classifier_adapter(model_config: dict[str, Any]) -> FamilyAdapter:
+def build_efficientnet_v2_classifier_adapter(model_config: dict[str, Any]) -> FamilyAdapter:
     architecture = model_config.get("architecture", {})
     if not isinstance(architecture, dict):
         raise ValueError("Model config architecture is missing")
@@ -107,7 +108,7 @@ def build_resnet_classifier_adapter(model_config: dict[str, Any]) -> FamilyAdapt
     if num_classes < 1:
         raise ValueError("head.num_classes must be >= 1")
 
-    return TorchvisionResnetClassifierAdapter(
+    return TorchvisionEfficientNetV2ClassifierAdapter(
         backbone_name=backbone_name,
         num_classes=num_classes,
         pretrained=pretrained,

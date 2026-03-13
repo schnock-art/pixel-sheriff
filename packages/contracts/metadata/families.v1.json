@@ -17,15 +17,29 @@
       }
     },
     {
+      "name": "efficientnet_v2_classifier",
+      "task": "classification",
+      "allowed_backbones": [
+        "efficientnet_v2_s",
+        "efficientnet_v2_m",
+        "efficientnet_v2_l"
+      ],
+      "input_size": {
+        "shape": "square",
+        "mode": "range",
+        "min_square_size": 32,
+        "step": 1,
+        "recommended_square_size": 384
+      }
+    },
+    {
       "name": "resnet_classifier",
       "task": "classification",
       "allowed_backbones": [
         "resnet18",
         "resnet34",
         "resnet50",
-        "resnet101",
-        "mobilenet_v3_large",
-        "mobilenet_v3_small"
+        "resnet101"
       ],
       "input_size": {
         "shape": "square",

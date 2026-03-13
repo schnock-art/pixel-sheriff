@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 from collections import defaultdict
 from datetime import datetime
+import httpx
 import logging
+import math
 from typing import Any
 
 from sqlalchemy import func, select
@@ -28,6 +31,7 @@ from sheriff_api.schemas.prelabels import (
 )
 from sheriff_api.services.annotation_payload import normalize_annotation_payload
 from sheriff_api.services.deployment_store import DeploymentStore
+from sheriff_api.services.inference_client import InferenceClient
 from sheriff_api.services.prelabel_adapters import (
     DetectionResult,
     PrelabelAdapter,
@@ -38,7 +42,26 @@ from sheriff_api.services.prelabel_queue import PrelabelQueue
 
 settings = get_settings()
 deployment_store = DeploymentStore(settings.storage_root)
+inference_client = InferenceClient(
+    base_url=settings.trainer_inference_base_url,
+    timeout_seconds=float(settings.trainer_inference_timeout_seconds),
+)
 logger = logging.getLogger(__name__)
+_PRELABEL_DEBUG_DETECTIONS_LIMIT = 200
+_FLORENCE_WARMUP_RETRY_DELAY_SECONDS = 0.5
+_FLORENCE_WARMUP_MAX_ATTEMPTS = 2
+
+_PRELABEL_ALIAS_GROUPS: tuple[frozenset[str], ...] = (
+    frozenset({"human", "person", "people"}),
+    frozenset({"glass", "glasses", "eyeglasses", "eye glasses", "spectacles", "specs", "eyewear"}),
+    frozenset({"eye", "eyes", "eyeball", "eyeballs"}),
+    frozenset({"mouth", "mouths", "lip", "lips"}),
+    frozenset({"head", "face"}),
+)
+_PRELABEL_ALIAS_LOOKUP: dict[str, set[str]] = {}
+for _group in _PRELABEL_ALIAS_GROUPS:
+    for _value in _group:
+        _PRELABEL_ALIAS_LOOKUP[_value] = set(_group - {_value})
 
 
 def utc_now_dt() -> datetime:
@@ -70,6 +93,17 @@ async def list_task_categories(db: AsyncSession, *, project_id: str, task_id: st
 
 
 def prelabel_session_to_read(session: PrelabelSession) -> PrelabelSessionRead:
+    source_label: str | None = None
+    device_preference: str | None = None
+    if str(session.source_type) == "active_deployment":
+        deployment = deployment_store.get(session.project_id, str(session.source_ref or ""))
+        if isinstance(deployment, dict):
+            source_label = str(deployment.get("name") or "").strip() or "Project model"
+            device_preference = str(deployment.get("device_preference") or "").strip() or None
+        else:
+            source_label = "Project model"
+    else:
+        source_label = "Florence-2"
     return PrelabelSessionRead(
         id=session.id,
         project_id=session.project_id,
@@ -77,6 +111,8 @@ def prelabel_session_to_read(session: PrelabelSession) -> PrelabelSessionRead:
         sequence_id=session.sequence_id,
         source_type=str(session.source_type),
         source_ref=session.source_ref,
+        source_label=source_label,
+        device_preference=device_preference,
         prompts=list(session.prompts_json or []),
         sampling_mode=str(session.sampling_mode),
         sampling_value=float(session.sampling_value),
@@ -90,6 +126,7 @@ def prelabel_session_to_read(session: PrelabelSession) -> PrelabelSessionRead:
         generated_proposals=int(session.generated_proposals or 0),
         skipped_unmatched=int(session.skipped_unmatched or 0),
         error_message=session.error_message,
+        debug_detections=_normalized_debug_detections(session.debug_detections_json),
         created_at=session.created_at,
         updated_at=session.updated_at,
     )
@@ -123,6 +160,65 @@ def sequence_pending_total_from_counts(counts_by_asset: dict[str, int]) -> int:
     return sum(int(value or 0) for value in counts_by_asset.values())
 
 
+def _normalized_debug_detections(raw_rows: Any) -> list[dict[str, Any]]:
+    if not isinstance(raw_rows, list):
+        return []
+    detections: list[dict[str, Any]] = []
+    for row in raw_rows[:_PRELABEL_DEBUG_DETECTIONS_LIMIT]:
+        if not isinstance(row, dict):
+            continue
+        asset_id = str(row.get("asset_id") or "").strip()
+        label_text = str(row.get("label_text") or "").strip()
+        bbox_xyxy = row.get("bbox_xyxy")
+        status = str(row.get("status") or "").strip().lower()
+        if not asset_id or not label_text:
+            continue
+        if status not in {"matched", "unmatched", "discarded"}:
+            continue
+        if not isinstance(bbox_xyxy, list) or len(bbox_xyxy) != 4:
+            continue
+        if not all(isinstance(value, (int, float)) and math.isfinite(float(value)) for value in bbox_xyxy):
+            continue
+        asset_frame_index = row.get("asset_frame_index")
+        detections.append(
+            {
+                "asset_id": asset_id,
+                "asset_frame_index": int(asset_frame_index) if isinstance(asset_frame_index, int) else None,
+                "label_text": label_text,
+                "resolved_category_id": str(row.get("resolved_category_id") or "").strip() or None,
+                "resolved_category_name": str(row.get("resolved_category_name") or "").strip() or None,
+                "confidence": float(row.get("confidence") or 0.0),
+                "bbox_xyxy": [float(value) for value in bbox_xyxy],
+                "status": status,
+            }
+        )
+    return detections
+
+
+def _append_debug_detection(
+    session: PrelabelSession,
+    *,
+    asset: Asset,
+    detection: DetectionResult,
+    status: str,
+    category: Category | None,
+) -> None:
+    debug_detections = _normalized_debug_detections(session.debug_detections_json)
+    debug_detections.append(
+        {
+            "asset_id": asset.id,
+            "asset_frame_index": int(asset.frame_index) if isinstance(asset.frame_index, int) else None,
+            "label_text": str(detection.label_text or "").strip(),
+            "resolved_category_id": category.id if category is not None else None,
+            "resolved_category_name": category.name if category is not None else None,
+            "confidence": float(detection.score),
+            "bbox_xyxy": [float(value) for value in detection.bbox_xyxy],
+            "status": status,
+        }
+    )
+    session.debug_detections_json = debug_detections[-_PRELABEL_DEBUG_DETECTIONS_LIMIT:]
+
+
 def _sampling_interval_frames(session: PrelabelSession, sequence_fps: float | None) -> int:
     raw_value = float(session.sampling_value or 1.0)
     if str(session.sampling_mode) == "every_n_seconds":
@@ -150,13 +246,109 @@ def _maybe_finalize_session(session: PrelabelSession) -> None:
         session.status = "running"
 
 
-def _normalized_category_map(categories: list[Category]) -> dict[str, Category]:
-    mapping: dict[str, Category] = {}
+def _normalize_prelabel_label_key(value: str | None) -> str:
+    chunks: list[str] = []
+    current: list[str] = []
+    for char in str(value or ""):
+        if char.isalnum():
+            current.append(char.lower())
+            continue
+        if current:
+            chunks.append("".join(current))
+            current = []
+    if current:
+        chunks.append("".join(current))
+    return " ".join(chunks)
+
+
+def _inflection_alias_keys(normalized: str) -> set[str]:
+    keys: set[str] = set()
+    if not normalized:
+        return keys
+
+    if normalized.endswith("ies") and len(normalized) > 4:
+        keys.add(f"{normalized[:-3]}y")
+    if normalized.endswith("sses") and len(normalized) > 5:
+        keys.add(normalized[:-2])
+    elif normalized.endswith(("ches", "shes", "xes", "zes")) and len(normalized) > 4:
+        keys.add(normalized[:-2])
+    if normalized.endswith("s") and len(normalized) > 3 and not normalized.endswith("ss"):
+        keys.add(normalized[:-1])
+
+    if normalized.endswith("y") and len(normalized) > 1 and normalized[-2] not in {"a", "e", "i", "o", "u"}:
+        keys.add(f"{normalized[:-1]}ies")
+    elif normalized.endswith(("s", "x", "z", "ch", "sh")):
+        keys.add(f"{normalized}es")
+    else:
+        keys.add(f"{normalized}s")
+    return {key for key in keys if key and key != normalized}
+
+
+def _category_exact_keys(value: str | None) -> list[str]:
+    normalized = _normalize_prelabel_label_key(value)
+    if not normalized:
+        return []
+    keys = [normalized]
+    collapsed = normalized.replace(" ", "")
+    if collapsed and collapsed != normalized:
+        keys.append(collapsed)
+    return keys
+
+
+def _category_alias_keys(value: str | None) -> set[str]:
+    normalized = _normalize_prelabel_label_key(value)
+    if not normalized:
+        return set()
+
+    keys: set[str] = set()
+    collapsed = normalized.replace(" ", "")
+    if collapsed and collapsed != normalized:
+        keys.add(collapsed)
+    keys.update(_inflection_alias_keys(normalized))
+    for alias in _PRELABEL_ALIAS_LOOKUP.get(normalized, set()):
+        alias_key = _normalize_prelabel_label_key(alias)
+        if not alias_key:
+            continue
+        keys.add(alias_key)
+        collapsed_alias = alias_key.replace(" ", "")
+        if collapsed_alias and collapsed_alias != alias_key:
+            keys.add(collapsed_alias)
+        keys.update(_inflection_alias_keys(alias_key))
+    return keys - set(_category_exact_keys(value))
+
+
+def _category_match_maps(categories: list[Category]) -> tuple[dict[str, Category], dict[str, Category]]:
+    exact_mapping: dict[str, Category] = {}
+    alias_candidates: dict[str, dict[str, Category]] = defaultdict(dict)
     for category in categories:
-        normalized = str(category.name or "").strip().lower()
-        if normalized and normalized not in mapping:
-            mapping[normalized] = category
-    return mapping
+        for key in _category_exact_keys(category.name):
+            if key not in exact_mapping:
+                exact_mapping[key] = category
+        for key in _category_alias_keys(category.name):
+            alias_candidates[key][category.id] = category
+    alias_mapping = {
+        key: next(iter(categories_by_id.values()))
+        for key, categories_by_id in alias_candidates.items()
+        if len(categories_by_id) == 1 and key not in exact_mapping
+    }
+    return exact_mapping, alias_mapping
+
+
+def _match_detection_category(
+    *,
+    label_text: str | None,
+    exact_mapping: dict[str, Category],
+    alias_mapping: dict[str, Category],
+) -> Category | None:
+    for key in _category_exact_keys(label_text):
+        category = exact_mapping.get(key)
+        if category is not None:
+            return category
+    for key in _category_alias_keys(label_text):
+        category = alias_mapping.get(key)
+        if category is not None:
+            return category
+    return None
 
 
 async def resolve_active_deployment(project_id: str, task_id: str) -> dict[str, Any]:
@@ -177,6 +369,39 @@ async def resolve_active_deployment(project_id: str, task_id: str) -> dict[str, 
     return deployment
 
 
+async def resolve_prelabel_source_config(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    task: Task,
+    config: PrelabelConfigCreate,
+) -> dict[str, Any]:
+    if task.kind != TaskKind.bbox:
+        raise ValueError("task_kind_unsupported")
+
+    prompts = normalize_prompts(config.prompts)
+    if config.source_type == "active_deployment":
+        deployment = await resolve_active_deployment(project_id, task.id)
+        return {
+            "source_ref": str(deployment.get("deployment_id")),
+            "source_label": str(deployment.get("name") or "").strip() or "Project model",
+            "device_preference": str(deployment.get("device_preference") or "").strip() or "auto",
+            "prompts": [],
+            "deployment": deployment,
+        }
+
+    if not prompts:
+        categories = await list_task_categories(db, project_id=project_id, task_id=task.id)
+        prompts = [category.name for category in categories if isinstance(category.name, str) and category.name.strip()]
+    return {
+        "source_ref": "microsoft/Florence-2-base-ft",
+        "source_label": "Florence-2",
+        "device_preference": None,
+        "prompts": prompts,
+        "deployment": None,
+    }
+
+
 async def create_prelabel_session(
     db: AsyncSession,
     *,
@@ -186,27 +411,15 @@ async def create_prelabel_session(
     config: PrelabelConfigCreate,
     live_mode: bool,
 ) -> PrelabelSession:
-    if task.kind != TaskKind.bbox:
-        raise ValueError("task_kind_unsupported")
-
-    prompts = normalize_prompts(config.prompts)
-    if config.source_type == "active_deployment":
-        deployment = await resolve_active_deployment(project_id, task.id)
-        source_ref = str(deployment.get("deployment_id"))
-        prompts = []
-    else:
-        if not prompts:
-            categories = await list_task_categories(db, project_id=project_id, task_id=task.id)
-            prompts = [category.name for category in categories if isinstance(category.name, str) and category.name.strip()]
-        source_ref = "microsoft/Florence-2-base-ft"
+    resolved = await resolve_prelabel_source_config(db, project_id=project_id, task=task, config=config)
 
     session = PrelabelSession(
         project_id=project_id,
         task_id=task.id,
         sequence_id=sequence.id,
         source_type=config.source_type,
-        source_ref=source_ref,
-        prompts_json=prompts,
+        source_ref=str(resolved["source_ref"]),
+        prompts_json=list(resolved["prompts"]),
         sampling_mode=config.frame_sampling.mode,
         sampling_value=float(config.frame_sampling.value),
         confidence_threshold=float(config.confidence_threshold),
@@ -217,6 +430,65 @@ async def create_prelabel_session(
     db.add(session)
     await db.flush()
     return session
+
+
+async def warmup_prelabel_source(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    task: Task,
+    config: PrelabelConfigCreate,
+) -> dict[str, Any]:
+    resolved = await resolve_prelabel_source_config(db, project_id=project_id, task=task, config=config)
+    if config.source_type == "active_deployment":
+        deployment = resolved["deployment"]
+        source = deployment.get("source") if isinstance(deployment, dict) else None
+        if not isinstance(source, dict):
+            raise RuntimeError("Deployment source is invalid")
+        response = await inference_client.warmup_detection(
+            {
+                "onnx_relpath": source.get("onnx_relpath"),
+                "metadata_relpath": source.get("metadata_relpath"),
+                "device_preference": deployment.get("device_preference", "auto"),
+                "model_key": deployment.get("model_key"),
+            }
+        )
+        return {
+            "ok": True,
+            "source_type": config.source_type,
+            "source_ref": str(resolved["source_ref"]),
+            "source_label": str(resolved["source_label"]),
+            "device_selected": str(response.get("device_selected") or "cpu"),
+            "device_preference": resolved["device_preference"],
+        }
+
+    response = await _warmup_florence_source(str(resolved["source_ref"]))
+    return {
+        "ok": True,
+        "source_type": config.source_type,
+        "source_ref": str(resolved["source_ref"]),
+        "source_label": str(resolved["source_label"]),
+        "device_selected": str(response.get("device_selected") or "cpu"),
+        "device_preference": None,
+    }
+
+
+async def _warmup_florence_source(model_name: str) -> dict[str, Any]:
+    last_error: Exception | None = None
+    for attempt in range(_FLORENCE_WARMUP_MAX_ATTEMPTS):
+        try:
+            return await inference_client.warmup_florence({"model_name": model_name})
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code != 503 or attempt + 1 >= _FLORENCE_WARMUP_MAX_ATTEMPTS:
+                raise
+            last_error = exc
+        except httpx.HTTPError as exc:
+            if attempt + 1 >= _FLORENCE_WARMUP_MAX_ATTEMPTS:
+                raise
+            last_error = exc
+        await asyncio.sleep(_FLORENCE_WARMUP_RETRY_DELAY_SECONDS)
+    assert last_error is not None
+    raise last_error
 
 
 async def get_latest_sequence_prelabel_session(
@@ -458,7 +730,7 @@ async def process_prelabel_asset_job(
             raise RuntimeError("Prelabel context is missing")
 
         categories = await list_task_categories(db, project_id=session.project_id, task_id=session.task_id)
-        category_by_name = _normalized_category_map(categories)
+        category_exact_map, category_alias_map = _category_match_maps(categories)
         storage_uri = None
         if isinstance(asset.metadata_json, dict):
             storage_uri = asset.metadata_json.get("storage_uri")
@@ -479,8 +751,13 @@ async def process_prelabel_asset_job(
             proposals_created = 0
             skipped_unmatched = 0
             for detection in detections:
-                category = category_by_name.get(str(detection.label_text or "").strip().lower())
+                category = _match_detection_category(
+                    label_text=detection.label_text,
+                    exact_mapping=category_exact_map,
+                    alias_mapping=category_alias_map,
+                )
                 if category is None:
+                    _append_debug_detection(session, asset=asset, detection=detection, status="unmatched", category=None)
                     skipped_unmatched += 1
                     logger.info(
                         "Skipping unmatched prelabel detection",
@@ -493,7 +770,9 @@ async def process_prelabel_asset_job(
                     continue
                 bbox_xywh = _bbox_xyxy_to_xywh(detection.bbox_xyxy, width=asset.width, height=asset.height)
                 if bbox_xywh is None:
+                    _append_debug_detection(session, asset=asset, detection=detection, status="discarded", category=category)
                     continue
+                _append_debug_detection(session, asset=asset, detection=detection, status="matched", category=category)
                 proposal = PrelabelProposal(
                     session_id=session.id,
                     asset_id=asset.id,

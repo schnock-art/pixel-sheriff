@@ -53,6 +53,12 @@ async def create_project(payload: ProjectCreate, db: AsyncSession = Depends(get_
     project_id = str(uuid.uuid4())
     default_task_id = str(uuid.uuid4())
     kind, label_mode = _task_spec_from_project_task_type(payload.task_type)
+    project = Project(
+        id=project_id,
+        name=payload.name,
+        task_type=payload.task_type,
+        default_task_id=None,
+    )
     default_task = Task(
         id=default_task_id,
         project_id=project_id,
@@ -60,15 +66,12 @@ async def create_project(payload: ProjectCreate, db: AsyncSession = Depends(get_
         kind=kind,
         label_mode=label_mode,
     )
-    project = Project(
-        id=project_id,
-        name=payload.name,
-        task_type=payload.task_type,
-        default_task_id=default_task_id,
-    )
 
     db.add(project)
+    await db.flush()
     db.add(default_task)
+    await db.flush()
+    project.default_task_id = default_task.id
     await db.commit()
     await db.refresh(project)
     return _project_read(project, default_task)
@@ -126,6 +129,8 @@ async def delete_project(project_id: str, db: AsyncSession = Depends(get_db)) ->
 
     if asset_ids:
         await db.execute(delete(Suggestion).where(Suggestion.asset_id.in_(asset_ids)))
+    project.default_task_id = None
+    await db.flush()
     await db.execute(delete(Annotation).where(Annotation.project_id == project_id))
     await db.execute(delete(Category).where(Category.project_id == project_id))
     await db.execute(delete(Task).where(Task.project_id == project_id))

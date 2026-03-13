@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import uuid
 import zipfile
@@ -9,7 +10,7 @@ import pytest
 
 try:
     import torch  # noqa: F401
-    from pixel_sheriff_ml.model_factory import build_resnet_classifier
+    from pixel_sheriff_ml.model_factory import build_classifier_model, build_resnet_classifier
     from pixel_sheriff_trainer.classification.dataset import build_classification_loaders
     from pixel_sheriff_trainer.detection.dataset import build_detection_loaders
     from pixel_sheriff_trainer.detection.eval import DetectionEvaluation
@@ -24,10 +25,12 @@ try:
     from pixel_sheriff_trainer.jobs import TrainJob, parse_train_job
     from pixel_sheriff_trainer.runner import TrainRunner
     from pixel_sheriff_trainer.segmentation.dataset import build_segmentation_loaders
+    from pixel_sheriff_trainer.utils.torchvision_cache import configure_torchvision_cache, resolve_torchvision_cache_root
 
     HAS_TORCH = True
 except Exception:
     HAS_TORCH = False
+    build_classifier_model = None  # type: ignore[assignment]
     build_resnet_classifier = None  # type: ignore[assignment]
     build_classification_loaders = None  # type: ignore[assignment]
     build_detection_loaders = None  # type: ignore[assignment]
@@ -45,6 +48,8 @@ except Exception:
     parse_train_job = None  # type: ignore[assignment]
     TrainRunner = None  # type: ignore[assignment]
     build_segmentation_loaders = None  # type: ignore[assignment]
+    configure_torchvision_cache = None  # type: ignore[assignment]
+    resolve_torchvision_cache_root = None  # type: ignore[assignment]
 
 try:
     import numpy as np  # noqa: F401
@@ -327,6 +332,174 @@ def _write_tiny_coco_export_zip(root: Path, project_id: str, *, include_segmenta
     return zip_path
 
 
+@pytest.mark.skipif(not HAS_TORCH, reason="torch is required")
+def test_build_classifier_model_uses_pretrained_weights_when_requested(monkeypatch: pytest.MonkeyPatch) -> None:
+    import torchvision.models as tv_models
+
+    captured: dict[str, object] = {}
+    expected_default = object()
+
+    class FakeWeights:
+        DEFAULT = expected_default
+
+    class FakeResNet(torch.nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.fc = torch.nn.Linear(4, 2)
+
+        def forward(self, x):  # type: ignore[override]
+            return self.fc(torch.ones((x.shape[0], 4), dtype=x.dtype))
+
+    def _fake_ctor(*, weights=None, **_kwargs):
+        captured["weights"] = weights
+        return FakeResNet()
+
+    monkeypatch.setattr(tv_models, "ResNet18_Weights", FakeWeights)
+    monkeypatch.setattr(tv_models, "resnet18", _fake_ctor)
+
+    model = build_classifier_model(
+        {
+            "architecture": {
+                "family": "resnet_classifier",
+                "backbone": {"name": "resnet18", "pretrained": True},
+                "head": {"num_classes": 3},
+            }
+        },
+        num_classes_override=3,
+    )
+
+    assert captured["weights"] is expected_default
+    assert isinstance(model.fc, torch.nn.Linear)
+    assert model.fc.out_features == 3
+
+
+@pytest.mark.skipif(not HAS_TORCH, reason="torch is required")
+def test_build_classifier_model_supports_efficientnet_v2_family() -> None:
+    model = build_classifier_model(
+        {
+            "architecture": {
+                "family": "efficientnet_v2_classifier",
+                "backbone": {"name": "efficientnet_v2_s", "pretrained": False},
+                "head": {"num_classes": 5},
+            }
+        },
+        num_classes_override=5,
+    )
+    outputs = model(torch.randn(1, 3, 128, 128))
+    assert tuple(outputs.shape) == (1, 5)
+
+
+@pytest.mark.skipif(not HAS_TORCH, reason="torch is required")
+def test_build_classifier_model_fails_when_pretrained_weights_are_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
+    import torchvision.models as tv_models
+
+    class FakeWeights:
+        DEFAULT = object()
+
+    def _failing_ctor(*, weights=None, **_kwargs):
+        raise RuntimeError(f"download failed for weights={weights}")
+
+    monkeypatch.setattr(tv_models, "ResNet18_Weights", FakeWeights)
+    monkeypatch.setattr(tv_models, "resnet18", _failing_ctor)
+
+    with pytest.raises(ValueError, match="pretrained_weights_unavailable"):
+        build_classifier_model(
+            {
+                "architecture": {
+                    "family": "resnet_classifier",
+                    "backbone": {"name": "resnet18", "pretrained": True},
+                    "head": {"num_classes": 2},
+                }
+            },
+            num_classes_override=2,
+        )
+
+
+@pytest.mark.skipif(not HAS_TORCH, reason="torch is required")
+def test_detection_builder_uses_backbone_weights_when_pretrained(monkeypatch: pytest.MonkeyPatch) -> None:
+    import pixel_sheriff_trainer.detection.train as detection_train
+    import torchvision.models as tv_models
+    import torchvision.models.detection as tv_det
+
+    captured: dict[str, object] = {}
+    expected_default = object()
+
+    class FakeWeights:
+        DEFAULT = expected_default
+
+    def _fake_builder(*, weights=None, weights_backbone=None, num_classes=None, **_kwargs):
+        captured["weights"] = weights
+        captured["weights_backbone"] = weights_backbone
+        captured["num_classes"] = num_classes
+        return torch.nn.Identity()
+
+    monkeypatch.setattr(tv_models, "ResNet50_Weights", FakeWeights)
+    monkeypatch.setattr(tv_det, "retinanet_resnet50_fpn", _fake_builder)
+
+    detection_train._build_detection_model(
+        {
+            "architecture": {
+                "family": "retinanet",
+                "backbone": {"name": "resnet50", "pretrained": True},
+            }
+        },
+        num_classes=4,
+    )
+
+    assert captured["weights"] is None
+    assert captured["weights_backbone"] is expected_default
+    assert captured["num_classes"] == 4
+
+
+@pytest.mark.skipif(not HAS_TORCH, reason="torch is required")
+def test_segmentation_builder_uses_backbone_weights_when_pretrained(monkeypatch: pytest.MonkeyPatch) -> None:
+    import pixel_sheriff_trainer.segmentation.train as segmentation_train
+    import torchvision.models as tv_models
+    import torchvision.models.segmentation as tv_seg
+
+    captured: dict[str, object] = {}
+    expected_default = object()
+
+    class FakeWeights:
+        DEFAULT = expected_default
+
+    def _fake_builder(*, weights=None, weights_backbone=None, num_classes=None, **_kwargs):
+        captured["weights"] = weights
+        captured["weights_backbone"] = weights_backbone
+        captured["num_classes"] = num_classes
+        return torch.nn.Identity()
+
+    monkeypatch.setattr(tv_models, "ResNet101_Weights", FakeWeights)
+    monkeypatch.setattr(tv_seg, "deeplabv3_resnet101", _fake_builder)
+
+    segmentation_train._build_deeplabv3(
+        {
+            "architecture": {
+                "backbone": {"name": "resnet101", "pretrained": True},
+            }
+        },
+        num_classes=3,
+    )
+
+    assert captured["weights"] is None
+    assert captured["weights_backbone"] is expected_default
+    assert captured["num_classes"] == 4
+
+
+@pytest.mark.skipif(not HAS_TORCH, reason="torch is required")
+def test_configure_torchvision_cache_uses_storage_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("TORCHVISION_CACHE_ROOT", raising=False)
+    monkeypatch.delenv("TORCH_HOME", raising=False)
+
+    expected_root = (tmp_path / "model_weights" / "torchvision").resolve()
+    assert resolve_torchvision_cache_root(str(tmp_path)) == expected_root
+
+    configured_root = configure_torchvision_cache(str(tmp_path))
+    assert configured_root == expected_root
+    assert Path(os.environ["TORCH_HOME"]) == expected_root
+    assert Path(torch.hub.get_dir()) == expected_root / "hub"
+
+
 def test_dataset_loader_reads_tiny_export_zip(tmp_path: Path) -> None:
     if not HAS_TORCH:
         pytest.skip("torch/torchvision not available")
@@ -494,8 +667,9 @@ def test_detection_training_uses_ssdlite_builder(monkeypatch: pytest.MonkeyPatch
 
     called = {"ssdlite": False}
 
-    def _fake_builder(_num_classes: int) -> torch.nn.Module:
+    def _fake_builder(_num_classes: int, *, pretrained: bool = False) -> torch.nn.Module:
         called["ssdlite"] = True
+        called["pretrained"] = pretrained
         return FakeDetector()
 
     monkeypatch.setattr(detection_train, "_build_ssdlite320_mobilenet_v3_large", _fake_builder)
@@ -534,6 +708,7 @@ def test_detection_training_uses_ssdlite_builder(monkeypatch: pytest.MonkeyPatch
     )
 
     assert called["ssdlite"] is True
+    assert called["pretrained"] is False
     assert status == "completed"
     assert evaluation is not None
 
@@ -607,7 +782,7 @@ def test_detection_training_falls_back_to_cpu_eval_when_cuda_nms_is_unavailable(
             raise RuntimeError("CUDA error: no kernel image is available for execution on the device")
         return DetectionEvaluation(mAP50=0.25, mAP50_95=0.15)
 
-    monkeypatch.setattr(detection_train, "_build_retinanet", lambda _num_classes: fake_model)
+    monkeypatch.setattr(detection_train, "_build_retinanet", lambda _num_classes, *, pretrained=False: fake_model)
     monkeypatch.setattr(detection_train, "evaluate_detection", _fake_eval)
 
     train_loader = [
@@ -671,7 +846,7 @@ def test_detection_training_cancel_stops_between_batches(monkeypatch: pytest.Mon
                 yielded_batches["count"] += 1
                 yield [sample_image.clone()], [{key: value.clone() for key, value in sample_target.items()}]
 
-    monkeypatch.setattr(detection_train, "_build_retinanet", lambda _num_classes: FakeDetector())
+    monkeypatch.setattr(detection_train, "_build_retinanet", lambda _num_classes, *, pretrained=False: FakeDetector())
     monkeypatch.setattr(
         detection_train,
         "evaluate_detection",

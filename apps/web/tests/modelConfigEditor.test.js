@@ -25,8 +25,14 @@ const FAMILIES_METADATA = {
     {
       name: "resnet_classifier",
       task: "classification",
-      allowed_backbones: ["resnet18", "resnet34", "resnet50", "resnet101", "mobilenet_v3_large", "mobilenet_v3_small"],
+      allowed_backbones: ["resnet18", "resnet34", "resnet50", "resnet101"],
       input_size: { shape: "square", mode: "range", min_square_size: 32, step: 1, recommended_square_size: 224 },
+    },
+    {
+      name: "efficientnet_v2_classifier",
+      task: "classification",
+      allowed_backbones: ["efficientnet_v2_s", "efficientnet_v2_m", "efficientnet_v2_l"],
+      input_size: { shape: "square", mode: "range", min_square_size: 32, step: 1, recommended_square_size: 384 },
     },
     {
       name: "retinanet",
@@ -189,6 +195,24 @@ test("setArchitectureFamily uses BCE loss for multi-label classification dataset
   assert.equal(next.loss.type, "classification_bce_with_logits");
   assert.equal(next.architecture.head.num_classes, 4);
   assert.equal(next.outputs.primary.format, "classification_logits");
+});
+
+test("setArchitectureFamily configures EfficientNetV2 classification defaults", () => {
+  const next = setArchitectureFamily(
+    {
+      input: { input_size: [224, 224], resize_policy: "letterbox" },
+      source_dataset: { task: "classification", num_classes: 4 },
+      architecture: { backbone: { name: "resnet18" }, head: { num_classes: 4 } },
+    },
+    "efficientnet_v2_classifier",
+    FAMILIES_METADATA,
+  );
+  assert.equal(next.architecture.family, "efficientnet_v2_classifier");
+  assert.equal(next.architecture.backbone.name, "efficientnet_v2_s");
+  assert.equal(next.architecture.head.type, "linear");
+  assert.equal(next.loss.type, "classification_cross_entropy");
+  assert.deepEqual(next.input.input_size, [384, 384]);
+  assert.equal(next.architecture.backbone.pretrained, true);
 });
 
 test("setArchitectureFamily keeps existing backbone when it is in allowed_backbones", () => {

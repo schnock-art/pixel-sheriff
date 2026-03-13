@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 
 import { LabelPanel } from "../LabelPanel";
@@ -112,6 +112,7 @@ export default function ProjectAssetsWorkspace() {
   const [videoImportError, setVideoImportError] = useState<string | null>(null);
   const [isWebcamModalOpen, setIsWebcamModalOpen] = useState(false);
   const [sequencePauseSignal, setSequencePauseSignal] = useState(0);
+  const reloadPrelabelsRef = useRef<null | (() => Promise<void>)>(null);
   const projectAnnotationMode = useMemo(() => taskKindToAnnotationMode(selectedTask?.kind), [selectedTask?.kind]);
 
   useEffect(() => {
@@ -254,6 +255,13 @@ export default function ProjectAssetsWorkspace() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [treeState.currentAsset?.id, treeState.currentAsset?.uri, treeState.currentAsset?.width, treeState.currentAsset?.height],
   );
+  const refreshPrelabelWorkspace = useCallback(async () => {
+    await Promise.all([refetchAssets(selectedProjectId), currentSequenceId ? refetchSequence() : Promise.resolve()]);
+  }, [currentSequenceId, refetchAssets, refetchSequence, selectedProjectId]);
+  const handleAnnotationSubmitSuccess = useCallback(async () => {
+    await refreshPrelabelWorkspace();
+    await reloadPrelabelsRef.current?.();
+  }, [refreshPrelabelWorkspace]);
 
   const annotationWorkflow = useAnnotationWorkflow({
     selectedProjectId,
@@ -267,6 +275,7 @@ export default function ProjectAssetsWorkspace() {
     setEditMode,
     setAnnotations,
     setMessage,
+    onSubmitSuccess: handleAnnotationSubmitSuccess,
   });
   const {
     selectedLabelIds,
@@ -306,9 +315,6 @@ export default function ProjectAssetsWorkspace() {
       })),
     [currentObjects, labelNameById],
   );
-  const refreshPrelabelWorkspace = useCallback(async () => {
-    await Promise.all([refetchAssets(selectedProjectId), currentSequenceId ? refetchSequence() : Promise.resolve()]);
-  }, [currentSequenceId, refetchAssets, refetchSequence, selectedProjectId]);
   const prelabelState = usePrelabels({
     projectId: selectedProjectId,
     taskId: selectedTaskId,
@@ -320,6 +326,14 @@ export default function ProjectAssetsWorkspace() {
     onRefresh: refreshPrelabelWorkspace,
     setMessage,
   });
+  useEffect(() => {
+    reloadPrelabelsRef.current = prelabelState.reload;
+    return () => {
+      if (reloadPrelabelsRef.current === prelabelState.reload) {
+        reloadPrelabelsRef.current = null;
+      }
+    };
+  }, [prelabelState.reload]);
   const pendingPrelabelObjects = useMemo(
     () =>
       prelabelState.proposals.map((proposal) => ({
@@ -1044,6 +1058,8 @@ export default function ProjectAssetsWorkspace() {
       />
       <VideoImportModal
         open={isVideoImportModalOpen}
+        projectId={selectedProjectId}
+        taskId={selectedTaskId}
         defaultName={videoImportDefaultName}
         isImporting={isVideoImporting}
         errorMessage={videoImportError}

@@ -69,15 +69,16 @@ Gaps found before implementation:
 - [x] API regression for accept merge idempotency
 - [x] API regression for edited proposal sync on annotation save
 - [x] Web regression for provenance preservation in annotation state normalization
-- [ ] Coverage for Florence normalization edge cases with fake trainer responses
-- [ ] Coverage for multi-camera webcam close-input completion path
-- [ ] Coverage for full workspace review interactions
+- [x] Coverage for Florence normalization edge cases with fake trainer responses
+- [x] Coverage for multi-camera webcam close-input completion path
+- [x] Coverage for full workspace review interactions
 
 ## Files Changed In This Pass
 
 Backend:
 - `apps/api/src/sheriff_api/services/prelabel_adapters.py`
 - `apps/api/src/sheriff_api/services/prelabels.py`
+- `apps/api/src/sheriff_api/demo_prelabel_seed.py`
 - `apps/api/tests/test_prelabels_api.py`
 
 Frontend:
@@ -88,24 +89,40 @@ Frontend:
 - `apps/web/src/components/workspace/project-assets/SequenceToolbar.tsx`
 - `apps/web/src/components/Viewer.tsx`
 - `apps/web/src/lib/hooks/usePrelabels.ts`
+- `apps/web/src/lib/hooks/useWebcamCapture.ts`
 - `apps/web/src/lib/hooks/useSequenceNavigation.ts`
+- `apps/web/src/lib/workspace/webcamCaptureFinish.js`
 - `apps/web/src/app/globals.css`
 - `apps/web/tests/annotationState.test.js`
+- `apps/web/tests/webcamCaptureFinish.test.js`
+- `apps/web/tests/demo/prelabels-review.spec.mjs`
+
+Demo / harness:
+- `scripts/demo/seed-demo-project.mjs`
+- `scripts/demo/run-prelabels.mjs`
+- `scripts/run_demo_assets.sh`
 
 Docs:
 - `docu/VLM_COLD_START_PRELABELING_TASKS.md`
 
-## Remaining Gaps
+## Coverage Added In This Completion Pass
 
-Not completed in this pass:
-- full frontend automated interaction coverage for the new AI prelabels panel/overlay flow
-- dedicated tests for Florence malformed-box normalization/clamping against fake trainer responses
-- explicit webcam multi-camera completion regression asserting close-input per session and final completion after queue drain
+- `apps/api/tests/test_prelabels_api.py`
+  - Florence malformed-row skipping and clamp/reorder normalization through the live prelabel job path
+  - webcam `close-input` completion semantics for multiple live sessions with queued work still draining
+- `apps/trainer/tests/test_inference_app.py`
+  - `_parse_florence_generation` ignores malformed Florence payload rows without raising
+- `apps/web/tests/webcamCaptureFinish.test.js`
+  - webcam finish helper drains uploads, dedupes session ids, closes prelabel input, then tears down preview
+- `apps/web/tests/demo/prelabels-review.spec.mjs`
+  - seeded AI prelabel review workflow across overlay selection, edit/save, accept-frame, next-pending navigation, and reject-selected flows
+- `apps/api/src/sheriff_api/demo_prelabel_seed.py`
+  - deterministic bbox sequence + completed prelabel session + pending proposals for the Playwright demo harness
 
 ## Current Outcome
 
 Feature status after this pass:
-- backend orchestration is in place and regression-covered for the main accept/edit flows
-- labeling workspace now exposes pending AI proposals end to end
-- sequence review UX now highlights pending AI work and can jump to the next pending frame
-- task tracking for this feature is now recorded here and can be updated incrementally
+- Florence malformed responses are skipped consistently in both the trainer parser and API adapter path
+- webcam finish now drains already-started uploads before closing live prelabel input and tearing down preview streams
+- labeling workspace review interactions now have deterministic demo seed data plus dedicated browser automation coverage
+- the originally tracked v1 cold-start prelabel gaps in this document are complete

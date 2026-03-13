@@ -6,18 +6,29 @@ from sheriff_api.ml.adapters.base import FamilyAdapter
 
 
 class TorchvisionDeepLabV3Adapter(FamilyAdapter):
-    def __init__(self, *, backbone_name: str, num_classes: int, _pretrained: bool) -> None:
+    def __init__(self, *, backbone_name: str, num_classes: int, pretrained: bool) -> None:
         import torchvision.models.segmentation as tv_segmentation
+        import torchvision.models as tv_models
 
         builders = {
-            "resnet50": tv_segmentation.deeplabv3_resnet50,
-            "resnet101": tv_segmentation.deeplabv3_resnet101,
+            "resnet50": (tv_segmentation.deeplabv3_resnet50, tv_models.ResNet50_Weights.DEFAULT),
+            "resnet101": (tv_segmentation.deeplabv3_resnet101, tv_models.ResNet101_Weights.DEFAULT),
         }
-        builder = builders.get(backbone_name)
-        if builder is None:
+        selected = builders.get(backbone_name)
+        if selected is None:
             raise ValueError("deeplabv3 adapter currently supports backbones: resnet50, resnet101")
+        builder, weights_backbone = selected
 
-        model = builder(weights=None, weights_backbone=None, num_classes=int(num_classes))
+        try:
+            model = builder(
+                weights=None,
+                weights_backbone=weights_backbone if pretrained else None,
+                num_classes=int(num_classes),
+            )
+        except Exception as exc:
+            if pretrained:
+                raise ValueError(f"pretrained_weights_unavailable:deeplabv3/{backbone_name}:{exc}") from exc
+            raise
         super().__init__(
             task="segmentation",
             family="deeplabv3",
@@ -50,5 +61,5 @@ def build_deeplabv3_adapter(model_config: dict[str, Any]) -> FamilyAdapter:
     return TorchvisionDeepLabV3Adapter(
         backbone_name=str(backbone.get("name", "")).strip().lower(),
         num_classes=int(head.get("num_classes", 0)),
-        _pretrained=bool(backbone.get("pretrained")),
+        pretrained=bool(backbone.get("pretrained")),
     )

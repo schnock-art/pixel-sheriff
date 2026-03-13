@@ -1,5 +1,5 @@
 import { apiGet, apiPost } from "./client";
-import type { PrelabelProposal, PrelabelSession } from "./types";
+import type { PrelabelConfig, PrelabelProposal, PrelabelSession, PrelabelSourceStatus } from "./types";
 
 
 export function listPrelabelSessions(projectId: string, taskId: string, sequenceId: string): Promise<{ items: PrelabelSession[] }> {
@@ -9,6 +9,14 @@ export function listPrelabelSessions(projectId: string, taskId: string, sequence
 
 export function getPrelabelSession(projectId: string, taskId: string, sessionId: string): Promise<{ session: PrelabelSession }> {
   return apiGet<{ session: PrelabelSession }>(`/projects/${projectId}/tasks/${taskId}/prelabels/${sessionId}`);
+}
+
+export function getPrelabelSourceStatus(
+  projectId: string,
+  taskId: string,
+  payload: PrelabelConfig,
+): Promise<PrelabelSourceStatus> {
+  return apiPost<PrelabelSourceStatus, PrelabelConfig>(`/projects/${projectId}/tasks/${taskId}/prelabels/source-status`, payload);
 }
 
 export function listPrelabelProposals(
@@ -54,4 +62,3 @@ export function closePrelabelInput(projectId: string, taskId: string, sessionId:
     {},
   );
 }
-

@@ -15,12 +15,14 @@ from pixel_sheriff_trainer.io.storage import ExperimentStorage
 from pixel_sheriff_trainer.jobs import TrainJob
 from pixel_sheriff_trainer.pipeline import PIPELINE_REGISTRY
 from pixel_sheriff_trainer.utils.seed import seed_everything
+from pixel_sheriff_trainer.utils.torchvision_cache import configure_torchvision_cache
 from pixel_sheriff_trainer.utils.time import utc_now_iso
 
 
 class TrainRunner:
     def __init__(self, storage_root: str) -> None:
         self.storage = ExperimentStorage(storage_root)
+        configure_torchvision_cache(storage_root)
         self.events = EventLog(self.storage)
 
     def _status_summary(self, status: str, attempt: int, job_id: str, message: str | None = None) -> dict[str, Any]:
@@ -473,6 +475,8 @@ class TrainRunner:
                 message = f"Unsupported task: {code}"
             elif code == "unsupported_family":
                 message = "Model family not supported for this task"
+            elif code.startswith("pretrained_weights_unavailable:"):
+                message = code.split(":", 1)[1]
             elif code == "batchnorm_small_batch_unsupported":
                 message = "BatchNorm training requires effective batch size >= 2. Increase batch size or enable training.drop_last"
             else:

@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 MIGRATION_TABLE = "schema_migrations"
 MULTI_TASK_MIGRATION_VERSION = "multi_task_projects_v1"
 FOLDERS_SEQUENCES_MIGRATION_VERSION = "folders_sequences_v1"
-PRELABELS_MIGRATION_VERSION = "prelabels_v1"
+PRELABELS_MIGRATION_VERSION = "prelabels_v2"
 
 
 @dataclass
@@ -1197,6 +1197,7 @@ async def _ensure_prelabels_schema(conn: AsyncConnection) -> None:
                 generated_proposals INTEGER NOT NULL DEFAULT 0,
                 skipped_unmatched INTEGER NOT NULL DEFAULT 0,
                 error_message VARCHAR NULL,
+                debug_detections_json JSON,
                 created_at DATETIME NULL,
                 updated_at DATETIME NULL
             )
@@ -1207,6 +1208,7 @@ async def _ensure_prelabels_schema(conn: AsyncConnection) -> None:
     await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_prelabel_sessions_task_id ON prelabel_sessions (task_id)"))
     await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_prelabel_sessions_sequence_id ON prelabel_sessions (sequence_id)"))
     await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_prelabel_sessions_status ON prelabel_sessions (status)"))
+    await _add_column_if_missing(conn, "prelabel_sessions", "debug_detections_json", "debug_detections_json JSON")
 
     await conn.execute(
         text(

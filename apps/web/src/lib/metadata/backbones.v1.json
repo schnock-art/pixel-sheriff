@@ -2,6 +2,72 @@
   "backbones": [
     {
       "default_out_strides": [
+        32
+      ],
+      "embedding_dim": 1280,
+      "family": "efficientnet_v2",
+      "name": "efficientnet_v2_l",
+      "taps": [
+        {
+          "channels": 1280,
+          "kind": "feature_map",
+          "name": "backbone.c5",
+          "stride": 32
+        },
+        {
+          "channels": 1280,
+          "kind": "embedding",
+          "name": "backbone.global_pool",
+          "stride": null
+        }
+      ]
+    },
+    {
+      "default_out_strides": [
+        32
+      ],
+      "embedding_dim": 1280,
+      "family": "efficientnet_v2",
+      "name": "efficientnet_v2_m",
+      "taps": [
+        {
+          "channels": 1280,
+          "kind": "feature_map",
+          "name": "backbone.c5",
+          "stride": 32
+        },
+        {
+          "channels": 1280,
+          "kind": "embedding",
+          "name": "backbone.global_pool",
+          "stride": null
+        }
+      ]
+    },
+    {
+      "default_out_strides": [
+        32
+      ],
+      "embedding_dim": 1280,
+      "family": "efficientnet_v2",
+      "name": "efficientnet_v2_s",
+      "taps": [
+        {
+          "channels": 1280,
+          "kind": "feature_map",
+          "name": "backbone.c5",
+          "stride": 32
+        },
+        {
+          "channels": 1280,
+          "kind": "embedding",
+          "name": "backbone.global_pool",
+          "stride": null
+        }
+      ]
+    },
+    {
+      "default_out_strides": [
         8,
         16,
         32

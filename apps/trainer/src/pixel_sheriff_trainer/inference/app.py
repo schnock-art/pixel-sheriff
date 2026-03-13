@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import gc
+import math
 import os
 from pathlib import Path
+import threading
 from typing import Any
 
 import numpy as np
@@ -33,6 +36,7 @@ from .session_cache import CacheBusyError, SessionCache, sha256_file
 
 
 _FLORENCE_CACHE: dict[str, tuple[object, object, str]] = {}
+_FLORENCE_CACHE_LOCK = threading.Lock()
 
 
 def _top_k_predictions(logits: np.ndarray, top_k: int) -> tuple[list[PredictionRow], int]:
@@ -404,24 +408,52 @@ def _parse_segmentation_output(
     return objects
 
 
-def _load_florence_runtime(model_name: str) -> tuple[object, object, str]:
-    normalized_name = str(model_name or "microsoft/Florence-2-base-ft").strip() or "microsoft/Florence-2-base-ft"
-    cached = _FLORENCE_CACHE.get(normalized_name)
-    if cached is not None:
-        return cached
+def _is_meta_tensor_load_error(exc: Exception) -> bool:
+    return "meta tensor" in str(exc).lower()
+
+
+def _create_florence_runtime(*, model_name: str, low_cpu_mem_usage: bool | None) -> tuple[object, object, str]:
     try:
         from transformers import AutoModelForCausalLM, AutoProcessor
     except Exception as exc:
         raise RuntimeError("transformers is not available for Florence-2 inference") from exc
 
     device_selected = "cuda" if torch.cuda.is_available() else "cpu"
-    model = AutoModelForCausalLM.from_pretrained(normalized_name, trust_remote_code=True)
+    # Florence-2 remote code expects eager attention during init on current transformers releases.
+    model_kwargs: dict[str, Any] = {
+        "trust_remote_code": True,
+        "attn_implementation": "eager",
+    }
+    if low_cpu_mem_usage is not None:
+        model_kwargs["low_cpu_mem_usage"] = low_cpu_mem_usage
+    model = AutoModelForCausalLM.from_pretrained(model_name, **model_kwargs)
     model = model.to(device_selected)
     model.eval()
-    processor = AutoProcessor.from_pretrained(normalized_name, trust_remote_code=True)
-    cached = (model, processor, device_selected)
-    _FLORENCE_CACHE[normalized_name] = cached
-    return cached
+    processor = AutoProcessor.from_pretrained(model_name, trust_remote_code=True)
+    return model, processor, device_selected
+
+
+def _load_florence_runtime(model_name: str) -> tuple[object, object, str]:
+    normalized_name = str(model_name or "microsoft/Florence-2-base-ft").strip() or "microsoft/Florence-2-base-ft"
+    cached = _FLORENCE_CACHE.get(normalized_name)
+    if cached is not None:
+        return cached
+
+    with _FLORENCE_CACHE_LOCK:
+        cached = _FLORENCE_CACHE.get(normalized_name)
+        if cached is not None:
+            return cached
+        try:
+            cached = _create_florence_runtime(model_name=normalized_name, low_cpu_mem_usage=None)
+        except Exception as exc:
+            if not _is_meta_tensor_load_error(exc):
+                raise
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            cached = _create_florence_runtime(model_name=normalized_name, low_cpu_mem_usage=False)
+        _FLORENCE_CACHE[normalized_name] = cached
+        return cached
 
 
 def _normalize_florence_prompt_text(prompts: list[str]) -> tuple[str, str]:
@@ -461,17 +493,24 @@ def _parse_florence_generation(
             continue
         if not all(isinstance(value, (int, float)) for value in raw_box):
             continue
+        x1, y1, x2, y2 = (float(raw_box[0]), float(raw_box[1]), float(raw_box[2]), float(raw_box[3]))
         label_text = str(raw_labels[index] if index < len(raw_labels) else "").strip()
         if not label_text:
             continue
         score = float(raw_scores[index]) if index < len(raw_scores) and isinstance(raw_scores[index], (int, float)) else 1.0
-        if score < score_threshold:
+        if (
+            not math.isfinite(score)
+            or not all(math.isfinite(value) for value in (x1, y1, x2, y2))
+            or (max(x1, x2) - min(x1, x2)) <= 0
+            or (max(y1, y2) - min(y1, y2)) <= 0
+            or score < score_threshold
+        ):
             continue
         detections.append(
             FlorenceDetectionBox(
                 label_text=label_text,
                 score=score,
-                bbox=[float(raw_box[0]), float(raw_box[1]), float(raw_box[2]), float(raw_box[3])],
+                bbox=[x1, y1, x2, y2],
             )
         )
         if len(detections) >= max_detections:
@@ -500,6 +539,7 @@ def _run_florence_detection(
             max_new_tokens=256,
             num_beams=3,
             do_sample=False,
+            use_cache=False,
         )
         decoded = processor.batch_decode(generated_ids, skip_special_tokens=False)
         generated_text = decoded[0] if isinstance(decoded, list) and decoded else ""

@@ -6,17 +6,23 @@ from sheriff_api.ml.adapters.base import FamilyAdapter
 
 
 class TorchvisionRetinaNetAdapter(FamilyAdapter):
-    def __init__(self, *, backbone_name: str, num_classes: int, _pretrained: bool) -> None:
+    def __init__(self, *, backbone_name: str, num_classes: int, pretrained: bool) -> None:
         import torchvision.models.detection as tv_detection
+        import torchvision.models as tv_models
 
         if backbone_name != "resnet50":
             raise ValueError("retinanet adapter currently supports only backbone 'resnet50'")
 
-        model = tv_detection.retinanet_resnet50_fpn(
-            weights=None,
-            weights_backbone=None,
-            num_classes=int(num_classes),
-        )
+        try:
+            model = tv_detection.retinanet_resnet50_fpn(
+                weights=None,
+                weights_backbone=tv_models.ResNet50_Weights.DEFAULT if pretrained else None,
+                num_classes=int(num_classes),
+            )
+        except Exception as exc:
+            if pretrained:
+                raise ValueError(f"pretrained_weights_unavailable:retinanet/{backbone_name}:{exc}") from exc
+            raise
         super().__init__(
             task="detection",
             family="retinanet",
@@ -48,5 +54,5 @@ def build_retinanet_adapter(model_config: dict[str, Any]) -> FamilyAdapter:
     return TorchvisionRetinaNetAdapter(
         backbone_name=str(backbone.get("name", "")).strip().lower(),
         num_classes=int(head.get("num_classes", 0)),
-        _pretrained=bool(backbone.get("pretrained")),
+        pretrained=bool(backbone.get("pretrained")),
     )

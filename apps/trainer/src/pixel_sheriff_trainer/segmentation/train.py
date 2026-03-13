@@ -22,10 +22,53 @@ class SegmentationEpochMetrics:
     evaluated: bool
 
 
-def _build_deeplabv3(num_classes: int) -> torch.nn.Module:
+def _backbone_name(model_config: dict[str, Any]) -> str:
+    architecture = model_config.get("architecture")
+    if not isinstance(architecture, dict):
+        return "resnet50"
+    backbone = architecture.get("backbone")
+    if not isinstance(backbone, dict):
+        return "resnet50"
+    name = backbone.get("name")
+    if isinstance(name, str) and name.strip():
+        return name.strip().lower()
+    return "resnet50"
+
+
+def _backbone_pretrained(model_config: dict[str, Any]) -> bool:
+    architecture = model_config.get("architecture")
+    if not isinstance(architecture, dict):
+        return False
+    backbone = architecture.get("backbone")
+    if not isinstance(backbone, dict):
+        return False
+    return bool(backbone.get("pretrained"))
+
+
+def _build_deeplabv3(model_config: dict[str, Any], *, num_classes: int) -> torch.nn.Module:
     import torchvision.models.segmentation as tv_seg
+    import torchvision.models as tv_models
+    backbone_name = _backbone_name(model_config)
+    pretrained = _backbone_pretrained(model_config)
+    builders = {
+        "resnet50": (tv_seg.deeplabv3_resnet50, tv_models.ResNet50_Weights.DEFAULT),
+        "resnet101": (tv_seg.deeplabv3_resnet101, tv_models.ResNet101_Weights.DEFAULT),
+    }
+    selected = builders.get(backbone_name)
+    if selected is None:
+        raise ValueError(f"unsupported_backbone:{backbone_name}")
+    builder, weights_backbone = selected
     # num_classes includes background (0) + foreground classes
-    model = tv_seg.deeplabv3_resnet50(weights=None, num_classes=num_classes + 1)
+    try:
+        model = builder(
+            weights=None,
+            weights_backbone=weights_backbone if pretrained else None,
+            num_classes=num_classes + 1,
+        )
+    except Exception as exc:
+        if pretrained:
+            raise ValueError(f"pretrained_weights_unavailable:deeplabv3/{backbone_name}:{exc}") from exc
+        raise
     return model
 
 
@@ -44,7 +87,7 @@ def run_segmentation_training(
     class_names: list[str] | None = None,
 ) -> tuple[str, SegmentationEvaluation | None]:
     resolved_device = device or torch.device("cpu")
-    model = _build_deeplabv3(num_classes)
+    model = _build_deeplabv3(model_config, num_classes=num_classes)
     model.to(resolved_device)
 
     if resolved_device.type == "cuda":

@@ -83,6 +83,7 @@ interface UseAnnotationWorkflowParams {
   setEditMode: Dispatch<SetStateAction<boolean>>;
   setAnnotations: Dispatch<SetStateAction<Annotation[]>>;
   setMessage: Dispatch<SetStateAction<string | null>>;
+  onSubmitSuccess?: () => Promise<void> | void;
 }
 
 function resolveFallbackImageBasis(currentAsset: UseAnnotationWorkflowParams["currentAsset"]): ImageBasis | null {
@@ -108,6 +109,7 @@ export function useAnnotationWorkflow({
   setEditMode,
   setAnnotations,
   setMessage,
+  onSubmitSuccess,
 }: UseAnnotationWorkflowParams) {
   const [selectedLabelIds, setSelectedLabelIds] = useState<string[]>([]);
   const [currentStatus, setCurrentStatus] = useState<AnnotationStatus>("unlabeled");
@@ -350,6 +352,7 @@ export function useAnnotationWorkflow({
       return next;
     });
     setCurrentStatus(annotation.status);
+    await onSubmitSuccess?.();
     setMessage(upsertInput.isUnlabeledSelection ? "Cleared annotation labels." : "Saved annotation.");
   }
 
@@ -406,6 +409,7 @@ export function useAnnotationWorkflow({
     setPendingAnnotations({});
     setEditMode(false);
     setSelectedObjectId(null);
+    await onSubmitSuccess?.();
     setMessage(`Submitted ${saved.length} staged annotations.`);
   }
 

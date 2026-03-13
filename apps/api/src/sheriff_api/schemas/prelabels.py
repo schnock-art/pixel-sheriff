@@ -10,6 +10,7 @@ PrelabelSourceType = Literal["active_deployment", "florence2"]
 PrelabelSamplingMode = Literal["every_n_frames", "every_n_seconds"]
 PrelabelSessionStatus = Literal["queued", "running", "completed", "failed", "cancelled"]
 PrelabelProposalStatus = Literal["pending", "accepted", "edited", "rejected"]
+PrelabelDebugDetectionStatus = Literal["matched", "unmatched", "discarded"]
 
 
 class PrelabelFrameSampling(BaseModel):
@@ -29,6 +30,17 @@ class PrelabelSessionCreate(PrelabelConfigCreate):
     sequence_id: str
 
 
+class PrelabelDebugDetectionRead(BaseModel):
+    asset_id: str
+    asset_frame_index: int | None = None
+    label_text: str
+    resolved_category_id: str | None = None
+    resolved_category_name: str | None = None
+    confidence: float
+    bbox_xyxy: list[float]
+    status: PrelabelDebugDetectionStatus
+
+
 class PrelabelSessionRead(BaseModel):
     id: str
     project_id: str
@@ -36,6 +48,8 @@ class PrelabelSessionRead(BaseModel):
     sequence_id: str
     source_type: PrelabelSourceType
     source_ref: str | None = None
+    source_label: str | None = None
+    device_preference: str | None = None
     prompts: list[str] = Field(default_factory=list)
     sampling_mode: PrelabelSamplingMode
     sampling_value: float
@@ -49,6 +63,7 @@ class PrelabelSessionRead(BaseModel):
     generated_proposals: int
     skipped_unmatched: int
     error_message: str | None = None
+    debug_detections: list[PrelabelDebugDetectionRead] = Field(default_factory=list)
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
@@ -104,3 +119,12 @@ class PrelabelReviewResponse(BaseModel):
 
 class PrelabelCloseResponse(BaseModel):
     session: PrelabelSessionRead
+
+
+class PrelabelSourceStatusRead(BaseModel):
+    ok: bool = True
+    source_type: PrelabelSourceType
+    source_ref: str | None = None
+    source_label: str
+    device_selected: Literal["cuda", "cpu"] | None = None
+    device_preference: str | None = None

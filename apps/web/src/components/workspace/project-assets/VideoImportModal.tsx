@@ -5,6 +5,8 @@ import { PrelabelSettingsSection } from "./PrelabelSettingsSection";
 
 interface VideoImportModalProps {
   open: boolean;
+  projectId: string | null;
+  taskId: string | null;
   defaultName: string;
   isImporting: boolean;
   errorMessage: string | null;
@@ -16,6 +18,8 @@ interface VideoImportModalProps {
 
 export function VideoImportModal({
   open,
+  projectId,
+  taskId,
   defaultName,
   isImporting,
   errorMessage,
@@ -105,6 +109,8 @@ export function VideoImportModal({
         </label>
         <PrelabelSettingsSection
           enabled={enablePrelabels}
+          projectId={projectId}
+          taskId={taskId}
           value={prelabelConfig}
           defaultPrompts={defaultPrompts}
           onChange={setPrelabelConfig}

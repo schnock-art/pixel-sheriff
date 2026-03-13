@@ -16,6 +16,7 @@ from pixel_sheriff_trainer.pipeline import (
 from pixel_sheriff_trainer.segmentation.dataset import build_segmentation_loaders
 from pixel_sheriff_trainer.segmentation.eval import SegmentationEvaluation, evaluate_segmentation
 from pixel_sheriff_trainer.segmentation.train import SegmentationEpochMetrics, run_segmentation_training
+from pixel_sheriff_trainer.utils.torchvision_cache import configure_torchvision_cache
 from pixel_sheriff_trainer.utils.time import utc_now_iso
 
 
@@ -161,6 +162,8 @@ class SegmentationPipeline(TaskPipeline):
             export_model_to_onnx,
         )
 
+        configure_torchvision_cache(str(storage.root))
+
         checkpoint_kind, checkpoint_path = _resolve_best_checkpoint(
             storage, project_id=project_id, experiment_id=experiment_id, attempt=attempt,
         )
@@ -186,7 +189,7 @@ class SegmentationPipeline(TaskPipeline):
             else checkpoint_payload
         )
 
-        model = _build_deeplabv3(loaders.num_classes)
+        model = _build_deeplabv3(job.model_config, num_classes=loaders.num_classes)
         model.load_state_dict(state_dict, strict=True)
         model.eval()
 

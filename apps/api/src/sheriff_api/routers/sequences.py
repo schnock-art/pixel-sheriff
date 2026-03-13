@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from pathlib import Path
 from fastapi import APIRouter, Depends, File, Form, UploadFile, status
+import logging
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -30,6 +32,20 @@ from sheriff_api.services.storage import LocalStorage
 router = APIRouter(tags=["sequences"])
 settings = get_settings()
 storage = LocalStorage(settings.storage_root)
+logger = logging.getLogger(__name__)
+
+
+def _webcam_frame_storage_name(*, frame_index: int, upload_filename: str | None, mime_type: str | None) -> str:
+    suffix = Path(str(upload_filename or "").strip()).suffix.lower()
+    if suffix not in {".jpg", ".jpeg", ".png", ".webp"}:
+        normalized_mime = str(mime_type or "").strip().lower()
+        if normalized_mime == "image/png":
+            suffix = ".png"
+        elif normalized_mime == "image/webp":
+            suffix = ".webp"
+        else:
+            suffix = ".jpg"
+    return f"frame_{frame_index + 1:06d}{suffix}"
 
 
 async def _require_project(db: AsyncSession, project_id: str) -> Project:
@@ -253,13 +269,18 @@ async def upload_webcam_frame(
     storage.ensure_project_dirs(project_id)
     asset: Asset | None = None
     storage_uri: str | None = None
+    storage_file_name = _webcam_frame_storage_name(
+        frame_index=frame_index,
+        upload_filename=file.filename,
+        mime_type=file.content_type,
+    )
     try:
         asset = await persist_asset_bytes(
             db=db,
             storage=storage,
             project_id=project_id,
             content=content,
-            file_name=file.filename or f"frame_{frame_index + 1:06d}.jpg",
+            file_name=storage_file_name,
             mime_type=file.content_type or "image/jpeg",
             folder=folder,
             original_filename=file.filename or f"frame_{frame_index + 1:06d}.jpg",
@@ -279,7 +300,6 @@ async def upload_webcam_frame(
             sequence.height = asset.height
         if timestamp_seconds is not None:
             sequence.duration_seconds = max(float(sequence.duration_seconds or 0.0), float(timestamp_seconds))
-        await enqueue_live_prelabel_jobs_for_asset(db, sequence=sequence, asset=asset)
         await db.commit()
         await db.refresh(asset)
     except Exception as exc:
@@ -295,5 +315,15 @@ async def upload_webcam_frame(
             message="Failed to upload webcam frame",
             details={"sequence_id": sequence.id, "filename": file.filename},
         ) from exc
+
+    try:
+        await enqueue_live_prelabel_jobs_for_asset(db, sequence=sequence, asset=asset)
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        logger.exception(
+            "Failed to enqueue live webcam prelabel jobs",
+            extra={"project_id": project_id, "sequence_id": sequence.id, "asset_id": asset.id},
+        )
 
     return asset_to_read(asset)

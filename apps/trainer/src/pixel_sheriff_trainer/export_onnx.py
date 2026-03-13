@@ -7,9 +7,10 @@ from typing import TYPE_CHECKING, Any
 
 import torch
 
-from pixel_sheriff_ml.model_factory import build_resnet_classifier
+from pixel_sheriff_ml.model_factory import build_classifier_model
 from pixel_sheriff_trainer.io.checkpoints import read_checkpoints
 from pixel_sheriff_trainer.io.storage import ExperimentStorage
+from pixel_sheriff_trainer.utils.torchvision_cache import configure_torchvision_cache
 from pixel_sheriff_trainer.utils.time import utc_now_iso
 
 if TYPE_CHECKING:
@@ -272,6 +273,7 @@ def export_best_classification_onnx(
     class_names: list[str],
     class_order: list[str] | None = None,
 ) -> OnnxExportResult:
+    configure_torchvision_cache(str(storage.root))
     onnx_dir = storage.run_dir(project_id, experiment_id, attempt) / "onnx"
     onnx_dir.mkdir(parents=True, exist_ok=True)
     model_path = onnx_dir / "model.onnx"
@@ -313,7 +315,7 @@ def export_best_classification_onnx(
         else:
             raise ValueError("checkpoint payload is invalid")
 
-        model = build_resnet_classifier(model_config, num_classes_override=int(num_classes))
+        model = build_classifier_model(model_config, num_classes_override=int(num_classes))
         model.load_state_dict(state_dict, strict=True)
         model.eval()
 
