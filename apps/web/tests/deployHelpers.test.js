@@ -3,26 +3,19 @@ const assert = require("node:assert/strict");
 
 const {
   buildPredictPayload,
+  buildAcceptedPredictionReview,
+  detectionBoxesToPreviewObjects,
   deploymentTaskForExperiment,
   detectionBoxesToGeometryObjects,
   deviceLabelToPreference,
-  suggestionsPanelState,
+  normalizePredictReview,
+  resolveDefaultReviewItemId,
 } = require("../src/lib/workspace/deployHelpers.js");
 
 test("deviceLabelToPreference maps dropdown values to patch payload", () => {
   assert.equal(deviceLabelToPreference("Auto"), "auto");
   assert.equal(deviceLabelToPreference("CUDA"), "cuda");
   assert.equal(deviceLabelToPreference("CPU"), "cpu");
-});
-
-test("suggestionsPanelState transitions correctly", () => {
-  assert.equal(suggestionsPanelState({ hasActiveDeployment: false, isSuggesting: false, predictions: [] }), "cta");
-  assert.equal(suggestionsPanelState({ hasActiveDeployment: true, isSuggesting: true, predictions: [] }), "loading");
-  assert.equal(suggestionsPanelState({ hasActiveDeployment: true, isSuggesting: false, predictions: [] }), "empty");
-  assert.equal(
-    suggestionsPanelState({ hasActiveDeployment: true, isSuggesting: false, predictions: [{ class_id: 1, score: 0.9 }] }),
-    "ready",
-  );
 });
 
 test("deploymentTaskForExperiment maps detection experiments to bbox deployments", () => {
@@ -44,9 +37,85 @@ test("buildPredictPayload sends score threshold only for bbox suggestions", () =
   });
 });
 
-test("detectionBoxesToGeometryObjects converts predict response boxes into staged bbox objects", () => {
+test("detectionBoxesToPreviewObjects converts predict response boxes into preview overlay objects", () => {
   assert.deepEqual(
-    detectionBoxesToGeometryObjects([{ class_id: "cat-1", bbox: [1, 2, 3, 4] }]),
-    [{ id: "suggested-bbox-1", kind: "bbox", category_id: "cat-1", bbox: [1, 2, 3, 4] }],
+    detectionBoxesToPreviewObjects([{ review_item_id: "prediction-bbox-1", class_id: "cat-1", class_name: "cat", score: 0.9, bbox: [1, 2, 3, 4] }]),
+    [{ id: "prediction-bbox-1", category_id: "cat-1", bbox: [1, 2, 3, 4], label_text: "cat", confidence: 0.9 }],
   );
+});
+
+test("detectionBoxesToGeometryObjects adds deployment provenance for accepted bbox predictions", () => {
+  assert.deepEqual(
+    detectionBoxesToGeometryObjects([{ review_item_id: "prediction-bbox-1", class_id: "cat-1", score: 0.9, bbox: [1, 2, 3, 4] }], {
+      sourceModel: "truck-detector",
+      reviewDecision: "accepted",
+    }),
+    [
+      {
+        id: "prediction-bbox-1",
+        kind: "bbox",
+        category_id: "cat-1",
+        bbox: [1, 2, 3, 4],
+        provenance: {
+          origin_kind: "deployment_prediction",
+          source_model: "truck-detector",
+          confidence: 0.9,
+          review_decision: "accepted",
+        },
+      },
+    ],
+  );
+});
+
+test("normalizePredictReview builds bbox review state with preview objects", () => {
+  const review = normalizePredictReview(
+    {
+      asset_id: "asset-1",
+      deployment_id: "dep-1",
+      deployment_name: "detector",
+      device_selected: "cpu",
+      device_preference: "auto",
+      task: "bbox",
+      boxes: [{ class_index: 0, class_id: "cat-1", class_name: "cat", score: 0.85, bbox: [1, 2, 3, 4] }],
+    },
+    { scoreThreshold: 0.6 },
+  );
+
+  assert.equal(review.task, "bbox");
+  assert.equal(review.score_threshold, 0.6);
+  assert.equal(resolveDefaultReviewItemId(review), "prediction-bbox-1");
+  assert.equal(review.preview_objects[0].label_text, "cat");
+});
+
+test("buildAcceptedPredictionReview returns classification metadata for the selected prediction", () => {
+  const accepted = buildAcceptedPredictionReview(
+    {
+      task: "classification",
+      asset_id: "asset-1",
+      deployment_id: "dep-1",
+      deployment_name: "cls-v1",
+      device_selected: "cuda",
+      device_preference: "auto",
+      items: [
+        { review_item_id: "prediction-class-cat", class_id: "cat", class_name: "Cat", score: 0.2 },
+        { review_item_id: "prediction-class-dog", class_id: "dog", class_name: "Dog", score: 0.8 },
+      ],
+    },
+    "prediction-class-dog",
+  );
+  assert.deepEqual(accepted, {
+    task: "classification",
+    categoryId: "dog",
+    predictionReview: {
+      origin_kind: "deployment_prediction",
+      task: "classification",
+      deployment_id: "dep-1",
+      deployment_name: "cls-v1",
+      device_selected: "cuda",
+      device_preference: "auto",
+      selected_class_id: "dog",
+      selected_class_name: "Dog",
+      score: 0.8,
+    },
+  });
 });

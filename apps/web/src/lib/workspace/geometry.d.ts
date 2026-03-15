@@ -11,7 +11,22 @@ export interface Point2D {
   y: number;
 }
 
+export interface ImageBasis {
+  width: number;
+  height: number;
+}
+
+export interface ImageBasisLike {
+  width?: number | null;
+  height?: number | null;
+}
+
 export function clamp(value: number, min: number, max: number): number;
+export function normalizeImageBasis(imageBasis: ImageBasisLike | null | undefined): ImageBasis | null;
+export function resolveImageBasis(
+  preferredImageBasis: ImageBasisLike | null | undefined,
+  fallbackImageBasis: ImageBasisLike | null | undefined,
+): ImageBasis | null;
 export function computeImageViewport(
   containerWidth: number,
   containerHeight: number,

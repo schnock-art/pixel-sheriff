@@ -13,7 +13,13 @@ from fastapi import FastAPI, HTTPException
 from PIL import Image
 import torch
 
-from .preprocess import load_metadata, preprocess_asset
+from .preprocess import (
+    PreprocessContext,
+    load_metadata,
+    preprocess_asset,
+    preprocess_asset_with_context,
+    remap_bbox_xyxy_to_original_xywh,
+)
 from .schemas import (
     DetectionBox,
     FlorenceDetectRequest,
@@ -219,10 +225,13 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=503, detail={"code": "session_load_failed", "message": str(exc)}) from exc
 
         try:
-            tensor = await asyncio.to_thread(preprocess_asset, asset_path, metadata)
+            tensor, preprocess_context = await asyncio.to_thread(preprocess_asset_with_context, asset_path, metadata)
             raw_outputs = await asyncio.to_thread(_run_onnx_detection, session, tensor)
             boxes = _parse_detection_output(
-                raw_outputs, class_names=class_names, score_threshold=payload.score_threshold,
+                raw_outputs,
+                class_names=class_names,
+                score_threshold=payload.score_threshold,
+                preprocess_context=preprocess_context,
             )
             return InferDetectionResponse(device_selected=device_selected, boxes=boxes)
         finally:
@@ -327,7 +336,190 @@ def _run_onnx_detection(session: object, tensor: np.ndarray) -> list[np.ndarray]
     """Run detection model; returns list of output arrays."""
     input_name = session.get_inputs()[0].name
     outputs = session.run(None, {input_name: tensor})
-    return [np.asarray(o, dtype=np.float32) for o in outputs]
+    return [np.asarray(output) for output in outputs]
+
+
+def _is_integral_array(values: np.ndarray) -> bool:
+    if np.issubdtype(values.dtype, np.integer):
+        return True
+    if not np.issubdtype(values.dtype, np.floating):
+        return False
+    if values.size == 0:
+        return True
+    return bool(np.all(np.isfinite(values)) and np.all(np.equal(values, np.round(values))))
+
+
+def _normalize_detection_labels(
+    raw_labels: np.ndarray,
+    *,
+    num_classes: int,
+    prefer_one_based: bool,
+) -> list[int | None]:
+    normalized_raw: list[int | None] = []
+    for raw_label in raw_labels.tolist():
+        if isinstance(raw_label, bool) or not isinstance(raw_label, (int, float)):
+            normalized_raw.append(None)
+            continue
+        label = float(raw_label)
+        if not math.isfinite(label) or not label.is_integer():
+            normalized_raw.append(None)
+            continue
+        normalized_raw.append(int(label))
+
+    if num_classes <= 0:
+        return [value if value is not None and value >= 0 else None for value in normalized_raw]
+
+    matches_zero_based = sum(1 for value in normalized_raw if value is not None and 0 <= value < num_classes)
+    matches_one_based = sum(1 for value in normalized_raw if value is not None and 1 <= value <= num_classes)
+
+    if matches_zero_based == 0 and matches_one_based == 0:
+        return [None for _value in normalized_raw]
+    if matches_zero_based == matches_one_based:
+        label_offset = 1 if prefer_one_based else 0
+    elif matches_one_based > matches_zero_based:
+        label_offset = 1
+    else:
+        label_offset = 0
+
+    normalized: list[int | None] = []
+    for value in normalized_raw:
+        if value is None:
+            normalized.append(None)
+            continue
+        class_index = value - label_offset
+        if class_index < 0 or class_index >= num_classes:
+            normalized.append(None)
+            continue
+        normalized.append(class_index)
+    return normalized
+
+
+def _detection_box_from_xyxy(
+    *,
+    bbox_xyxy: list[float] | tuple[float, float, float, float],
+    class_index: int | None,
+    score: Any,
+    class_names: list[str],
+    score_threshold: float,
+    preprocess_context: PreprocessContext | None,
+) -> DetectionBox | None:
+    if isinstance(score, np.generic):
+        score = score.item()
+    if not isinstance(score, (int, float)):
+        return None
+    score_value = float(score)
+    if not math.isfinite(score_value) or score_value < score_threshold:
+        return None
+
+    if len(bbox_xyxy) != 4:
+        return None
+    try:
+        x_min, y_min, x_max, y_max = [float(value) for value in bbox_xyxy]
+    except (TypeError, ValueError):
+        return None
+    if not all(math.isfinite(value) for value in (x_min, y_min, x_max, y_max)):
+        return None
+
+    if class_index is None:
+        return None
+
+    if preprocess_context is not None:
+        bbox = remap_bbox_xyxy_to_original_xywh([x_min, y_min, x_max, y_max], preprocess_context)
+    else:
+        if x_max <= x_min or y_max <= y_min:
+            return None
+        bbox = [x_min, y_min, x_max - x_min, y_max - y_min]
+    if bbox is None:
+        return None
+
+    class_name = class_names[class_index] if 0 <= class_index < len(class_names) else f"class_{class_index}"
+    return DetectionBox(class_index=class_index, class_name=class_name, score=score_value, bbox=bbox)
+
+
+def _parse_combined_detection_output(
+    raw_outputs: list[np.ndarray],
+    *,
+    class_names: list[str],
+    score_threshold: float,
+    preprocess_context: PreprocessContext | None,
+) -> list[DetectionBox] | None:
+    if not raw_outputs:
+        return None
+    first = np.asarray(raw_outputs[0])
+    if first.ndim != 2 or first.shape[-1] < 6:
+        return None
+
+    class_indexes = _normalize_detection_labels(
+        np.asarray(first[:, 5]),
+        num_classes=len(class_names),
+        prefer_one_based=False,
+    )
+    boxes: list[DetectionBox] = []
+    for row, class_index in zip(first, class_indexes, strict=False):
+        box = _detection_box_from_xyxy(
+            bbox_xyxy=[row[0], row[1], row[2], row[3]],
+            class_index=class_index,
+            score=row[4],
+            class_names=class_names,
+            score_threshold=score_threshold,
+            preprocess_context=preprocess_context,
+        )
+        if box is not None:
+            boxes.append(box)
+    return boxes
+
+
+def _match_separate_detection_outputs(raw_outputs: list[np.ndarray]) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
+    arrays = [np.asarray(output) for output in raw_outputs]
+    boxes = next((array for array in arrays if array.ndim == 2 and array.shape[-1] == 4), None)
+    if boxes is None:
+        return None
+
+    candidates = [array for array in arrays if array.ndim == 1 and array.shape[0] == boxes.shape[0]]
+    if len(candidates) < 2:
+        return None
+
+    labels_index = next((index for index, array in enumerate(candidates) if _is_integral_array(array)), None)
+    if labels_index is None:
+        return None
+    labels = candidates[labels_index]
+    scores = next((array for index, array in enumerate(candidates) if index != labels_index), None)
+    if scores is None:
+        return None
+
+    return boxes, scores.astype(np.float32, copy=False), labels
+
+
+def _parse_separate_detection_output(
+    raw_outputs: list[np.ndarray],
+    *,
+    class_names: list[str],
+    score_threshold: float,
+    preprocess_context: PreprocessContext | None,
+) -> list[DetectionBox] | None:
+    matched = _match_separate_detection_outputs(raw_outputs)
+    if matched is None:
+        return None
+    raw_boxes, raw_scores, raw_labels = matched
+
+    class_indexes = _normalize_detection_labels(
+        np.asarray(raw_labels),
+        num_classes=len(class_names),
+        prefer_one_based=True,
+    )
+    boxes: list[DetectionBox] = []
+    for bbox_row, score, class_index in zip(raw_boxes, raw_scores, class_indexes, strict=False):
+        box = _detection_box_from_xyxy(
+            bbox_xyxy=[bbox_row[0], bbox_row[1], bbox_row[2], bbox_row[3]],
+            class_index=class_index,
+            score=score,
+            class_names=class_names,
+            score_threshold=score_threshold,
+            preprocess_context=preprocess_context,
+        )
+        if box is not None:
+            boxes.append(box)
+    return boxes
 
 
 def _parse_detection_output(
@@ -335,6 +527,7 @@ def _parse_detection_output(
     *,
     class_names: list[str],
     score_threshold: float,
+    preprocess_context: PreprocessContext | None = None,
 ) -> list[DetectionBox]:
     """Parse ONNX detection output into DetectionBox list.
 
@@ -344,21 +537,22 @@ def _parse_detection_output(
     """
     if not raw_outputs:
         return []
-    boxes: list[DetectionBox] = []
-    first = raw_outputs[0]
-    if first.ndim == 2 and first.shape[-1] >= 6:
-        for row in first:
-            x_min, y_min, x_max, y_max, score, cls = (
-                float(row[0]), float(row[1]), float(row[2]), float(row[3]), float(row[4]), int(row[5])
-            )
-            if score < score_threshold:
-                continue
-            name = class_names[cls] if 0 <= cls < len(class_names) else f"class_{cls}"
-            boxes.append(DetectionBox(
-                class_index=cls, class_name=name, score=score,
-                bbox=[x_min, y_min, x_max - x_min, y_max - y_min],
-            ))
-    return sorted(boxes, key=lambda b: -b.score)
+    boxes = _parse_combined_detection_output(
+        raw_outputs,
+        class_names=class_names,
+        score_threshold=score_threshold,
+        preprocess_context=preprocess_context,
+    )
+    if boxes is None:
+        boxes = _parse_separate_detection_output(
+            raw_outputs,
+            class_names=class_names,
+            score_threshold=score_threshold,
+            preprocess_context=preprocess_context,
+        )
+    if boxes is None:
+        return []
+    return sorted(boxes, key=lambda box: (-box.score, box.class_index))
 
 
 def _parse_segmentation_output(

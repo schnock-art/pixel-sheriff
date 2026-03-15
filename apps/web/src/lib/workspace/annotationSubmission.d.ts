@@ -1,5 +1,5 @@
 import type { AnnotationStatus } from "../api";
-import type { GeometryObject, ImageBasis } from "./annotationState";
+import type { GeometryObject, ImageBasis, PredictionReviewMetadata } from "./annotationState";
 
 export interface ActiveLabelRow {
   id: string;
@@ -19,6 +19,7 @@ export function buildClassificationPayload(
   activeLabelRows: ActiveLabelRow[],
   objects?: GeometryObject[],
   imageBasis?: ImageBasis | null,
+  predictionReview?: PredictionReviewMetadata | null,
 ):
   | {
       isUnlabeledSelection: boolean;
@@ -34,4 +35,5 @@ export function buildAnnotationUpsertInput(params: {
   activeLabelRows: ActiveLabelRow[];
   objects?: GeometryObject[];
   imageBasis?: ImageBasis | null;
+  predictionReview?: PredictionReviewMetadata | null;
 }): AnnotationUpsertInput | null;

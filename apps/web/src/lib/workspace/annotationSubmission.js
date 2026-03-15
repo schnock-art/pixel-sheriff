@@ -1,4 +1,10 @@
-const { deriveNextAnnotationStatus, normalizeAnnotationObjects, normalizeImageBasis, normalizeLabelIds } = require("./annotationState.js");
+const {
+  deriveNextAnnotationStatus,
+  normalizeAnnotationObjects,
+  normalizeImageBasis,
+  normalizeLabelIds,
+  normalizePredictionReview,
+} = require("./annotationState.js");
 
 function resolveActiveSelection(labelIds, activeLabelRows) {
   const activeLabelIds = new Set(activeLabelRows.map((label) => label.id));
@@ -17,10 +23,11 @@ function resolveLabelIdsForPayload(selectedLabelIds, activeLabelRows, normalized
   return [];
 }
 
-function buildClassificationPayload(assetId, selectedLabelIds, activeLabelRows, objects = [], imageBasis = null) {
+function buildClassificationPayload(assetId, selectedLabelIds, activeLabelRows, objects = [], imageBasis = null, predictionReview = null) {
   const normalizedObjects = normalizeAnnotationObjects(objects);
   const resolvedLabelIds = resolveLabelIdsForPayload(selectedLabelIds, activeLabelRows, normalizedObjects);
   const normalizedImageBasis = normalizeImageBasis(imageBasis);
+  const normalizedPredictionReview = normalizePredictionReview(predictionReview);
   const primaryCategoryId = resolvedLabelIds[0] ?? null;
   const isUnlabeledSelection = resolvedLabelIds.length === 0 && normalizedObjects.length === 0;
   if (isUnlabeledSelection) {
@@ -39,6 +46,7 @@ function buildClassificationPayload(assetId, selectedLabelIds, activeLabelRows, 
         },
         objects: normalizedObjects,
         image_basis: normalizedImageBasis,
+        ...(normalizedPredictionReview ? { prediction_review: normalizedPredictionReview } : {}),
         coco: { image_id: assetId, category_id: null },
         source: "web-ui",
       },
@@ -62,6 +70,7 @@ function buildClassificationPayload(assetId, selectedLabelIds, activeLabelRows, 
       },
       objects: normalizedObjects,
       image_basis: normalizedImageBasis,
+      ...(normalizedPredictionReview ? { prediction_review: normalizedPredictionReview } : {}),
       ...(selectedLabel ? { category_name: selectedLabel.name } : {}),
       coco: { image_id: assetId, category_id: primaryCategoryId },
       source: "web-ui",
@@ -69,8 +78,16 @@ function buildClassificationPayload(assetId, selectedLabelIds, activeLabelRows, 
   };
 }
 
-function buildAnnotationUpsertInput({ assetId, currentStatus, selectedLabelIds, activeLabelRows, objects = [], imageBasis = null }) {
-  const payload = buildClassificationPayload(assetId, selectedLabelIds, activeLabelRows, objects, imageBasis);
+function buildAnnotationUpsertInput({
+  assetId,
+  currentStatus,
+  selectedLabelIds,
+  activeLabelRows,
+  objects = [],
+  imageBasis = null,
+  predictionReview = null,
+}) {
+  const payload = buildClassificationPayload(assetId, selectedLabelIds, activeLabelRows, objects, imageBasis, predictionReview);
   if (!payload) return null;
   return {
     status: deriveNextAnnotationStatus(currentStatus, payload.selectedLabelIds, payload.objects.length),

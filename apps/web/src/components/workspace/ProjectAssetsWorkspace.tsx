@@ -290,6 +290,7 @@ export default function ProjectAssetsWorkspace() {
     setCurrentImageBasis,
     handleToggleLabel,
     clearSelectedLabels,
+    applyPredictedLabelSelection,
     assignSelectedGeometryCategory,
     upsertGeometryObject,
     replaceGeometryObjects,
@@ -302,7 +303,8 @@ export default function ProjectAssetsWorkspace() {
     selectedTaskId: selectedTask?.id ?? null,
     currentAssetId: treeState.currentAsset?.id ?? null,
     selectedTaskKind: selectedTask?.kind ?? null,
-    onApplyDetectionSuggestions: replaceGeometryObjects,
+    onAcceptDetectionReview: replaceGeometryObjects,
+    onAcceptClassificationReview: applyPredictedLabelSelection,
     setMessage,
   });
   const geometryObjectRows = useMemo(
@@ -499,6 +501,7 @@ export default function ProjectAssetsWorkspace() {
     onJumpNext: isSequenceMode ? () => sequenceNavigation.jumpBy(10) : undefined,
     onTogglePlayback: isSequenceMode ? sequenceNavigation.togglePlayback : undefined,
     onLabelHotkey: (labelId, selectedHotkeyObjectId) => {
+      if (suggestionState.hasPendingReview) return;
       if (annotationMode === "labels") {
         handleToggleLabel(labelId);
       } else {
@@ -520,6 +523,7 @@ export default function ProjectAssetsWorkspace() {
     annotationMode === "labels" ? selectedLabelIds : defaultGeometryCategoryId ? [defaultGeometryCategoryId] : [];
 
   function handleToggleLabelForCurrentMode(labelId: string) {
+    if (suggestionState.hasPendingReview) return;
     if (annotationMode === "labels") {
       handleToggleLabel(labelId);
       return;
@@ -818,11 +822,6 @@ export default function ProjectAssetsWorkspace() {
     });
   }
 
-  function handleApplySuggestedLabel(categoryId: string) {
-    clearSelectedLabels();
-    handleToggleLabelForCurrentMode(categoryId);
-  }
-
   const headerTitle = treeState.selectedTreeFolderPath ? `${selectedProjectName} / ${treeState.selectedTreeFolderPath}` : selectedProjectName;
 
   return (
@@ -901,8 +900,11 @@ export default function ProjectAssetsWorkspace() {
               canvasTool={canvasTool}
               resetToken={viewerResetToken}
               geometryObjects={currentObjects}
+              pendingPredictionObjects={suggestionState.pendingPreviewObjects}
+              selectedPendingPredictionId={suggestionState.selectedReviewItemId}
               pendingPrelabelObjects={pendingPrelabelObjects}
               selectedPendingPrelabelId={prelabelState.selectedProposalId}
+              annotationEditingDisabled={suggestionState.hasPendingReview}
               selectedObjectId={selectedObjectId}
               hoveredObjectId={hoveredGeometryObjectId}
               defaultCategoryId={defaultGeometryCategoryId}
@@ -997,15 +999,19 @@ export default function ProjectAssetsWorkspace() {
               selectedDeploymentName={suggestionState.selectedDeployment?.name ?? null}
               selectedDeploymentDevicePreference={suggestionState.selectedDeployment?.device_preference ?? null}
               lastInferenceDeviceSelected={suggestionState.lastInferenceDeviceSelected}
-              suggestionPredictions={suggestionState.suggestionPredictions}
-              suggestionBoxes={suggestionState.suggestionBoxes}
+              pendingReview={suggestionState.pendingReview}
+              selectedReviewItemId={suggestionState.selectedReviewItemId}
               suggestionScoreThreshold={suggestionState.suggestionScoreThreshold}
               onChangeSuggestionScoreThreshold={suggestionState.setSuggestionScoreThreshold}
               isSuggesting={suggestionState.isSuggesting}
+              hasPendingReview={suggestionState.hasPendingReview}
               hasCompatibleDeployment={suggestionState.availableDeployments.length > 0}
               onChangeSelectedDeploymentId={suggestionState.setSelectedDeploymentId}
               onSuggest={suggestionState.handleSuggest}
-              onApplySuggestedLabel={handleApplySuggestedLabel}
+              onSelectReviewItem={suggestionState.setSelectedReviewItemId}
+              onAcceptReview={suggestionState.acceptReview}
+              onRejectReview={suggestionState.rejectReview}
+              annotationEditingDisabled={suggestionState.hasPendingReview}
             />
             <AiPrelabelsPanel
               session={prelabelState.session}

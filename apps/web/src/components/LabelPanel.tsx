@@ -26,6 +26,18 @@ interface GeometryObjectListItem {
   categoryName: string;
 }
 
+interface ClassificationSuggestionReview {
+  task: "classification";
+  items: Array<{ review_item_id: string; class_id: string; class_name: string; score: number }>;
+}
+
+interface BBoxSuggestionReview {
+  task: "bbox";
+  items: Array<{ review_item_id: string; class_id: string; class_name: string; score: number; bbox: number[] }>;
+}
+
+type PendingSuggestionReview = ClassificationSuggestionReview | BBoxSuggestionReview;
+
 interface LabelPanelProps {
   labels: LabelItem[];
   allLabels: LabelItem[];
@@ -62,15 +74,19 @@ interface LabelPanelProps {
   selectedDeploymentName?: string | null;
   selectedDeploymentDevicePreference?: string | null;
   lastInferenceDeviceSelected?: string | null;
-  suggestionPredictions?: Array<{ class_id: string; class_name: string; score: number }>;
-  suggestionBoxes?: Array<{ class_id: string; class_name: string; score: number; bbox: number[] }>;
+  pendingReview?: PendingSuggestionReview | null;
+  selectedReviewItemId?: string | null;
   suggestionScoreThreshold?: number;
   onChangeSuggestionScoreThreshold?: (value: number) => void;
   isSuggesting?: boolean;
+  hasPendingReview?: boolean;
   hasCompatibleDeployment?: boolean;
   onChangeSelectedDeploymentId?: (deploymentId: string) => void;
   onSuggest?: () => void;
-  onApplySuggestedLabel?: (categoryId: string) => void;
+  onSelectReviewItem?: (reviewItemId: string) => void;
+  onAcceptReview?: () => void;
+  onRejectReview?: () => void;
+  annotationEditingDisabled?: boolean;
 }
 
 export function LabelPanel({
@@ -109,15 +125,19 @@ export function LabelPanel({
   selectedDeploymentName = null,
   selectedDeploymentDevicePreference = null,
   lastInferenceDeviceSelected = null,
-  suggestionPredictions = [],
-  suggestionBoxes = [],
+  pendingReview = null,
+  selectedReviewItemId = null,
   suggestionScoreThreshold = 0.3,
   onChangeSuggestionScoreThreshold,
   isSuggesting = false,
+  hasPendingReview = false,
   hasCompatibleDeployment = false,
   onChangeSelectedDeploymentId,
   onSuggest,
-  onApplySuggestedLabel,
+  onSelectReviewItem,
+  onAcceptReview,
+  onRejectReview,
+  annotationEditingDisabled = false,
 }: LabelPanelProps) {
   const [manageMode, setManageMode] = useState(false);
   const [draftLabels, setDraftLabels] = useState<ManageLabelItem[]>([]);
@@ -223,7 +243,7 @@ export function LabelPanel({
           type="button"
           className={multiLabelEnabled ? "ghost-button active-toggle" : "ghost-button"}
           onClick={onToggleMultiLabel}
-          disabled={!manageMode || taskModeLocked || labelsLocked}
+          disabled={!manageMode || taskModeLocked || labelsLocked || annotationEditingDisabled}
         >
           Task Multi-label: {multiLabelEnabled ? "On" : "Off"}
         </button>
@@ -232,7 +252,7 @@ export function LabelPanel({
             type="button"
             className="ghost-button danger-button"
             onClick={onDeleteSelectedObject}
-            disabled={!selectedObjectId}
+            disabled={!selectedObjectId || annotationEditingDisabled}
             title={selectedObjectId ?? undefined}
           >
             Delete Selected
@@ -259,7 +279,7 @@ export function LabelPanel({
           type="button"
           className="ghost-button danger-button subtle-danger"
           onClick={onClearLabels}
-          disabled={selectedLabelIds.length === 0}
+          disabled={selectedLabelIds.length === 0 || annotationEditingDisabled}
         >
           Clear Selected Labels
         </button>
@@ -395,10 +415,11 @@ export function LabelPanel({
               return (
                 <li key={label.id}>
                   <button
-                    type="button"
-                    onClick={() => onToggleLabel(label.id)}
-                    className={isActive ? "label-item active" : "label-item"}
-                    style={
+                  type="button"
+                  onClick={() => onToggleLabel(label.id)}
+                  className={isActive ? "label-item active" : "label-item"}
+                  disabled={annotationEditingDisabled}
+                  style={
                       {
                         "--class-chip-bg": classColor.chipBackground,
                         "--class-chip-border": classColor.chipBorder,
@@ -459,38 +480,75 @@ export function LabelPanel({
                 <button type="button" className="ghost-button" onClick={onSuggest} disabled={isSuggesting || !onSuggest}>
                   {isSuggesting ? "Suggesting..." : "Suggest"}
                 </button>
-                {annotationMode === "labels" ? (
+                {pendingReview ? (
                   <button
                     type="button"
                     className="primary-button"
-                    onClick={() => onApplySuggestedLabel?.(suggestionPredictions[0].class_id)}
-                    disabled={suggestionPredictions.length === 0 || !onApplySuggestedLabel}
+                    onClick={onAcceptReview}
+                    disabled={pendingReview.items.length === 0 || !onAcceptReview}
+                    data-testid="prediction-review-accept"
                   >
-                    Apply top-1
+                    {pendingReview.task === "bbox" ? "Accept prediction" : "Accept selected"}
+                  </button>
+                ) : null}
+                {pendingReview ? (
+                  <button
+                    type="button"
+                    className="ghost-button"
+                    onClick={onRejectReview}
+                    disabled={!onRejectReview}
+                    data-testid="prediction-review-reject"
+                  >
+                    Reject prediction
                   </button>
                 ) : null}
               </div>
-              {annotationMode === "labels" && suggestionPredictions.length > 0 ? (
+              {hasPendingReview ? (
+                <p className="labels-empty">Resolve this prediction before editing labels or boxes.</p>
+              ) : null}
+              {annotationMode === "labels" && pendingReview?.task === "classification" && pendingReview.items.length > 0 ? (
                 <ol className="label-list">
-                  {suggestionPredictions.map((row) => (
-                    <li key={`${row.class_id}-${row.class_name}`}>
-                      <button type="button" className="label-item" onClick={() => onApplySuggestedLabel?.(row.class_id)}>
-                        <span>{row.class_name}</span>
-                        <span className="label-check">{row.score.toFixed(3)}</span>
-                      </button>
-                    </li>
-                  ))}
+                  {pendingReview.items.map((row) => {
+                    const isSelected = selectedReviewItemId === row.review_item_id;
+                    return (
+                      <li key={row.review_item_id}>
+                        <button
+                          type="button"
+                          className={isSelected ? "label-item active" : "label-item"}
+                          onClick={() => onSelectReviewItem?.(row.review_item_id)}
+                          disabled={!onSelectReviewItem}
+                          data-testid="prediction-review-item"
+                          data-review-item-id={row.review_item_id}
+                          data-selected={isSelected ? "true" : "false"}
+                        >
+                          <span>{row.class_name}</span>
+                          <span className="label-check">{row.score.toFixed(3)}</span>
+                        </button>
+                      </li>
+                    );
+                  })}
                 </ol>
-              ) : annotationMode === "bbox" && suggestionBoxes.length > 0 ? (
+              ) : annotationMode === "bbox" && pendingReview?.task === "bbox" && pendingReview.items.length > 0 ? (
                 <ol className="label-list">
-                  {suggestionBoxes.map((row, index) => (
-                    <li key={`${row.class_id}-${index}`}>
-                      <button type="button" className="label-item">
-                        <span>{row.class_name}</span>
-                        <span className="label-check">{row.score.toFixed(3)}</span>
-                      </button>
-                    </li>
-                  ))}
+                  {pendingReview.items.map((row) => {
+                    const isSelected = selectedReviewItemId === row.review_item_id;
+                    return (
+                      <li key={row.review_item_id}>
+                        <button
+                          type="button"
+                          className={isSelected ? "label-item active" : "label-item"}
+                          onClick={() => onSelectReviewItem?.(row.review_item_id)}
+                          disabled={!onSelectReviewItem}
+                          data-testid="prediction-review-item"
+                          data-review-item-id={row.review_item_id}
+                          data-selected={isSelected ? "true" : "false"}
+                        >
+                          <span>{row.class_name}</span>
+                          <span className="label-check">{row.score.toFixed(3)}</span>
+                        </button>
+                      </li>
+                    );
+                  })}
                 </ol>
               ) : (
                 <p className="labels-empty">No suggestions yet.</p>
@@ -503,14 +561,14 @@ export function LabelPanel({
       ) : null}
 
       <div className="label-actions">
-        <button type="button" className="ghost-button" onClick={onToggleEditMode}>
+        <button type="button" className="ghost-button" onClick={onToggleEditMode} disabled={annotationEditingDisabled}>
           {editMode ? "Exit Edit" : "Edit"}
         </button>
         <button
           type="button"
           className="primary-button"
           onClick={onSubmit}
-          disabled={isSaving || !canSubmit}
+          disabled={isSaving || !canSubmit || annotationEditingDisabled}
           data-testid="annotation-submit-button"
         >
           {isSaving ? "Saving..." : `Submit${pendingCount > 0 ? ` (${pendingCount})` : ""}`}

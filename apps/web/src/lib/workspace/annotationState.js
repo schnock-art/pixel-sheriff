@@ -57,6 +57,35 @@ function normalizeImageBasis(imageBasis) {
   return { width: Math.round(width), height: Math.round(height) };
 }
 
+function normalizePredictionReview(predictionReview) {
+  if (!predictionReview || typeof predictionReview !== "object") return null;
+  const originKind = typeof predictionReview.origin_kind === "string" ? predictionReview.origin_kind.trim() : "";
+  if (!originKind) return null;
+
+  const normalized = { origin_kind: originKind };
+  for (const fieldName of [
+    "task",
+    "deployment_id",
+    "deployment_name",
+    "device_selected",
+    "device_preference",
+    "selected_class_id",
+    "selected_class_name",
+  ]) {
+    const value = predictionReview[fieldName];
+    if (typeof value === "string" && value.trim() !== "") {
+      normalized[fieldName] = value.trim();
+    }
+  }
+  for (const fieldName of ["score", "score_threshold"]) {
+    const value = predictionReview[fieldName];
+    if (typeof value === "number" && Number.isFinite(value)) {
+      normalized[fieldName] = value;
+    }
+  }
+  return normalized;
+}
+
 function normalizeSegmentation(rawSegmentation) {
   if (!Array.isArray(rawSegmentation)) return [];
   const segments = [];
@@ -151,6 +180,11 @@ function readAnnotationImageBasis(payload) {
   return normalizeImageBasis(payload.image_basis);
 }
 
+function readAnnotationPredictionReview(payload) {
+  if (!payload || typeof payload !== "object") return null;
+  return normalizePredictionReview(payload.prediction_review);
+}
+
 function deriveNextAnnotationStatus(currentStatus, labelIds, objectCount = 0) {
   if (labelIds.length === 0 && objectCount === 0) return "unlabeled";
   return currentStatus === "unlabeled" ? "labeled" : currentStatus;
@@ -221,9 +255,17 @@ function areImageBasisEqual(leftImageBasis, rightImageBasis) {
   return left.width === right.width && left.height === right.height;
 }
 
+function arePredictionReviewsEqual(leftReview, rightReview) {
+  const left = normalizePredictionReview(leftReview);
+  const right = normalizePredictionReview(rightReview);
+  if (!left && !right) return true;
+  if (!left || !right) return false;
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
 function getCommittedSelectionState(annotation) {
   if (!annotation) {
-    return { labelIds: [], status: "unlabeled", objects: [], imageBasis: null };
+    return { labelIds: [], status: "unlabeled", objects: [], imageBasis: null, predictionReview: null };
   }
 
   return {
@@ -231,6 +273,7 @@ function getCommittedSelectionState(annotation) {
     status: annotation.status,
     objects: readAnnotationObjects(annotation.payload_json),
     imageBasis: readAnnotationImageBasis(annotation.payload_json),
+    predictionReview: readAnnotationPredictionReview(annotation.payload_json),
   };
 }
 
@@ -240,19 +283,25 @@ function resolvePendingAnnotation(draftState, committedState) {
     status: draftState.status,
     objects: normalizeAnnotationObjects(draftState.objects),
     imageBasis: normalizeImageBasis(draftState.imageBasis),
+    predictionReview: normalizePredictionReview(draftState.predictionReview),
   };
   const normalizedCommittedState = {
     labelIds: normalizeLabelIds(committedState.labelIds),
     status: committedState.status,
     objects: normalizeAnnotationObjects(committedState.objects),
     imageBasis: normalizeImageBasis(committedState.imageBasis),
+    predictionReview: normalizePredictionReview(committedState.predictionReview),
   };
 
   const selectionEqual = areSelectionStatesEqual(normalizedDraftState, normalizedCommittedState);
   const geometryEqual = areGeometryStatesEqual(normalizedDraftState.objects, normalizedCommittedState.objects);
+  const predictionReviewEqual = arePredictionReviewsEqual(
+    normalizedDraftState.predictionReview,
+    normalizedCommittedState.predictionReview,
+  );
   // imageBasis is auxiliary metadata that updates automatically when the image loads.
   // It must not drive the dirty/staged state on its own — only label/object changes matter.
-  if (selectionEqual && geometryEqual) {
+  if (selectionEqual && geometryEqual && predictionReviewEqual) {
     return null;
   }
 
@@ -271,12 +320,15 @@ module.exports = {
   normalizeLabelIds,
   normalizeAnnotationObjects,
   normalizeImageBasis,
+  normalizePredictionReview,
   readAnnotationLabelIds,
   readAnnotationObjects,
   readAnnotationImageBasis,
+  readAnnotationPredictionReview,
   deriveNextAnnotationStatus,
   areSelectionStatesEqual,
   areGeometryStatesEqual,
+  arePredictionReviewsEqual,
   getCommittedSelectionState,
   resolvePendingAnnotation,
   canSubmitWithStates,

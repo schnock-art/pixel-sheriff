@@ -1,7 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 
-import { ApiError, listDeployments, predict, type PredictDetectionBox, type TaskKind } from "../api";
-import { buildPredictPayload, detectionBoxesToGeometryObjects } from "../workspace/deployHelpers.js";
+import { ApiError, listDeployments, predict, type TaskKind } from "../api";
+import {
+  buildAcceptedPredictionReview,
+  buildPredictPayload,
+  normalizePredictReview,
+  resolveDefaultReviewItemId,
+} from "../workspace/deployHelpers.js";
+import type { GeometryBBoxObject, PredictionReviewMetadata } from "./useAnnotationWorkflow";
 
 type DeploymentSummary = {
   deployment_id: string;
@@ -12,32 +18,81 @@ type DeploymentSummary = {
   task: TaskKind;
 };
 
+export interface ClassificationSuggestionReviewItem {
+  review_item_id: string;
+  class_index: number;
+  class_id: string;
+  class_name: string;
+  score: number;
+}
+
+export interface BBoxSuggestionReviewItem {
+  review_item_id: string;
+  class_index: number;
+  class_id: string;
+  class_name: string;
+  score: number;
+  bbox: number[];
+}
+
+export interface SuggestionPreviewObject {
+  id: string;
+  category_id: string;
+  bbox: number[];
+  label_text: string;
+  confidence: number;
+}
+
+export interface PendingClassificationSuggestionReview {
+  task: "classification";
+  asset_id: string;
+  deployment_id: string;
+  deployment_name: string | null;
+  device_selected: string | null;
+  device_preference: string | null;
+  items: ClassificationSuggestionReviewItem[];
+}
+
+export interface PendingBBoxSuggestionReview {
+  task: "bbox";
+  asset_id: string;
+  deployment_id: string;
+  deployment_name: string | null;
+  device_selected: string | null;
+  device_preference: string | null;
+  score_threshold: number | null;
+  items: BBoxSuggestionReviewItem[];
+  preview_objects: SuggestionPreviewObject[];
+}
+
+export type PendingSuggestionReview = PendingClassificationSuggestionReview | PendingBBoxSuggestionReview;
+
 export function useWorkspaceSuggestions({
   selectedProjectId,
   selectedTaskId,
   currentAssetId,
   selectedTaskKind,
-  onApplyDetectionSuggestions,
+  onAcceptDetectionReview,
+  onAcceptClassificationReview,
   setMessage,
 }: {
   selectedProjectId: string | null;
   selectedTaskId: string | null;
   currentAssetId: string | null;
   selectedTaskKind: TaskKind | null;
-  onApplyDetectionSuggestions: (objects: Array<{ id: string; kind: "bbox"; category_id: string; bbox: number[] }>) => void;
+  onAcceptDetectionReview: (objects: GeometryBBoxObject[]) => void;
+  onAcceptClassificationReview: (categoryId: string, predictionReview: PredictionReviewMetadata) => void;
   setMessage: (message: string | null) => void;
 }) {
   const [deploymentsState, setDeploymentsState] = useState<{
     active_deployment_id: string | null;
     items: DeploymentSummary[];
   }>({ active_deployment_id: null, items: [] });
-  const [suggestionPredictions, setSuggestionPredictions] = useState<
-    Array<{ class_id: string; class_name: string; score: number }>
-  >([]);
-  const [suggestionBoxes, setSuggestionBoxes] = useState<PredictDetectionBox[]>([]);
   const [suggestionScoreThreshold, setSuggestionScoreThreshold] = useState(0.3);
   const [selectedDeploymentId, setSelectedDeploymentId] = useState<string | null>(null);
   const [lastInferenceDeviceSelected, setLastInferenceDeviceSelected] = useState<string | null>(null);
+  const [pendingReview, setPendingReview] = useState<PendingSuggestionReview | null>(null);
+  const [selectedReviewItemId, setSelectedReviewItemId] = useState<string | null>(null);
   const [isSuggesting, setIsSuggesting] = useState(false);
 
   const activeDeployment = useMemo(
@@ -58,6 +113,11 @@ export function useWorkspaceSuggestions({
     () => availableDeployments.find((item) => item.deployment_id === selectedDeploymentId) ?? null,
     [availableDeployments, selectedDeploymentId],
   );
+  const pendingPreviewObjects = useMemo(
+    () => (pendingReview?.task === "bbox" ? pendingReview.preview_objects : []),
+    [pendingReview],
+  );
+  const hasPendingReview = pendingReview !== null;
 
   useEffect(() => {
     let mounted = true;
@@ -82,8 +142,8 @@ export function useWorkspaceSuggestions({
   }, [selectedProjectId]);
 
   useEffect(() => {
-    setSuggestionPredictions([]);
-    setSuggestionBoxes([]);
+    setPendingReview(null);
+    setSelectedReviewItemId(null);
     setLastInferenceDeviceSelected(null);
   }, [currentAssetId, selectedProjectId, selectedTaskId, selectedTaskKind]);
 
@@ -95,6 +155,24 @@ export function useWorkspaceSuggestions({
     if (currentStillAvailable) return;
     setSelectedDeploymentId(activeCompatible?.deployment_id ?? availableDeployments[0]?.deployment_id ?? null);
   }, [availableDeployments, deploymentsState.active_deployment_id, selectedDeploymentId]);
+
+  useEffect(() => {
+    if (!pendingReview) return;
+    if (!selectedDeploymentId || pendingReview.deployment_id !== selectedDeploymentId) {
+      setPendingReview(null);
+      setSelectedReviewItemId(null);
+    }
+  }, [pendingReview, selectedDeploymentId]);
+
+  useEffect(() => {
+    if (!pendingReview) {
+      if (selectedReviewItemId !== null) setSelectedReviewItemId(null);
+      return;
+    }
+    const validSelection = pendingReview.items.some((item) => item.review_item_id === selectedReviewItemId);
+    if (validSelection) return;
+    setSelectedReviewItemId(resolveDefaultReviewItemId(pendingReview));
+  }, [pendingReview, selectedReviewItemId]);
 
   async function handleSuggest() {
     if (!selectedProjectId || !currentAssetId) {
@@ -111,6 +189,9 @@ export function useWorkspaceSuggestions({
     }
     try {
       setIsSuggesting(true);
+      setMessage(null);
+      setPendingReview(null);
+      setSelectedReviewItemId(null);
       const response = await predict(
         selectedProjectId,
         buildPredictPayload({
@@ -120,24 +201,13 @@ export function useWorkspaceSuggestions({
           scoreThreshold: suggestionScoreThreshold,
         }),
       );
-      if (response.task === "bbox") {
-        const boxes = response.boxes ?? [];
-        setSuggestionPredictions([]);
-        setSuggestionBoxes(boxes);
-        onApplyDetectionSuggestions(
-          detectionBoxesToGeometryObjects(boxes) as Array<{ id: string; kind: "bbox"; category_id: string; bbox: number[] }>,
-        );
-      } else {
-        setSuggestionBoxes([]);
-        setSuggestionPredictions(
-          (response.predictions ?? []).map((row) => ({
-            class_id: row.class_id,
-            class_name: row.class_name,
-            score: row.score,
-          })),
-        );
-      }
+      const nextReview = normalizePredictReview(response, { scoreThreshold: suggestionScoreThreshold }) as PendingSuggestionReview | null;
+      setPendingReview(nextReview);
+      setSelectedReviewItemId(resolveDefaultReviewItemId(nextReview));
       setLastInferenceDeviceSelected(response.device_selected ?? null);
+      if (!nextReview || nextReview.items.length === 0) {
+        setMessage("No predictions matched the current request.");
+      }
     } catch (error) {
       if (error instanceof ApiError && error.responseBody) {
         setMessage(`Suggest failed: ${error.responseBody}`);
@@ -149,17 +219,52 @@ export function useWorkspaceSuggestions({
     }
   }
 
+  function rejectReview() {
+    if (!pendingReview) return;
+    setPendingReview(null);
+    setSelectedReviewItemId(null);
+    setMessage("Prediction rejected.");
+  }
+
+  function acceptReview() {
+    if (!pendingReview) return;
+    const accepted = buildAcceptedPredictionReview(pendingReview, selectedReviewItemId) as
+      | { task: "bbox"; objects: GeometryBBoxObject[] }
+      | { task: "classification"; categoryId: string; predictionReview: PredictionReviewMetadata }
+      | null;
+    if (!accepted) {
+      setMessage("No prediction is ready to accept.");
+      return;
+    }
+
+    if (accepted.task === "bbox") {
+      onAcceptDetectionReview(accepted.objects);
+      setMessage(`Accepted ${accepted.objects.length} predicted box${accepted.objects.length === 1 ? "" : "es"} into the draft.`);
+    } else {
+      onAcceptClassificationReview(accepted.categoryId, accepted.predictionReview);
+      setMessage("Accepted predicted class into the draft.");
+    }
+
+    setPendingReview(null);
+    setSelectedReviewItemId(null);
+  }
+
   return {
     availableDeployments,
     selectedDeployment,
     selectedDeploymentId,
     setSelectedDeploymentId,
-    suggestionPredictions,
-    suggestionBoxes,
     suggestionScoreThreshold,
     setSuggestionScoreThreshold,
     lastInferenceDeviceSelected,
+    pendingReview,
+    pendingPreviewObjects,
+    selectedReviewItemId,
+    setSelectedReviewItemId,
+    hasPendingReview,
     isSuggesting,
     handleSuggest,
+    acceptReview,
+    rejectReview,
   };
 }

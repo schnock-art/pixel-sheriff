@@ -33,10 +33,22 @@ make demo-assets
 
 - The pipeline deletes and recreates a dedicated `README Demo` project on every run.
 - It seeds deterministic bbox fixture data through the public API from the committed source images under `docs/demo/source-images`.
+- It builds isolated `api-demo`, `trainer-demo`, and `web-demo` images from the current checked-out source before capture.
 - The hero walkthrough is generated with Playwright and copied into `docs/demo/`.
 - Screenshots are captured programmatically with a fixed viewport and stable filenames.
 - Raw capture artifacts are stored under `artifacts/demo/`.
 - `./scripts/run_demo_assets.sh` runs the capture flow in Docker via the Compose `demo-runner` service, so it does not depend on host Playwright browser packages.
+
+## Playwright Demo Specs
+
+Current demo/browser specs under `apps/web/tests/demo/`:
+
+- `hero-demo.spec.mjs`: walkthrough capture for the hero media
+- `screenshots.spec.mjs`: deterministic documentation screenshots
+- `prelabels-review.spec.mjs`: bbox AI prelabel review flow
+- `prediction-review.spec.mjs`: deployed prediction accept/reject flow for bbox and classification
+
+Playwright output is written to `artifacts/demo/playwright-output/`.
 
 ## Prerequisites
 
@@ -56,6 +68,23 @@ npm run demo:assets
 ```
 
 That local path expects a working Node environment plus Playwright browser/runtime dependencies on the host.
+
+## Full Browser Review Pass
+
+To run the deployed prediction browser pass in Docker against the isolated demo stack:
+
+```bash
+docker compose --profile demo build api-demo trainer-demo web-demo
+docker compose --profile demo up -d db-demo redis-demo trainer-demo api-demo web-demo
+docker compose --profile demo run --rm demo-runner bash -lc "npm ci --cache /tmp/npm-cache && npx playwright test tests/demo/prediction-review.spec.mjs --config=playwright.demo.config.mjs"
+```
+
+That spec verifies the current review-first behavior:
+
+- bbox predictions render as a separate preview and can be rejected or accepted
+- accepted bbox predictions replace the current draft boxes and persist deployment provenance on submit
+- classification predictions can be re-ranked in the side panel before acceptance
+- accepted classification predictions persist `prediction_review` metadata on submit
 
 ## Updating README Media
 

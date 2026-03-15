@@ -18,7 +18,7 @@ Current task modes:
 - `segmentation`
 
 Current AI-assisted workflow:
-- deployment-backed labeling suggestions for the active asset
+- review-first deployment predictions for the active asset in `classification` and `bbox` tasks
 - sequence-first AI prelabels for bbox tasks
 - pending prelabels stored separately from normal annotations until accepted or edited
 
@@ -51,7 +51,7 @@ video file / webcam stream
 - immutable dataset versions with saved split membership
 - export zip generation with `manifest.json` and `coco_instances.json`
 - project-scoped models, experiments, and deployments
-- active-deployment suggestions in labeling
+- review-first deployment predictions with preview, accept, and reject in labeling
 - bbox prelabel sessions for video and webcam review flows
 
 ## Runtime Topology
@@ -127,7 +127,41 @@ make up
 8. Create a dataset version.
 9. Create or edit a model.
 10. Launch and monitor experiments.
-11. Deploy a completed experiment and use deployment suggestions in labeling.
+11. Deploy a completed experiment and use deployment predictions in labeling.
+12. Review the prediction, then `Accept` to stage it into the draft or `Reject` to keep the prior draft unchanged.
+13. Use `Submit` to persist accepted draft changes.
+
+## Deployment Predictions
+
+Supported in the labeling workspace today:
+
+- `classification`
+- `bbox`
+
+Current review behavior:
+
+- predictions are requested for the currently selected asset only
+- clicking `Suggest` creates a pending review instead of mutating the draft immediately
+- while a pending review exists, label and geometry editing are temporarily locked
+- `Reject prediction` clears the pending review and leaves the existing draft unchanged
+- `Accept selected` or `Accept prediction` copies the reviewed result into the normal draft
+- accepted predictions are not saved until the normal `Submit` action runs
+
+Task-specific behavior:
+
+- classification:
+  - the UI shows a ranked prediction list
+  - you can choose a non-top-1 row before accepting
+  - accepting stages exactly one class selection and stores shared `prediction_review` metadata in the annotation payload
+- bbox:
+  - the UI shows predicted boxes as a separate preview overlay on top of the image
+  - accepting replaces the asset's current draft object set with the reviewed prediction
+  - accepted boxes keep `deployment_prediction` provenance including model name, confidence, and review decision
+
+Current limitations:
+
+- segmentation deployment review is not wired into the labeling UI yet
+- folder-level or batch accept/reject for deployment predictions is not implemented yet
 
 ## AI Prelabels
 
@@ -151,6 +185,11 @@ Review behavior:
 - `Accept` merges them into the asset annotation payload
 - `Edit selected` loads a proposal into the normal bbox draft with provenance
 - saved provenance-backed objects mark proposals as `accepted` or `edited`
+
+Deployment predictions and AI prelabels are intentionally separate:
+
+- deployment predictions are current-asset review flows in the main labeling panel
+- AI prelabels are session-driven bbox proposals for video and webcam review
 
 ## Storage Model
 
@@ -230,17 +269,14 @@ make contracts-check
 Current docs:
 
 - `docs/architecture.md`
-- `docu/Architecture.md`
-- `docu/TECHNICAL_REFERENCE.md`
-- `docu/Roadplan.md`
-- `docu/IMPLEMENTATION_TASKS.md`
-- `docu/VLM_COLD_START_PRELABELING_TASKS.md`
-- `docu/CHANGELOG.md`
+- `docs/demo/README.md`
+- `docs/plans/`
 
 Other folders:
 
 - `docs/demo/` contains generated README/demo media
 - `docs/plans/` contains dated design notes and plan snapshots
+- `docu/` contains older reference material retained for historical context
 
 ## Codebase Map
 

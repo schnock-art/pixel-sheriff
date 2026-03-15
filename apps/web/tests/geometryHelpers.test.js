@@ -6,6 +6,7 @@ const {
   bboxFromPoints,
   computeImageViewport,
   flattenPoints,
+  resolveImageBasis,
   polygonArea,
   polygonBounds,
   polygonContainsPoint,
@@ -39,6 +40,14 @@ test("bbox and polygon helpers compute containment and area", () => {
   assert.deepEqual(polygonBounds(polygon), [0, 0, 10, 10]);
   assert.equal(polygonContainsPoint(polygon, 5, 5), true);
   assert.equal(polygonContainsPoint(polygon, 20, 20), false);
+});
+
+test("resolveImageBasis prefers loaded image dimensions over fallback asset metadata", () => {
+  assert.deepEqual(
+    resolveImageBasis({ width: 3024, height: 4032 }, { width: 4032, height: 3024 }),
+    { width: 3024, height: 4032 },
+  );
+  assert.deepEqual(resolveImageBasis(null, { width: 640, height: 480 }), { width: 640, height: 480 });
 });
 
 test("annotation submission includes geometry payload and image basis", () => {

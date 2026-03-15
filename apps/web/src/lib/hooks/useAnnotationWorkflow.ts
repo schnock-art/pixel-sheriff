@@ -54,6 +54,19 @@ export interface GeometryPolygonObject {
 
 export type GeometryObject = GeometryBBoxObject | GeometryPolygonObject;
 
+export interface PredictionReviewMetadata {
+  origin_kind: string;
+  task?: string;
+  deployment_id?: string;
+  deployment_name?: string;
+  device_selected?: string;
+  device_preference?: string;
+  selected_class_id?: string;
+  selected_class_name?: string;
+  score?: number;
+  score_threshold?: number;
+}
+
 export interface ImageBasis {
   width: number;
   height: number;
@@ -64,6 +77,7 @@ export interface PendingAnnotation {
   status: AnnotationStatus;
   objects: GeometryObject[];
   imageBasis: ImageBasis | null;
+  predictionReview?: PredictionReviewMetadata | null;
 }
 
 interface LabelRow {
@@ -201,8 +215,17 @@ export function useAnnotationWorkflow({
       status: deriveNextAnnotationStatus(currentStatus, resolvedLabelIds, currentObjects.length),
       objects: currentObjects,
       imageBasis: currentResolvedImageBasis,
+      predictionReview: currentPendingAnnotation?.predictionReview ?? currentCommittedSelectionState.predictionReview ?? null,
     };
-  }, [activeLabelRows, currentObjects, currentResolvedImageBasis, currentStatus, selectedLabelIds]);
+  }, [
+    activeLabelRows,
+    currentCommittedSelectionState.predictionReview,
+    currentObjects,
+    currentPendingAnnotation?.predictionReview,
+    currentResolvedImageBasis,
+    currentStatus,
+    selectedLabelIds,
+  ]);
 
   const canSubmit = canSubmitWithStates({
     pendingCount,
@@ -221,6 +244,7 @@ export function useAnnotationWorkflow({
       status: committedRaw.status,
       objects: normalizeGeometryObjectInput(committedRaw.objects as GeometryObject[]),
       imageBasis: (normalizeImageBasis(committedRaw.imageBasis ?? fallbackImageBasis) as ImageBasis | null) ?? null,
+      predictionReview: committedRaw.predictionReview ?? null,
     };
     const nextPending = resolvePendingAnnotation(nextDraft, committedState) as PendingAnnotation | null;
 
@@ -232,7 +256,7 @@ export function useAnnotationWorkflow({
     });
   }
 
-  function stageLabelSelection(nextLabelIds: string[]) {
+  function stageLabelSelection(nextLabelIds: string[], predictionReview: PredictionReviewMetadata | null = null) {
     if (!currentAsset) return;
     const normalizedLabelIds = normalizeLabelIds(nextLabelIds);
     const draftState: PendingAnnotation = {
@@ -240,6 +264,7 @@ export function useAnnotationWorkflow({
       status: deriveNextAnnotationStatus(currentStatus, normalizedLabelIds, currentObjects.length),
       objects: currentObjects,
       imageBasis: currentResolvedImageBasis,
+      predictionReview,
     };
 
     setSelectedLabelIds(draftState.labelIds);
@@ -266,7 +291,16 @@ export function useAnnotationWorkflow({
     stageLabelSelection([]);
   }
 
-  function stageGeometry(nextObjects: GeometryObject[], nextImageBasis: ImageBasis | null = currentResolvedImageBasis) {
+  function applyPredictedLabelSelection(categoryId: string, predictionReview: PredictionReviewMetadata) {
+    if (!currentAsset) return;
+    stageLabelSelection([categoryId], predictionReview);
+  }
+
+  function stageGeometry(
+    nextObjects: GeometryObject[],
+    nextImageBasis: ImageBasis | null = currentResolvedImageBasis,
+    predictionReview: PredictionReviewMetadata | null = currentPendingAnnotation?.predictionReview ?? null,
+  ) {
     if (!currentAsset) return;
 
     const resolvedLabelIds = resolveActiveSelection(selectedLabelIds, activeLabelRows);
@@ -277,6 +311,7 @@ export function useAnnotationWorkflow({
       status: deriveNextAnnotationStatus(currentStatus, resolvedLabelIds, normalizedObjects.length),
       objects: normalizedObjects,
       imageBasis: normalizedBasis,
+      predictionReview,
     };
 
     setSelectedLabelIds(resolvedLabelIds);
@@ -329,6 +364,7 @@ export function useAnnotationWorkflow({
       activeLabelRows,
       objects: currentObjects,
       imageBasis: currentResolvedImageBasis,
+      predictionReview: currentDraftSelectionState.predictionReview ?? null,
     });
     if (!upsertInput) {
       setMessage("Selected label could not be resolved.");
@@ -389,6 +425,7 @@ export function useAnnotationWorkflow({
         activeLabelRows,
         objects: pending.objects,
         imageBasis: pending.imageBasis,
+        predictionReview: pending.predictionReview ?? null,
       });
       if (!upsertInput) continue;
 
@@ -479,6 +516,7 @@ export function useAnnotationWorkflow({
     setCurrentImageBasis: updateCurrentImageBasis,
     handleToggleLabel,
     clearSelectedLabels,
+    applyPredictedLabelSelection,
     assignSelectedGeometryCategory,
     upsertGeometryObject,
     replaceGeometryObjects,

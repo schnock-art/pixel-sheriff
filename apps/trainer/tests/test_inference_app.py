@@ -1,6 +1,8 @@
 from __future__ import annotations
+import json
 from pathlib import Path
 import math
+import numpy as np
 import sys
 import types
 
@@ -9,7 +11,7 @@ import pytest
 
 import pixel_sheriff_trainer.inference.app as inference_app_module
 import pixel_sheriff_trainer.inference.session_cache as session_cache_module
-from pixel_sheriff_trainer.inference.schemas import InferDetectionWarmupRequest
+from pixel_sheriff_trainer.inference.schemas import InferDetectionRequest, InferDetectionWarmupRequest
 
 
 @pytest.mark.asyncio
@@ -35,6 +37,8 @@ async def test_detection_warmup_endpoint_returns_selected_device(tmp_path: Path,
             },
         ),
     )
+    async def _to_thread(func, /, *args, **kwargs):
+        return func(*args, **kwargs)
 
     async def _acquire_session(self, *, model_key: str, onnx_path: Path, device_preference: str):
         assert model_key == "model-key"
@@ -60,6 +64,136 @@ async def test_detection_warmup_endpoint_returns_selected_device(tmp_path: Path,
 
     response = await route.endpoint(payload)
     assert response.model_dump() == {"device_selected": "cuda", "warmed": True}
+
+
+def test_parse_detection_output_supports_separate_outputs_with_one_based_labels() -> None:
+    detections = inference_app_module._parse_detection_output(
+        [
+            np.array([[10.0, 20.0, 30.0, 60.0], [5.0, 5.0, 15.0, 15.0], [1.0, 2.0, 3.0, 4.0]], dtype=np.float32),
+            np.array([0.9, 0.8, 0.7], dtype=np.float32),
+            np.array([1, 2, 9], dtype=np.int64),
+        ],
+        class_names=["flower", "bird"],
+        score_threshold=0.75,
+    )
+
+    assert len(detections) == 2
+    assert detections[0].class_index == 0
+    assert detections[0].class_name == "flower"
+    assert detections[0].score == pytest.approx(0.9)
+    assert detections[0].bbox == [10.0, 20.0, 20.0, 40.0]
+    assert detections[1].class_index == 1
+    assert detections[1].class_name == "bird"
+    assert detections[1].score == pytest.approx(0.8)
+    assert detections[1].bbox == [5.0, 5.0, 10.0, 10.0]
+
+
+def test_parse_detection_output_supports_separate_outputs_with_zero_based_labels() -> None:
+    detections = inference_app_module._parse_detection_output(
+        [
+            np.array([[2.0, 4.0, 10.0, 14.0], [20.0, 25.0, 80.0, 125.0]], dtype=np.float32),
+            np.array([0.6, 0.95], dtype=np.float32),
+            np.array([0, 1], dtype=np.int64),
+        ],
+        class_names=["flower", "bird"],
+        score_threshold=0.5,
+    )
+
+    assert len(detections) == 2
+    assert detections[0].class_index == 1
+    assert detections[0].class_name == "bird"
+    assert detections[0].score == pytest.approx(0.95)
+    assert detections[0].bbox == [20.0, 25.0, 60.0, 100.0]
+    assert detections[1].class_index == 0
+    assert detections[1].class_name == "flower"
+    assert detections[1].score == pytest.approx(0.6)
+    assert detections[1].bbox == [2.0, 4.0, 8.0, 10.0]
+
+
+@pytest.mark.asyncio
+async def test_detection_endpoint_maps_separate_outputs_back_to_original_pixels(tmp_path: Path, monkeypatch) -> None:
+    storage_root = tmp_path / "storage"
+    onnx_path = storage_root / "models" / "demo.onnx"
+    metadata_path = storage_root / "models" / "demo.metadata.json"
+    asset_path = storage_root / "assets" / "frame.png"
+    onnx_path.parent.mkdir(parents=True, exist_ok=True)
+    asset_path.parent.mkdir(parents=True, exist_ok=True)
+    onnx_path.write_bytes(b"fake-onnx")
+    Image.new("RGB", (640, 480), color=(12, 34, 56)).save(asset_path)
+    metadata_path.write_text(
+        json.dumps(
+            {
+                "class_names": ["flower", "bird"],
+                "preprocess": {
+                    "resize_policy": "stretch",
+                    "resize": {"width": 320, "height": 320},
+                    "normalization": {"type": "none"},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setenv("STORAGE_ROOT", str(storage_root))
+    monkeypatch.setattr(inference_app_module, "sha256_file", lambda _path: "model-key")
+    monkeypatch.setattr(
+        session_cache_module,
+        "ort",
+        type(
+            "_DummyOrt",
+            (),
+            {
+                "get_available_providers": staticmethod(lambda: ["CPUExecutionProvider"]),
+                "InferenceSession": object,
+            },
+        ),
+    )
+
+    async def _to_thread(func, /, *args, **kwargs):
+        return func(*args, **kwargs)
+
+    async def _acquire_session(self, *, model_key: str, onnx_path: Path, device_preference: str):
+        assert model_key == "model-key"
+        assert onnx_path.name == "demo.onnx"
+        assert device_preference == "auto"
+        return object(), "cpu"
+
+    async def _release(self, model_key: str, device_selected: str) -> None:
+        assert model_key == "model-key"
+        assert device_selected == "cpu"
+
+    def _run_detection(_session: object, tensor: np.ndarray) -> list[np.ndarray]:
+        assert tensor.shape == (1, 3, 320, 320)
+        return [
+            np.array([[32.0, 64.0, 160.0, 224.0], [0.0, 0.0, 10.0, 10.0]], dtype=np.float32),
+            np.array([0.95, 0.1], dtype=np.float32),
+            np.array([1, 2], dtype=np.int64),
+        ]
+
+    monkeypatch.setattr(inference_app_module.SessionCache, "acquire_session", _acquire_session)
+    monkeypatch.setattr(inference_app_module.SessionCache, "release", _release)
+    monkeypatch.setattr(inference_app_module, "_run_onnx_detection", _run_detection)
+    monkeypatch.setattr(inference_app_module.asyncio, "to_thread", _to_thread)
+
+    app = inference_app_module.create_app()
+    route = next(route for route in app.routes if getattr(route, "path", None) == "/infer/detection")
+    payload = InferDetectionRequest(
+        onnx_relpath="models/demo.onnx",
+        metadata_relpath="models/demo.metadata.json",
+        asset_relpath="assets/frame.png",
+        device_preference="auto",
+        score_threshold=0.5,
+        model_key="model-key",
+    )
+
+    response = await route.endpoint(payload)
+
+    assert response.device_selected == "cpu"
+    assert len(response.boxes) == 1
+    assert response.boxes[0].class_index == 0
+    assert response.boxes[0].class_name == "flower"
+    assert response.boxes[0].score == pytest.approx(0.95)
+    assert response.boxes[0].bbox == [64.0, 96.0, 256.0, 240.0]
 
 
 def test_parse_florence_generation_skips_malformed_entries() -> None:

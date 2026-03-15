@@ -7,6 +7,7 @@ import {
   distanceBetweenPoints,
   flattenPoints,
   polygonContainsPoint,
+  resolveImageBasis,
   toImageCoords,
   toViewportCoords,
 } from "../lib/workspace/geometry";
@@ -58,6 +59,14 @@ interface ViewerProps {
   canvasTool: CanvasTool;
   resetToken?: number;
   geometryObjects: GeometryObject[];
+  pendingPredictionObjects?: Array<{
+    id: string;
+    category_id: string;
+    bbox: number[];
+    label_text: string;
+    confidence: number;
+  }>;
+  selectedPendingPredictionId?: string | null;
   pendingPrelabelObjects?: Array<{
     id: string;
     category_id: string;
@@ -66,6 +75,7 @@ interface ViewerProps {
     confidence: number;
   }>;
   selectedPendingPrelabelId?: string | null;
+  annotationEditingDisabled?: boolean;
   selectedObjectId: string | null;
   hoveredObjectId: string | null;
   defaultCategoryId: string | null;
@@ -191,8 +201,11 @@ export function Viewer({
   canvasTool,
   resetToken = 0,
   geometryObjects,
+  pendingPredictionObjects = [],
+  selectedPendingPredictionId = null,
   pendingPrelabelObjects = [],
   selectedPendingPrelabelId = null,
+  annotationEditingDisabled = false,
   selectedObjectId,
   hoveredObjectId,
   defaultCategoryId,
@@ -225,19 +238,24 @@ export function Viewer({
   } | null>(null);
 
   const imageBasis = useMemo(() => {
-    if (currentAsset && typeof currentAsset.width === "number" && currentAsset.width > 0 && typeof currentAsset.height === "number" && currentAsset.height > 0) {
-      return { width: currentAsset.width, height: currentAsset.height };
-    }
-    return naturalSize;
+    return resolveImageBasis(
+      naturalSize,
+      currentAsset
+        ? {
+            width: currentAsset.width,
+            height: currentAsset.height,
+          }
+        : null,
+    );
   }, [currentAsset, naturalSize]);
 
   const viewport = useMemo(() => {
     if (!imageBasis) return null;
     return computeImageViewport(canvasSize.width, canvasSize.height, imageBasis.width, imageBasis.height);
   }, [canvasSize.height, canvasSize.width, imageBasis]);
-  const canDrawBBox = annotationMode === "bbox" && canvasTool === "bbox";
-  const canDrawPolygon = annotationMode === "segmentation" && canvasTool === "polygon";
-  const canInteractWithGeometry = annotationMode !== "labels" && canvasTool !== "pan";
+  const canDrawBBox = !annotationEditingDisabled && annotationMode === "bbox" && canvasTool === "bbox";
+  const canDrawPolygon = !annotationEditingDisabled && annotationMode === "segmentation" && canvasTool === "polygon";
+  const canInteractWithGeometry = !annotationEditingDisabled && annotationMode !== "labels" && canvasTool !== "pan";
 
   useEffect(() => {
     setBboxDraft(null);
@@ -307,6 +325,7 @@ export function Viewer({
 
   useEffect(() => {
     if (annotationMode === "labels") return;
+    if (annotationEditingDisabled) return;
 
     function onKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
@@ -330,7 +349,7 @@ export function Viewer({
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [annotationMode, canDrawPolygon, finalizePolygon, onDeleteSelectedObject, onHoverObject, selectedObjectId]);
+  }, [annotationEditingDisabled, annotationMode, canDrawPolygon, finalizePolygon, onDeleteSelectedObject, onHoverObject, selectedObjectId]);
 
   function handlePointerDown(event: PointerEvent<SVGSVGElement>) {
     if (event.button !== 0) return;
@@ -678,6 +697,43 @@ export function Viewer({
     );
   }
 
+  function renderPendingPredictionObject(object: NonNullable<ViewerProps["pendingPredictionObjects"]>[number]) {
+    if (!viewport) return null;
+    const isSelected = object.id === selectedPendingPredictionId;
+    const color = getClassColor(object.category_id);
+    const topLeft = toViewportCoords(object.bbox[0], object.bbox[1], viewport);
+    const width = object.bbox[2] * viewport.scale;
+    const height = object.bbox[3] * viewport.scale;
+    return (
+      <g
+        key={object.id}
+        className={`prelabel-shape${isSelected ? " is-selected" : ""}`}
+        data-testid="pending-deployment-prediction"
+        data-review-item-id={object.id}
+        data-selected={isSelected ? "true" : "false"}
+      >
+        <rect
+          x={topLeft.x}
+          y={topLeft.y}
+          width={width}
+          height={height}
+          style={{
+            fill: `hsl(${color.hue} 85% 55% / ${isSelected ? "0.16" : "0.08"})`,
+            stroke: color.overlayStroke,
+            strokeWidth: isSelected ? 2.5 : 2,
+            strokeDasharray: "5 4",
+          }}
+        />
+        <g className="prelabel-badge">
+          <rect x={topLeft.x + 8} y={Math.max(8, topLeft.y + 8)} rx={10} ry={10} width={116} height={22} />
+          <text x={topLeft.x + 18} y={Math.max(22, topLeft.y + 23)}>
+            Prediction {object.label_text}
+          </text>
+        </g>
+      </g>
+    );
+  }
+
   function renderDraft() {
     if (!viewport) return null;
     const draftColor = getClassColor(defaultCategoryId ?? 1);
@@ -743,7 +799,7 @@ export function Viewer({
         ) : null}
         {hasImage && viewport ? (
           <svg
-            className={annotationMode === "labels" ? "viewer-geometry-overlay is-readonly" : "viewer-geometry-overlay"}
+            className={annotationMode === "labels" || annotationEditingDisabled ? "viewer-geometry-overlay is-readonly" : "viewer-geometry-overlay"}
             data-testid="viewer-geometry-overlay"
             onPointerDown={handlePointerDown}
             onPointerMove={handlePointerMove}
@@ -752,6 +808,7 @@ export function Viewer({
             onDoubleClick={handleDoubleClick}
             onPointerLeave={() => onHoverObject(null)}
           >
+            {pendingPredictionObjects.map((object) => renderPendingPredictionObject(object))}
             {pendingPrelabelObjects.map((object) => renderPendingPrelabelObject(object))}
             {geometryObjects.map((object) => renderGeometryObject(object))}
             {renderDraft()}

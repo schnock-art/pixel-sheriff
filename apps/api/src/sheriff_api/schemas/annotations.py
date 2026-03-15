@@ -53,6 +53,19 @@ class AnnotationClassificationV2(BaseModel):
     primary_category_id: str | None = None
 
 
+class AnnotationPredictionReview(BaseModel):
+    origin_kind: str
+    task: str | None = None
+    deployment_id: str | None = None
+    deployment_name: str | None = None
+    device_selected: str | None = None
+    device_preference: str | None = None
+    selected_class_id: str | None = None
+    selected_class_name: str | None = None
+    score: float | None = None
+    score_threshold: float | None = None
+
+
 class AnnotationPayloadV2(BaseModel):
     model_config = ConfigDict(extra="allow")
 
@@ -61,6 +74,7 @@ class AnnotationPayloadV2(BaseModel):
     objects: list[GeometryBBoxObject | GeometryPolygonObject] = Field(default_factory=list)
     image_basis: AnnotationImageBasis | None = None
     source: str | None = None
+    prediction_review: AnnotationPredictionReview | None = None
 
 
 class AnnotationUpsert(BaseModel):

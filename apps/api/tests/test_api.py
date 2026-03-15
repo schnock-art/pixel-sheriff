@@ -489,6 +489,7 @@ async def test_annotation_upsert_accepts_bbox_geometry_payload(client: AsyncClie
     saved = await client.post(
         f"/api/v1/projects/{project_id}/annotations",
         json={
+            "task_id": project["default_task_id"],
             "asset_id": asset["id"],
             "status": "approved",
             "payload_json": {
@@ -508,6 +509,113 @@ async def test_annotation_upsert_accepts_bbox_geometry_payload(client: AsyncClie
     assert len(payload["objects"]) == 1
     assert payload["objects"][0]["kind"] == "bbox"
     assert payload["image_basis"] == {"width": 128, "height": 128}
+
+
+@pytest.mark.asyncio
+async def test_annotation_upsert_preserves_prediction_review_metadata(client: AsyncClient) -> None:
+    project = (await client.post("/api/v1/projects", json={"name": "prediction-review", "task_type": "classification_single"})).json()
+    project_id = project["id"]
+    category = (
+        await client.post(
+            f"/api/v1/projects/{project_id}/categories",
+            json={"task_id": project["default_task_id"], "name": "truck"},
+        )
+    ).json()
+
+    upload = await client.post(
+        f"/api/v1/projects/{project_id}/assets/upload",
+        files={"file": ("sample.jpg", b"fake-image-bytes", "image/jpeg")},
+    )
+    assert upload.status_code == 200
+    asset = upload.json()
+
+    saved = await client.post(
+        f"/api/v1/projects/{project_id}/annotations",
+        json={
+            "task_id": project["default_task_id"],
+            "asset_id": asset["id"],
+            "status": "approved",
+            "payload_json": {
+                "version": "2.0",
+                "classification": {"category_ids": [category["id"]], "primary_category_id": category["id"]},
+                "prediction_review": {
+                    "origin_kind": "deployment_prediction",
+                    "task": "classification",
+                    "deployment_id": "dep-1",
+                    "deployment_name": "cls-v1",
+                    "selected_class_id": category["id"],
+                    "selected_class_name": "truck",
+                    "score": 0.91,
+                },
+            },
+        },
+    )
+    assert saved.status_code == 200
+    payload = saved.json()["payload_json"]
+    assert payload["prediction_review"] == {
+        "origin_kind": "deployment_prediction",
+        "task": "classification",
+        "deployment_id": "dep-1",
+        "deployment_name": "cls-v1",
+        "selected_class_id": category["id"],
+        "selected_class_name": "truck",
+        "score": 0.91,
+    }
+
+
+@pytest.mark.asyncio
+async def test_annotation_upsert_accepts_deployment_prediction_bbox_provenance(client: AsyncClient) -> None:
+    project = (await client.post("/api/v1/projects", json={"name": "bbox-prediction-review", "task_type": "bbox"})).json()
+    project_id = project["id"]
+    category = (
+        await client.post(
+            f"/api/v1/projects/{project_id}/categories",
+            json={"task_id": project["default_task_id"], "name": "truck"},
+        )
+    ).json()
+
+    upload = await client.post(
+        f"/api/v1/projects/{project_id}/assets/upload",
+        files={"file": ("sample.jpg", b"fake-image-bytes", "image/jpeg")},
+    )
+    assert upload.status_code == 200
+    asset = upload.json()
+
+    saved = await client.post(
+        f"/api/v1/projects/{project_id}/annotations",
+        json={
+            "task_id": project["default_task_id"],
+            "asset_id": asset["id"],
+            "status": "approved",
+            "payload_json": {
+                "version": "2.0",
+                "classification": {"category_ids": [category["id"]], "primary_category_id": category["id"]},
+                "image_basis": {"width": 128, "height": 128},
+                "objects": [
+                    {
+                        "id": "bbox-1",
+                        "kind": "bbox",
+                        "category_id": category["id"],
+                        "bbox": [10, 12, 30, 20],
+                        "provenance": {
+                            "origin_kind": "deployment_prediction",
+                            "source_model": "detector-v1",
+                            "confidence": 0.88,
+                            "review_decision": "accepted",
+                        },
+                    },
+                ],
+            },
+        },
+    )
+    assert saved.status_code == 200
+    payload = saved.json()["payload_json"]
+    assert payload["objects"][0]["provenance"] == {
+        "origin_kind": "deployment_prediction",
+        "source_model": "detector-v1",
+        "confidence": 0.88,
+        "review_decision": "accepted",
+    }
 
 
 @pytest.mark.asyncio

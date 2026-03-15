@@ -20,7 +20,7 @@ Task kinds:
 
 AI-assisted paths:
 
-- active deployment suggestions for single-asset review
+- review-first active deployment predictions for single-asset `classification` and `bbox` review
 - sequence-first AI prelabels for bbox video and webcam workflows
 
 ## Runtime Topology
@@ -138,6 +138,7 @@ Current payload model:
 - classification block
 - object geometry list for bbox or polygon tasks
 - optional per-object provenance
+- optional shared `prediction_review` metadata for accepted deployment reviews
 
 ### PrelabelSession
 
@@ -238,8 +239,41 @@ Review behavior:
 
 Separate from prelabels:
 
-- deployment suggestions are current-asset, deployment-driven review helpers
+- deployment predictions are current-asset, deployment-driven review helpers
 - prelabels are sequence/session-driven pending proposals for frame review
+
+### Deployment Prediction Review
+
+Current request path:
+
+- browser loads compatible deployments from `/projects/{project_id}/deployments`
+- the labeling panel sends `POST /projects/{project_id}/predict` for the currently selected asset
+- deployed prediction review is synchronous and separate from the legacy queued `/suggestions/batch` flow
+
+Frontend review state:
+
+- `/predict` responses are normalized into a `pendingReview` model in `useWorkspaceSuggestions`
+- bbox responses also create `preview_objects` for a read-only overlay in the viewer
+- while `pendingReview` exists, label toggles, geometry editing, edit mode, and submit are disabled to avoid mixed draft state
+
+Accept and reject semantics:
+
+- `Reject prediction` clears the pending review only
+- classification accept stages the selected class in the normal draft and attaches shared `prediction_review` metadata
+- bbox accept replaces the current asset draft object set with the accepted prediction boxes
+- accepted predictions still require the normal annotation `Submit` flow to persist
+
+Persistence details:
+
+- accepted bbox objects keep provenance with `origin_kind: deployment_prediction`
+- bbox provenance may include `source_model`, `confidence`, and `review_decision`
+- accepted classification reviews are written through the normal annotation payload with a `prediction_review` block
+
+Current UI scope:
+
+- supported in the labeling panel for `classification` and `bbox`
+- not yet surfaced for segmentation
+- no folder-level or batch accept/reject flow for deployment predictions yet
 
 ## Labeling Workspace
 
@@ -269,6 +303,13 @@ Sequence-aware hooks:
 - `useSequenceNavigation`
 - `useWebcamCapture`
 - `usePrelabels`
+
+Deployment review pieces:
+
+- `apps/web/src/lib/hooks/useWorkspaceSuggestions.ts`
+- `apps/web/src/lib/hooks/useAnnotationWorkflow.ts`
+- `apps/web/src/components/LabelPanel.tsx`
+- `apps/web/src/components/Viewer.tsx`
 
 ## Export Contract
 
@@ -334,6 +375,8 @@ Key trainer inference endpoints:
 
 Implemented system is broader than the original classification-only base, but some work is still intentionally open:
 
-- richer full-flow automated UI coverage for AI prelabel review
+- folder-level or batch accept/reject for deployment prediction review
+- segmentation deployment review in the labeling UI
+- broader end-to-end coverage for sequence AI prelabel review
 - deeper webcam frame-write diagnostics for intermittent browser/device issues
 - more advanced geometry editing polish

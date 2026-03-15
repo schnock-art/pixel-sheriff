@@ -2,6 +2,20 @@ function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
 }
 
+function normalizeImageBasis(imageBasis) {
+  if (!imageBasis || typeof imageBasis !== "object") return null;
+  const width = Number(imageBasis.width);
+  const height = Number(imageBasis.height);
+  if (!Number.isFinite(width) || width <= 0 || !Number.isFinite(height) || height <= 0) {
+    return null;
+  }
+  return { width: Math.round(width), height: Math.round(height) };
+}
+
+function resolveImageBasis(preferredImageBasis, fallbackImageBasis) {
+  return normalizeImageBasis(preferredImageBasis) ?? normalizeImageBasis(fallbackImageBasis);
+}
+
 function computeImageViewport(containerWidth, containerHeight, imageWidth, imageHeight) {
   if (containerWidth <= 0 || containerHeight <= 0 || imageWidth <= 0 || imageHeight <= 0) {
     return null;
@@ -110,6 +124,8 @@ function distanceBetweenPoints(a, b) {
 
 module.exports = {
   clamp,
+  normalizeImageBasis,
+  resolveImageBasis,
   computeImageViewport,
   toImageCoords,
   toViewportCoords,

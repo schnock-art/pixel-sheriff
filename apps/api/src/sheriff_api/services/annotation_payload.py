@@ -132,6 +132,58 @@ def _normalize_object_provenance(raw_provenance: Any) -> dict[str, Any] | None:
     return normalized
 
 
+def _normalize_prediction_review(raw_prediction_review: Any) -> dict[str, Any] | None:
+    if raw_prediction_review is None:
+        return None
+    if not isinstance(raw_prediction_review, dict):
+        raise PayloadValidationError(
+            code="annotation_payload_invalid",
+            message="prediction_review must be an object when provided",
+        )
+
+    origin_kind = raw_prediction_review.get("origin_kind")
+    if not isinstance(origin_kind, str) or not origin_kind.strip():
+        raise PayloadValidationError(
+            code="annotation_payload_invalid",
+            message="prediction_review.origin_kind is required",
+        )
+
+    normalized: dict[str, Any] = {"origin_kind": origin_kind.strip()}
+    for field_name in (
+        "task",
+        "deployment_id",
+        "deployment_name",
+        "device_selected",
+        "device_preference",
+        "selected_class_id",
+        "selected_class_name",
+    ):
+        value = raw_prediction_review.get(field_name)
+        if value is None:
+            continue
+        if not isinstance(value, str):
+            raise PayloadValidationError(
+                code="annotation_payload_invalid",
+                message=f"prediction_review.{field_name} must be a string when provided",
+            )
+        stripped = value.strip()
+        if stripped:
+            normalized[field_name] = stripped
+
+    for field_name in ("score", "score_threshold"):
+        value = raw_prediction_review.get(field_name)
+        if value is None:
+            continue
+        if not _valid_number(value):
+            raise PayloadValidationError(
+                code="annotation_payload_invalid",
+                message=f"prediction_review.{field_name} must be numeric when provided",
+            )
+        normalized[field_name] = float(value)
+
+    return normalized
+
+
 def _normalize_geometry_objects(
     raw_objects: Any,
     *,
@@ -359,6 +411,7 @@ def normalize_annotation_payload(
             details={"task_kind": task_kind.value, "label_mode": label_mode.value},
         )
     source = payload.get("source")
+    prediction_review = _normalize_prediction_review(payload.get("prediction_review"))
 
     return {
         "version": "2.0",
@@ -376,4 +429,5 @@ def normalize_annotation_payload(
             "category_id": primary_category_id,
         },
         "source": source if isinstance(source, str) and source.strip() else "web-ui",
+        **({"prediction_review": prediction_review} if prediction_review is not None else {}),
     }

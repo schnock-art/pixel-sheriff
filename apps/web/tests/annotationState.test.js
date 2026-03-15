@@ -3,6 +3,7 @@ const assert = require("node:assert/strict");
 
 const {
   areSelectionStatesEqual,
+  arePredictionReviewsEqual,
   canSubmitWithStates,
   deriveNextAnnotationStatus,
   readAnnotationObjects,
@@ -42,6 +43,7 @@ test("resolvePendingAnnotation keeps pending entry when draft and committed stat
     status: "unlabeled",
     objects: [],
     imageBasis: null,
+    predictionReview: null,
   });
 });
 
@@ -136,4 +138,55 @@ test("readAnnotationObjects preserves valid AI prelabel provenance", () => {
     confidence: 0.87,
     review_decision: "edited",
   });
+});
+
+test("getCommittedSelectionState reads prediction review metadata", () => {
+  const committedState = getCommittedSelectionState({
+    status: "approved",
+    payload_json: {
+      category_ids: ["3"],
+      prediction_review: {
+        origin_kind: "deployment_prediction",
+        task: "classification",
+        deployment_id: "dep-1",
+        selected_class_id: "3",
+        score: 0.92,
+      },
+    },
+  });
+
+  assert.deepEqual(committedState.predictionReview, {
+    origin_kind: "deployment_prediction",
+    task: "classification",
+    deployment_id: "dep-1",
+    selected_class_id: "3",
+    score: 0.92,
+  });
+});
+
+test("resolvePendingAnnotation keeps prediction review changes dirty", () => {
+  const committedState = {
+    labelIds: ["3"],
+    status: "approved",
+    objects: [],
+    imageBasis: null,
+    predictionReview: null,
+  };
+  const draftState = {
+    labelIds: ["3"],
+    status: "approved",
+    objects: [],
+    imageBasis: null,
+    predictionReview: {
+      origin_kind: "deployment_prediction",
+      task: "classification",
+      deployment_id: "dep-1",
+      selected_class_id: "3",
+      score: 0.92,
+    },
+  };
+
+  const pending = resolvePendingAnnotation(draftState, committedState);
+  assert.deepEqual(pending.predictionReview, draftState.predictionReview);
+  assert.equal(arePredictionReviewsEqual(pending.predictionReview, committedState.predictionReview), false);
 });
