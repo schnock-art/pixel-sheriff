@@ -14,7 +14,7 @@ Use it to record progress as items move from assessment into implementation and 
 ## Snapshot
 
 - Date started: `2026-03-15`
-- Current phase: `Failing test follow-up validated; broader cleanup items remain`
+- Current phase: `ProjectAssetsWorkspace orchestration split landed; broader cleanup items remain`
 - Source assessment: this repo review
 
 ## Findings
@@ -45,7 +45,7 @@ Use it to record progress as items move from assessment into implementation and 
 ## Refactor Candidates
 
 - [x] Identify high-risk large modules and oversized tests
-- [ ] Split `ProjectAssetsWorkspace` orchestration responsibilities
+- [x] Split `ProjectAssetsWorkspace` orchestration responsibilities
 - [ ] Extract non-UI logic from experiment detail page
 - [ ] Extract non-UI logic from model detail page
 - [ ] Break up API prelabels service into focused modules
@@ -66,6 +66,7 @@ Use it to record progress as items move from assessment into implementation and 
 
 - [~] Run full test matrix with the new commands
   - Web and worker remained green from the earlier baseline pass; this follow-up reran `api-test` (`149 passed`), `api-test-ml` (`13 passed`), targeted trainer regressions (`7 passed`), and the full trainer suite in the trainer base container (`50 passed`).
+  - This refactor reran the web unit suite with `node --test --test-isolation=none tests/*.test.js` (`159 passed`) plus `node ./node_modules/typescript/bin/tsc --noEmit` (`passed`). The default `npm test` / `next build` commands still hit sandbox `spawn EPERM` in this environment.
 - [ ] Generate and review baseline coverage reports
 - [x] Refresh changelog and docs notes for the completed cleanup
 - [ ] Mark tracker complete with final summary

@@ -6,24 +6,18 @@ import { useParams, useRouter } from "next/navigation";
 import { LabelPanel } from "../LabelPanel";
 import { Viewer } from "../Viewer";
 import {
-  ApiError,
-  createCategory,
-  deleteCategory,
-  createProject,
-  importVideo,
   listAssets,
-  patchCategory,
   resolveAssetUri,
-  uploadAsset,
   type ProjectTaskType,
   type TaskKind,
-  type VideoImportPayload,
 } from "../../lib/api";
 import { useAnnotationWorkflow } from "../../lib/hooks/useAnnotationWorkflow";
 import { useAssets } from "../../lib/hooks/useAssets";
 import { useDeleteWorkflow } from "../../lib/hooks/useDeleteWorkflow";
 import { useFolders } from "../../lib/hooks/useFolders";
-import { buildTargetRelativePath, isImageCandidate, useImportWorkflow } from "../../lib/hooks/useImportWorkflow";
+import { useImportWorkflow } from "../../lib/hooks/useImportWorkflow";
+import { useProjectAssetsImportActions } from "../../lib/hooks/useProjectAssetsImportActions";
+import { useProjectAssetsLabelManagement } from "../../lib/hooks/useProjectAssetsLabelManagement";
 import { useLabels } from "../../lib/hooks/useLabels";
 import { useProjectAssetsTreeState } from "../../lib/hooks/useProjectAssetsTreeState";
 import { usePrelabels } from "../../lib/hooks/usePrelabels";
@@ -38,7 +32,6 @@ import {
   deriveMessageTone,
 } from "../../lib/workspace/projectAssetsDerived";
 import { resolvePrelabelBBox, resolvePrelabelCategoryId } from "../../lib/workspace/prelabelGeometry.js";
-import { collectFolderPathsFromRelativePaths } from "../../lib/workspace/tree";
 import { ProjectSectionLayout } from "./project-shell/ProjectSectionLayout";
 import { useProjectShell } from "./project-shell/ProjectShellContext";
 import { AssetBrowser } from "./project-assets/AssetBrowser";
@@ -97,9 +90,6 @@ export default function ProjectAssetsWorkspace() {
     refetchProjects,
   } = useProjectShell();
   const selectedProjectId = routeProjectId.trim() ? routeProjectId : null;
-  const [isCreatingLabel, setIsCreatingLabel] = useState(false);
-  const [isSavingLabelChanges, setIsSavingLabelChanges] = useState(false);
-  const [deletingLabelId, setDeletingLabelId] = useState<string | null>(null);
   const [editMode, setEditMode] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [annotationMode, setAnnotationMode] = useState<WorkspaceAnnotationMode>("labels");
@@ -108,10 +98,6 @@ export default function ProjectAssetsWorkspace() {
   const [importNewProjectTaskType, setImportNewProjectTaskType] = useState<NewProjectTaskType>("classification_single");
   const [geometryCategoryId, setGeometryCategoryId] = useState<string | null>(null);
   const [hoveredGeometryObjectId, setHoveredGeometryObjectId] = useState<string | null>(null);
-  const [isVideoImportModalOpen, setIsVideoImportModalOpen] = useState(false);
-  const [isVideoImporting, setIsVideoImporting] = useState(false);
-  const [videoImportError, setVideoImportError] = useState<string | null>(null);
-  const [isWebcamModalOpen, setIsWebcamModalOpen] = useState(false);
   const [sequencePauseSignal, setSequencePauseSignal] = useState(0);
   const reloadPrelabelsRef = useRef<null | (() => Promise<void>)>(null);
   const projectAnnotationMode = useMemo(() => taskKindToAnnotationMode(selectedTask?.kind), [selectedTask?.kind]);
@@ -222,14 +208,6 @@ export default function ProjectAssetsWorkspace() {
     [sequenceNavigation.currentFrame?.timestamp_seconds],
   );
   const folderIdByPath = useMemo(() => new Map(folders.map((folder) => [folder.path, folder.id])), [folders]);
-  const videoImportDefaultName = useMemo(
-    () => `video_${new Date().toISOString().slice(0, 19).replaceAll(":", "-")}`,
-    [isVideoImportModalOpen],
-  );
-  const webcamDefaultName = useMemo(
-    () => `webcam_${new Date().toISOString().slice(0, 19).replaceAll(":", "-")}`,
-    [isWebcamModalOpen],
-  );
   const allLabelRows = labels.map((label) => ({
     id: label.id,
     name: label.name,
@@ -299,6 +277,25 @@ export default function ProjectAssetsWorkspace() {
     handleSubmit,
     resetAnnotationWorkflow,
   } = annotationWorkflow;
+  const {
+    isCreatingLabel,
+    isSavingLabelChanges,
+    deletingLabelId,
+    handleCreateLabel,
+    handleSaveLabelChanges,
+    handleDeleteLabel,
+  } = useProjectAssetsLabelManagement({
+    selectedProjectId,
+    selectedTaskId,
+    allLabelRows,
+    annotationMode,
+    isTaskLabelsLocked,
+    geometryCategoryId,
+    setGeometryCategoryId,
+    setSelectedLabelIds,
+    refetchLabels,
+    setMessage,
+  });
   const suggestionState = useWorkspaceSuggestions({
     selectedProjectId,
     selectedTaskId: selectedTask?.id ?? null,
@@ -396,6 +393,61 @@ export default function ProjectAssetsWorkspace() {
     handleDeleteCurrentProject,
     resetDeleteWorkflow,
   } = deleteWorkflow;
+  const {
+    isVideoImportModalOpen,
+    isVideoImporting,
+    videoImportError,
+    isWebcamModalOpen,
+    videoImportDefaultName,
+    webcamDefaultName,
+    confirmImportFromDialog,
+    handleImport,
+    handleImportVideoSubmit,
+    openVideoImportModal,
+    closeVideoImportModal,
+    openWebcamModal,
+    closeWebcamModal,
+    handleWebcamSequenceCreated,
+    handleWebcamFrameUploaded,
+    handleWebcamFinished,
+  } = useProjectAssetsImportActions({
+    selectedProjectId,
+    selectedTaskId,
+    projects,
+    importMode,
+    importDialog,
+    importExistingProjectId,
+    importNewProjectName,
+    importFolderName,
+    importNewProjectTaskType,
+    importValidation,
+    currentSequenceId,
+    currentAssetId: treeState.currentAsset?.id ?? null,
+    openImportDialog,
+    closeImportDialog,
+    setIsImporting,
+    setImportFailures,
+    setImportProgress,
+    setImportNewProjectTaskType,
+    setImportFolderOptionsByProject,
+    setSelectedImportExistingFolder,
+    setAnnotationMode,
+    setEditMode,
+    setHasUnsavedDrafts,
+    setMessage,
+    refetchProjects,
+    refetchAssets,
+    refetchFolders,
+    refetchSequence,
+    resetTreeState: treeState.resetTreeState,
+    resetAnnotationWorkflow,
+    handleSelectFolderScope: treeState.handleSelectFolderScope,
+    handleSelectTreeAsset: treeState.handleSelectTreeAsset,
+    pushToProject: (projectId) => router.push(`/projects/${encodeURIComponent(projectId)}/datasets`),
+    resolveAnnotationModeForProjectType: projectTaskTypeToAnnotationMode,
+    resolveNewProjectTaskTypeForProjectType: (taskType) =>
+      annotationModeToNewProjectTaskType(projectTaskTypeToAnnotationMode(taskType)),
+  });
 
   const assetReviewStateById = useMemo(
     () =>
@@ -550,271 +602,6 @@ export default function ProjectAssetsWorkspace() {
     setSelectedLabelIds([selectedObject.category_id]);
   }
 
-  async function handleCreateLabel(name: string) {
-    if (!selectedProjectId || !selectedTaskId) {
-      setMessage("Select a project before creating labels.");
-      return;
-    }
-    if (isTaskLabelsLocked) {
-      setMessage("This task is locked because dataset versions already exist. Create a new task to change labels.");
-      return;
-    }
-
-    try {
-      setIsCreatingLabel(true);
-      setMessage(null);
-      const created = await createCategory(selectedProjectId, { task_id: selectedTaskId, name, display_order: allLabelRows.length });
-      await refetchLabels();
-      if (annotationMode !== "labels") setGeometryCategoryId(created.id);
-      setSelectedLabelIds([created.id]);
-      setMessage(`Created label "${created.name}".`);
-    } catch (error) {
-      setMessage(error instanceof Error ? `Failed to create label: ${error.message}` : "Failed to create label.");
-    } finally {
-      setIsCreatingLabel(false);
-    }
-  }
-
-  async function handleSaveLabelChanges(
-    changes: Array<{ id: string; name: string; isActive: boolean; displayOrder: number }>,
-  ) {
-    if (isTaskLabelsLocked) {
-      setMessage("This task is locked because dataset versions already exist. Create a new task to change labels.");
-      return;
-    }
-    try {
-      setIsSavingLabelChanges(true);
-      setMessage(null);
-      for (const change of changes) {
-        await patchCategory(change.id, {
-          name: change.name.trim(),
-          is_active: change.isActive,
-          display_order: change.displayOrder,
-        });
-      }
-      await refetchLabels();
-      setMessage("Saved label configuration.");
-    } catch (error) {
-      setMessage(error instanceof Error ? `Failed to save labels: ${error.message}` : "Failed to save labels.");
-    } finally {
-      setIsSavingLabelChanges(false);
-    }
-  }
-
-  async function handleDeleteLabel(labelId: string, labelName: string) {
-    if (isTaskLabelsLocked) {
-      setMessage("This task is locked because dataset versions already exist. Create a new task to change labels.");
-      return;
-    }
-    if (!window.confirm(`Delete label "${labelName}"? This cannot be undone.`)) return;
-    try {
-      setDeletingLabelId(labelId);
-      await deleteCategory(labelId);
-      await refetchLabels();
-      setSelectedLabelIds((previous) => previous.filter((id) => id !== labelId));
-      if (geometryCategoryId === labelId) {
-        setGeometryCategoryId(null);
-      }
-      setMessage(`Deleted label "${labelName}".`);
-    } catch (error) {
-      if (error instanceof ApiError && error.responseBody) {
-        try {
-          const body = JSON.parse(error.responseBody) as { error?: { code?: string; message?: string; details?: { annotation_references?: number } } };
-          const code = body.error?.code;
-          const msg = body.error?.message;
-          const refs = body.error?.details?.annotation_references;
-          if (code === "category_in_use" && typeof refs === "number") {
-            setMessage(`Cannot delete "${labelName}": ${refs} annotation${refs === 1 ? "" : "s"} still reference this class. Clear those annotations and submit before deleting.`);
-          } else if (msg) {
-            setMessage(`Failed to delete label: ${msg}`);
-          } else {
-            setMessage(`Failed to delete label: ${error.message}`);
-          }
-        } catch {
-          setMessage(`Failed to delete label: ${error.message}`);
-        }
-      } else {
-        setMessage(error instanceof Error ? `Failed to delete label: ${error.message}` : "Failed to delete label.");
-      }
-    } finally {
-      setDeletingLabelId(null);
-    }
-  }
-
-  async function confirmImportFromDialog() {
-    const files = importDialog.files;
-    const folderName = importFolderName.trim();
-    if (!importValidation.canSubmit) {
-      setMessage(importValidation.filesError ?? importValidation.projectError ?? importValidation.folderError ?? "Import is not ready.");
-      if (importValidation.filesError) closeImportDialog();
-      return;
-    }
-
-    try {
-      setIsImporting(true);
-      setMessage("Importing images...");
-      setImportFailures([]);
-      const totalBytes = files.reduce((sum, file) => sum + file.size, 0);
-      setImportProgress({
-        totalFiles: files.length,
-        completedFiles: 0,
-        uploadedFiles: 0,
-        failedFiles: 0,
-        totalBytes,
-        processedBytes: 0,
-        startedAtMs: Date.now(),
-        activeFileName: null,
-      });
-
-      let targetProjectId = "";
-      let targetProjectName = "";
-
-      if (importMode === "new") {
-        const projectName = importNewProjectName.trim();
-        if (!projectName) {
-          setMessage("Project name is required for new project imports.");
-          return;
-        }
-        const project = await createProject({ name: projectName, task_type: importNewProjectTaskType });
-        targetProjectId = project.id;
-        targetProjectName = project.name;
-      } else {
-        const project = projects.find((item) => item.id === importExistingProjectId);
-        if (!project) {
-          setMessage("Please select an existing project.");
-          return;
-        }
-        targetProjectId = project.id;
-        targetProjectName = project.name;
-      }
-
-      let uploadedCount = 0;
-      const failures: string[] = [];
-
-      for (const file of files) {
-        setImportProgress((previous) => (previous ? { ...previous, activeFileName: file.name } : previous));
-        try {
-          const targetRelativePath = buildTargetRelativePath(file, folderName);
-          await uploadAsset(targetProjectId, file, targetRelativePath);
-          uploadedCount += 1;
-          setImportProgress((previous) =>
-            previous
-              ? {
-                  ...previous,
-                  completedFiles: previous.completedFiles + 1,
-                  uploadedFiles: previous.uploadedFiles + 1,
-                  processedBytes: previous.processedBytes + file.size,
-                  activeFileName: null,
-                }
-              : previous,
-          );
-        } catch (error) {
-          if (error instanceof ApiError) {
-            const reason = error.responseBody ? ` (${error.responseBody})` : "";
-            failures.push(`${file.name}: ${error.message}${reason}`);
-          } else {
-            failures.push(`${file.name}: ${error instanceof Error ? error.message : "unknown upload error"}`);
-          }
-          setImportProgress((previous) =>
-            previous
-              ? {
-                  ...previous,
-                  completedFiles: previous.completedFiles + 1,
-                  failedFiles: previous.failedFiles + 1,
-                  processedBytes: previous.processedBytes + file.size,
-                  activeFileName: null,
-                }
-              : previous,
-          );
-        }
-      }
-
-      await refetchProjects();
-      await refetchAssets(targetProjectId);
-      const targetProject = importMode === "new" ? null : projects.find((item) => item.id === targetProjectId) ?? null;
-      setAnnotationMode(projectTaskTypeToAnnotationMode(targetProject?.task_type ?? importNewProjectTaskType));
-      treeState.resetTreeState();
-      resetAnnotationWorkflow();
-      setEditMode(false);
-      setHasUnsavedDrafts(false);
-      if (targetProjectId !== selectedProjectId) {
-        router.push(`/projects/${encodeURIComponent(targetProjectId)}/datasets`);
-      }
-      setSelectedImportExistingFolder("");
-      setImportFolderOptionsByProject((previous) => {
-        const importedRelativePaths = files.map((file) => buildTargetRelativePath(file, folderName));
-        const importedFolders = collectFolderPathsFromRelativePaths(importedRelativePaths);
-        const merged = new Set([...(previous[targetProjectId] ?? []), ...importedFolders]);
-        return {
-          ...previous,
-          [targetProjectId]: Array.from(merged).sort((a, b) => a.localeCompare(b)),
-        };
-      });
-      setImportFailures(failures);
-      setSelectedImportExistingFolder("");
-      closeImportDialog();
-
-      if (uploadedCount === 0) setMessage(`Import failed: no files uploaded to "${folderName}".`);
-      else if (failures.length > 0)
-        setMessage(`Imported ${uploadedCount}/${files.length} images into "${targetProjectName}/${folderName}".`);
-      else setMessage(`Imported ${uploadedCount} images into "${targetProjectName}/${folderName}".`);
-    } catch (error) {
-      setImportFailures([]);
-      setImportProgress(null);
-      setMessage(error instanceof Error ? `Import failed: ${error.message}` : "Import failed.");
-    } finally {
-      setIsImporting(false);
-    }
-  }
-
-  async function handleImport() {
-    const picker = document.createElement("input");
-    picker.type = "file";
-    picker.accept = "image/*";
-    picker.multiple = true;
-    (picker as HTMLInputElement & { webkitdirectory?: boolean }).webkitdirectory = true;
-
-    picker.onchange = async () => {
-      const files = Array.from(picker.files ?? []).filter(isImageCandidate);
-      if (files.length === 0) {
-        setImportFailures([]);
-        setMessage("No image files were selected (supported by MIME or extension).");
-        return;
-      }
-      const rootName = files[0].webkitRelativePath.split("/")[0] || `Dataset ${new Date().toLocaleString()}`;
-      const defaultProject = projects.find((project) => project.id === selectedProjectId) ?? projects[0];
-      setImportNewProjectTaskType(annotationModeToNewProjectTaskType(projectTaskTypeToAnnotationMode(defaultProject?.task_type)));
-      openImportDialog(files, rootName, defaultProject?.id ?? "");
-    };
-
-    picker.click();
-  }
-
-  async function handleImportVideoSubmit(file: File, payload: VideoImportPayload) {
-    if (!selectedProjectId) {
-      setVideoImportError("Select a project before importing a video.");
-      return;
-    }
-
-    try {
-      setIsVideoImporting(true);
-      setVideoImportError(null);
-      setMessage(null);
-      const response = await importVideo(selectedProjectId, file, {
-        ...payload,
-        task_id: selectedTaskId,
-      });
-      await Promise.all([refetchFolders(selectedProjectId), refetchAssets(selectedProjectId)]);
-      if (response.sequence.folder_path) treeState.handleSelectFolderScope(response.sequence.folder_path);
-      setIsVideoImportModalOpen(false);
-      setMessage(`Processing video "${response.sequence.name}"...`);
-    } catch (error) {
-      setVideoImportError(error instanceof Error ? error.message : "Failed to import video.");
-    } finally {
-      setIsVideoImporting(false);
-    }
-  }
-
   function handleCreateDataset() {
     if (!selectedProjectId) {
       setMessage("Select a project before creating a dataset.");
@@ -864,11 +651,8 @@ export default function ProjectAssetsWorkspace() {
             currentAssetId={treeState.currentAsset?.id ?? null}
             assetReviewStateById={assetReviewStateById}
             onImportImages={handleImport}
-            onImportVideo={() => {
-              setVideoImportError(null);
-              setIsVideoImportModalOpen(true);
-            }}
-            onOpenWebcam={() => setIsWebcamModalOpen(true)}
+            onImportVideo={openVideoImportModal}
+            onOpenWebcam={openWebcamModal}
             onCollapseAllFolders={treeState.handleCollapseAllFolders}
             onExpandAllFolders={treeState.handleExpandAllFolders}
             onSelectFolderScope={treeState.handleSelectFolderScope}
@@ -1087,11 +871,7 @@ export default function ProjectAssetsWorkspace() {
         errorMessage={videoImportError}
         enablePrelabels={selectedTask?.kind === "bbox"}
         defaultPrompts={activeLabelRows.map((label) => label.name)}
-        onClose={() => {
-          if (isVideoImporting) return;
-          setIsVideoImportModalOpen(false);
-          setVideoImportError(null);
-        }}
+        onClose={closeVideoImportModal}
         onSubmit={(file, payload) => void handleImportVideoSubmit(file, payload)}
       />
       <WebcamCaptureModal
@@ -1102,27 +882,10 @@ export default function ProjectAssetsWorkspace() {
         folderOptions={folders.map((folder) => folder.path)}
         enablePrelabels={selectedTask?.kind === "bbox"}
         defaultPrompts={activeLabelRows.map((label) => label.name)}
-        onClose={() => setIsWebcamModalOpen(false)}
-        onSequenceCreated={(sequence) => {
-          if (sequence.folder_path) treeState.handleSelectFolderScope(sequence.folder_path);
-          void refetchFolders(selectedProjectId);
-        }}
-        onFrameUploaded={(asset, sequence) => {
-          void refetchAssets(selectedProjectId);
-          void refetchFolders(selectedProjectId);
-          if (currentSequenceId === sequence.id) void refetchSequence();
-          if (!treeState.currentAsset && sequence.folder_path) treeState.handleSelectFolderScope(sequence.folder_path);
-          if (asset.id && currentSequenceId === sequence.id) {
-            treeState.handleSelectTreeAsset(asset.id, sequence.folder_path ?? undefined);
-          }
-        }}
-        onFinished={(sequences) => {
-          void Promise.all([refetchAssets(selectedProjectId), refetchFolders(selectedProjectId)]).then(() => {
-            const firstSequence = sequences[0] ?? null;
-            if (firstSequence?.folder_path) treeState.handleSelectFolderScope(firstSequence.folder_path);
-            if (sequences.some((sequence) => sequence.id === currentSequenceId)) void refetchSequence();
-          });
-        }}
+        onClose={closeWebcamModal}
+        onSequenceCreated={handleWebcamSequenceCreated}
+        onFrameUploaded={handleWebcamFrameUploaded}
+        onFinished={handleWebcamFinished}
       />
     </>
   );

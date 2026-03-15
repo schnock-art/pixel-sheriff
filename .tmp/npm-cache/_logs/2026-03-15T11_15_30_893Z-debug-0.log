@@ -1,0 +1,670 @@
+0 verbose cli C:\Program Files\nodejs\node.exe C:\Program Files\nodejs\node_modules\npm\bin\npm-cli.js
+1 info using npm@11.6.2
+2 info using node@v24.13.0
+3 silly config load:file:C:\Program Files\nodejs\node_modules\npm\npmrc
+4 silly config load:file:C:\Users\jange\Scripts\pixel-sheriff\apps\web\.npmrc
+5 silly config load:file:C:\Users\jange\.npmrc
+6 silly config load:file:C:\Users\jange\AppData\Roaming\npm\etc\npmrc
+7 verbose title npm install
+8 verbose argv "install" "--package-lock-only"
+9 verbose logfile logs-max:10 dir:c:\Users\jange\Scripts\pixel-sheriff\.tmp\npm-cache\_logs\2026-03-15T11_15_30_893Z-
+10 verbose logfile c:\Users\jange\Scripts\pixel-sheriff\.tmp\npm-cache\_logs\2026-03-15T11_15_30_893Z-debug-0.log
+11 silly logfile done cleaning log files
+12 silly packumentCache heap:4496293888 maxSize:1124073472 maxEntrySize:562036736
+13 silly idealTree buildDeps
+14 silly fetch manifest c8@^10.1.3
+15 silly packumentCache full:https://registry.npmjs.org/c8 cache-miss
+16 http fetch GET 200 https://registry.npmjs.org/c8 122ms (cache miss)
+17 silly packumentCache full:https://registry.npmjs.org/c8 set size:undefined disposed:false
+18 silly fetch manifest monocart-coverage-reports@^2
+19 silly packumentCache full:https://registry.npmjs.org/monocart-coverage-reports cache-miss
+20 http fetch GET 200 https://registry.npmjs.org/npm 170ms
+21 http fetch GET 200 https://registry.npmjs.org/monocart-coverage-reports 49ms (cache miss)
+22 silly packumentCache full:https://registry.npmjs.org/monocart-coverage-reports set size:undefined disposed:false
+23 silly placeDep ROOT c8@10.1.3 OK for: pixel-sheriff-web@0.1.0 want: ^10.1.3
+24 silly fetch manifest yargs@^17.7.2
+25 silly packumentCache full:https://registry.npmjs.org/yargs cache-miss
+26 silly fetch manifest find-up@^5.0.0
+27 silly packumentCache full:https://registry.npmjs.org/find-up cache-miss
+28 silly fetch manifest test-exclude@^7.0.1
+29 silly packumentCache full:https://registry.npmjs.org/test-exclude cache-miss
+30 silly fetch manifest yargs-parser@^21.1.1
+31 silly packumentCache full:https://registry.npmjs.org/yargs-parser cache-miss
+32 silly fetch manifest v8-to-istanbul@^9.0.0
+33 silly packumentCache full:https://registry.npmjs.org/v8-to-istanbul cache-miss
+34 silly fetch manifest foreground-child@^3.1.1
+35 silly packumentCache full:https://registry.npmjs.org/foreground-child cache-miss
+36 silly fetch manifest istanbul-reports@^3.1.6
+37 silly packumentCache full:https://registry.npmjs.org/istanbul-reports cache-miss
+38 silly fetch manifest @bcoe/v8-coverage@^1.0.1
+39 silly packumentCache full:https://registry.npmjs.org/@bcoe%2fv8-coverage cache-miss
+40 silly fetch manifest @istanbuljs/schema@^0.1.3
+41 silly packumentCache full:https://registry.npmjs.org/@istanbuljs%2fschema cache-miss
+42 silly fetch manifest istanbul-lib-report@^3.0.1
+43 silly packumentCache full:https://registry.npmjs.org/istanbul-lib-report cache-miss
+44 silly fetch manifest istanbul-lib-coverage@^3.2.0
+45 silly packumentCache full:https://registry.npmjs.org/istanbul-lib-coverage cache-miss
+46 http fetch GET 200 https://registry.npmjs.org/find-up 44ms (cache miss)
+47 silly packumentCache full:https://registry.npmjs.org/find-up set size:undefined disposed:false
+48 http fetch GET 200 https://registry.npmjs.org/yargs 58ms (cache miss)
+49 silly packumentCache full:https://registry.npmjs.org/yargs set size:undefined disposed:false
+50 http fetch GET 200 https://registry.npmjs.org/foreground-child 109ms (cache miss)
+51 silly packumentCache full:https://registry.npmjs.org/foreground-child set size:undefined disposed:false
+52 http fetch GET 200 https://registry.npmjs.org/istanbul-lib-report 117ms (cache miss)
+53 silly packumentCache full:https://registry.npmjs.org/istanbul-lib-report set size:undefined disposed:false
+54 http fetch GET 200 https://registry.npmjs.org/istanbul-lib-coverage 118ms (cache miss)
+55 silly packumentCache full:https://registry.npmjs.org/istanbul-lib-coverage set size:undefined disposed:false
+56 http fetch GET 200 https://registry.npmjs.org/yargs-parser 123ms (cache miss)
+57 silly packumentCache full:https://registry.npmjs.org/yargs-parser set size:undefined disposed:false
+58 http fetch GET 200 https://registry.npmjs.org/v8-to-istanbul 123ms (cache miss)
+59 silly packumentCache full:https://registry.npmjs.org/v8-to-istanbul set size:undefined disposed:false
+60 http fetch GET 200 https://registry.npmjs.org/istanbul-reports 127ms (cache miss)
+61 silly packumentCache full:https://registry.npmjs.org/istanbul-reports set size:undefined disposed:false
+62 http fetch GET 200 https://registry.npmjs.org/test-exclude 269ms (cache miss)
+63 silly packumentCache full:https://registry.npmjs.org/test-exclude set size:undefined disposed:false
+64 http fetch GET 200 https://registry.npmjs.org/@bcoe%2fv8-coverage 385ms (cache miss)
+65 silly packumentCache full:https://registry.npmjs.org/@bcoe%2fv8-coverage set size:undefined disposed:false
+66 http fetch GET 200 https://registry.npmjs.org/@istanbuljs%2fschema 396ms (cache miss)
+67 silly packumentCache full:https://registry.npmjs.org/@istanbuljs%2fschema set size:undefined disposed:false
+68 silly placeDep ROOT @bcoe/v8-coverage@1.0.2 OK for: c8@10.1.3 want: ^1.0.1
+69 silly placeDep ROOT @istanbuljs/schema@0.1.3 OK for: c8@10.1.3 want: ^0.1.3
+70 silly placeDep ROOT find-up@5.0.0 OK for: c8@10.1.3 want: ^5.0.0
+71 silly placeDep ROOT foreground-child@3.3.1 OK for: c8@10.1.3 want: ^3.1.1
+72 silly placeDep ROOT istanbul-lib-coverage@3.2.2 OK for: c8@10.1.3 want: ^3.2.0
+73 silly placeDep ROOT istanbul-lib-report@3.0.1 OK for: c8@10.1.3 want: ^3.0.1
+74 silly placeDep ROOT istanbul-reports@3.2.0 OK for: c8@10.1.3 want: ^3.1.6
+75 silly placeDep ROOT test-exclude@7.0.2 OK for: c8@10.1.3 want: ^7.0.1
+76 silly placeDep ROOT v8-to-istanbul@9.3.0 OK for: c8@10.1.3 want: ^9.0.0
+77 silly placeDep ROOT yargs@17.7.2 OK for: c8@10.1.3 want: ^17.7.2
+78 silly placeDep ROOT yargs-parser@21.1.1 OK for: c8@10.1.3 want: ^21.1.1
+79 silly fetch manifest locate-path@^6.0.0
+80 silly packumentCache full:https://registry.npmjs.org/locate-path cache-miss
+81 silly fetch manifest path-exists@^4.0.0
+82 silly packumentCache full:https://registry.npmjs.org/path-exists cache-miss
+83 silly fetch manifest cross-spawn@^7.0.6
+84 silly packumentCache full:https://registry.npmjs.org/cross-spawn cache-miss
+85 silly fetch manifest signal-exit@^4.0.1
+86 silly packumentCache full:https://registry.npmjs.org/signal-exit cache-miss
+87 silly fetch manifest make-dir@^4.0.0
+88 silly packumentCache full:https://registry.npmjs.org/make-dir cache-miss
+89 silly fetch manifest supports-color@^7.1.0
+90 silly packumentCache full:https://registry.npmjs.org/supports-color cache-miss
+91 silly fetch manifest html-escaper@^2.0.0
+92 silly packumentCache full:https://registry.npmjs.org/html-escaper cache-miss
+93 silly fetch manifest glob@^10.4.1
+94 silly packumentCache full:https://registry.npmjs.org/glob cache-miss
+95 silly fetch manifest minimatch@^10.2.2
+96 silly packumentCache full:https://registry.npmjs.org/minimatch cache-miss
+97 silly fetch manifest @jridgewell/trace-mapping@^0.3.12
+98 silly packumentCache full:https://registry.npmjs.org/@jridgewell%2ftrace-mapping cache-miss
+99 silly fetch manifest @types/istanbul-lib-coverage@^2.0.1
+100 silly packumentCache full:https://registry.npmjs.org/@types%2fistanbul-lib-coverage cache-miss
+101 silly fetch manifest convert-source-map@^2.0.0
+102 silly packumentCache full:https://registry.npmjs.org/convert-source-map cache-miss
+103 silly fetch manifest y18n@^5.0.5
+104 silly packumentCache full:https://registry.npmjs.org/y18n cache-miss
+105 silly fetch manifest cliui@^8.0.1
+106 silly packumentCache full:https://registry.npmjs.org/cliui cache-miss
+107 silly fetch manifest escalade@^3.1.1
+108 silly packumentCache full:https://registry.npmjs.org/escalade cache-miss
+109 silly fetch manifest string-width@^4.2.3
+110 silly packumentCache full:https://registry.npmjs.org/string-width cache-miss
+111 silly fetch manifest get-caller-file@^2.0.5
+112 silly packumentCache full:https://registry.npmjs.org/get-caller-file cache-miss
+113 silly fetch manifest require-directory@^2.1.1
+114 silly packumentCache full:https://registry.npmjs.org/require-directory cache-miss
+115 http fetch GET 200 https://registry.npmjs.org/path-exists 98ms (cache miss)
+116 silly packumentCache full:https://registry.npmjs.org/path-exists set size:undefined disposed:false
+117 http fetch GET 200 https://registry.npmjs.org/locate-path 99ms (cache miss)
+118 silly packumentCache full:https://registry.npmjs.org/locate-path set size:undefined disposed:false
+119 http fetch GET 200 https://registry.npmjs.org/html-escaper 98ms (cache miss)
+120 silly packumentCache full:https://registry.npmjs.org/html-escaper set size:undefined disposed:false
+121 http fetch GET 200 https://registry.npmjs.org/signal-exit 99ms (cache miss)
+122 silly packumentCache full:https://registry.npmjs.org/signal-exit set size:undefined disposed:false
+123 http fetch GET 200 https://registry.npmjs.org/make-dir 101ms (cache miss)
+124 silly packumentCache full:https://registry.npmjs.org/make-dir set size:undefined disposed:false
+125 http fetch GET 200 https://registry.npmjs.org/cross-spawn 103ms (cache miss)
+126 silly packumentCache full:https://registry.npmjs.org/cross-spawn set size:undefined disposed:false
+127 http fetch GET 200 https://registry.npmjs.org/supports-color 105ms (cache miss)
+128 silly packumentCache full:https://registry.npmjs.org/supports-color set size:undefined disposed:false
+129 http fetch GET 200 https://registry.npmjs.org/glob 110ms (cache miss)
+130 silly packumentCache full:https://registry.npmjs.org/glob set size:undefined disposed:false
+131 http fetch GET 200 https://registry.npmjs.org/minimatch 116ms (cache miss)
+132 silly packumentCache full:https://registry.npmjs.org/minimatch set size:undefined disposed:false
+133 http fetch GET 200 https://registry.npmjs.org/string-width 127ms (cache miss)
+134 silly packumentCache full:https://registry.npmjs.org/string-width set size:undefined disposed:false
+135 http fetch GET 200 https://registry.npmjs.org/get-caller-file 128ms (cache miss)
+136 silly packumentCache full:https://registry.npmjs.org/get-caller-file set size:undefined disposed:false
+137 http fetch GET 200 https://registry.npmjs.org/require-directory 140ms (cache miss)
+138 silly packumentCache full:https://registry.npmjs.org/require-directory set size:undefined disposed:false
+139 http fetch GET 200 https://registry.npmjs.org/convert-source-map 151ms (cache miss)
+140 silly packumentCache full:https://registry.npmjs.org/convert-source-map set size:undefined disposed:false
+141 http fetch GET 200 https://registry.npmjs.org/escalade 151ms (cache miss)
+142 silly packumentCache full:https://registry.npmjs.org/escalade set size:undefined disposed:false
+143 http fetch GET 200 https://registry.npmjs.org/cliui 152ms (cache miss)
+144 silly packumentCache full:https://registry.npmjs.org/cliui set size:undefined disposed:false
+145 http fetch GET 200 https://registry.npmjs.org/y18n 155ms (cache miss)
+146 silly packumentCache full:https://registry.npmjs.org/y18n set size:undefined disposed:false
+147 http fetch GET 200 https://registry.npmjs.org/@types%2fistanbul-lib-coverage 256ms (cache miss)
+148 silly packumentCache full:https://registry.npmjs.org/@types%2fistanbul-lib-coverage set size:undefined disposed:false
+149 http fetch GET 200 https://registry.npmjs.org/@jridgewell%2ftrace-mapping 562ms (cache miss)
+150 silly packumentCache full:https://registry.npmjs.org/@jridgewell%2ftrace-mapping set size:undefined disposed:false
+151 silly placeDep ROOT locate-path@6.0.0 OK for: find-up@5.0.0 want: ^6.0.0
+152 silly placeDep ROOT path-exists@4.0.0 OK for: find-up@5.0.0 want: ^4.0.0
+153 silly fetch manifest p-locate@^5.0.0
+154 silly packumentCache full:https://registry.npmjs.org/p-locate cache-miss
+155 http fetch GET 200 https://registry.npmjs.org/p-locate 37ms (cache miss)
+156 silly packumentCache full:https://registry.npmjs.org/p-locate set size:undefined disposed:false
+157 silly placeDep ROOT cross-spawn@7.0.6 OK for: foreground-child@3.3.1 want: ^7.0.6
+158 silly placeDep ROOT signal-exit@4.1.0 OK for: foreground-child@3.3.1 want: ^4.0.1
+159 silly fetch manifest which@^2.0.1
+160 silly packumentCache full:https://registry.npmjs.org/which cache-miss
+161 silly fetch manifest path-key@^3.1.0
+162 silly packumentCache full:https://registry.npmjs.org/path-key cache-miss
+163 silly fetch manifest shebang-command@^2.0.0
+164 silly packumentCache full:https://registry.npmjs.org/shebang-command cache-miss
+165 http fetch GET 200 https://registry.npmjs.org/path-key 42ms (cache miss)
+166 silly packumentCache full:https://registry.npmjs.org/path-key set size:undefined disposed:false
+167 http fetch GET 200 https://registry.npmjs.org/shebang-command 43ms (cache miss)
+168 silly packumentCache full:https://registry.npmjs.org/shebang-command set size:undefined disposed:false
+169 http fetch GET 200 https://registry.npmjs.org/which 68ms (cache miss)
+170 silly packumentCache full:https://registry.npmjs.org/which set size:undefined disposed:false
+171 silly placeDep ROOT path-key@3.1.1 OK for: cross-spawn@7.0.6 want: ^3.1.0
+172 silly placeDep ROOT shebang-command@2.0.0 OK for: cross-spawn@7.0.6 want: ^2.0.0
+173 silly placeDep ROOT which@2.0.2 OK for: cross-spawn@7.0.6 want: ^2.0.1
+174 silly fetch manifest shebang-regex@^3.0.0
+175 silly packumentCache full:https://registry.npmjs.org/shebang-regex cache-miss
+176 silly fetch manifest isexe@^2.0.0
+177 silly packumentCache full:https://registry.npmjs.org/isexe cache-miss
+178 http fetch GET 200 https://registry.npmjs.org/isexe 207ms (cache miss)
+179 silly packumentCache full:https://registry.npmjs.org/isexe set size:undefined disposed:false
+180 http fetch GET 200 https://registry.npmjs.org/shebang-regex 215ms (cache miss)
+181 silly packumentCache full:https://registry.npmjs.org/shebang-regex set size:undefined disposed:false
+182 silly placeDep ROOT make-dir@4.0.0 OK for: istanbul-lib-report@3.0.1 want: ^4.0.0
+183 silly placeDep ROOT supports-color@7.2.0 OK for: istanbul-lib-report@3.0.1 want: ^7.1.0
+184 silly fetch manifest semver@^7.5.3
+185 silly packumentCache full:https://registry.npmjs.org/semver cache-miss
+186 silly fetch manifest has-flag@^4.0.0
+187 silly packumentCache full:https://registry.npmjs.org/has-flag cache-miss
+188 http fetch GET 200 https://registry.npmjs.org/semver 41ms (cache miss)
+189 silly packumentCache full:https://registry.npmjs.org/semver set size:undefined disposed:false
+190 http fetch GET 200 https://registry.npmjs.org/has-flag 41ms (cache miss)
+191 silly packumentCache full:https://registry.npmjs.org/has-flag set size:undefined disposed:false
+192 silly placeDep ROOT html-escaper@2.0.2 OK for: istanbul-reports@3.2.0 want: ^2.0.0
+193 silly placeDep ROOT p-locate@5.0.0 OK for: locate-path@6.0.0 want: ^5.0.0
+194 silly fetch manifest p-limit@^3.0.2
+195 silly packumentCache full:https://registry.npmjs.org/p-limit cache-miss
+196 http fetch GET 200 https://registry.npmjs.org/p-limit 533ms (cache miss)
+197 silly packumentCache full:https://registry.npmjs.org/p-limit set size:undefined disposed:false
+198 silly placeDep ROOT semver@7.7.4 OK for: make-dir@4.0.0 want: ^7.5.3
+199 silly placeDep ROOT p-limit@3.1.0 OK for: p-locate@5.0.0 want: ^3.0.2
+200 silly fetch manifest yocto-queue@^0.1.0
+201 silly packumentCache full:https://registry.npmjs.org/yocto-queue cache-miss
+202 http fetch GET 200 https://registry.npmjs.org/yocto-queue 46ms (cache miss)
+203 silly packumentCache full:https://registry.npmjs.org/yocto-queue set size:undefined disposed:false
+204 silly placeDep ROOT yocto-queue@0.1.0 OK for: p-limit@3.1.0 want: ^0.1.0
+205 silly placeDep ROOT shebang-regex@3.0.0 OK for: shebang-command@2.0.0 want: ^3.0.0
+206 silly placeDep ROOT has-flag@4.0.0 OK for: supports-color@7.2.0 want: ^4.0.0
+207 silly placeDep ROOT glob@10.5.0 OK for: test-exclude@7.0.2 want: ^10.4.1
+208 silly placeDep ROOT minimatch@10.2.4 OK for: test-exclude@7.0.2 want: ^10.2.2
+209 silly fetch manifest minipass@^7.1.2
+210 silly packumentCache full:https://registry.npmjs.org/minipass cache-miss
+211 silly fetch manifest jackspeak@^3.1.2
+212 silly packumentCache full:https://registry.npmjs.org/jackspeak cache-miss
+213 silly fetch manifest minimatch@^9.0.4
+214 silly packumentCache full:https://registry.npmjs.org/minimatch cache-miss
+215 silly fetch manifest path-scurry@^1.11.1
+216 silly packumentCache full:https://registry.npmjs.org/path-scurry cache-miss
+217 silly fetch manifest package-json-from-dist@^1.0.0
+218 silly packumentCache full:https://registry.npmjs.org/package-json-from-dist cache-miss
+219 silly fetch manifest brace-expansion@^5.0.2
+220 silly packumentCache full:https://registry.npmjs.org/brace-expansion cache-miss
+221 http cache https://registry.npmjs.org/minimatch 6ms (cache hit)
+222 silly packumentCache full:https://registry.npmjs.org/minimatch set size:352359 disposed:false
+223 http fetch GET 200 https://registry.npmjs.org/package-json-from-dist 41ms (cache miss)
+224 silly packumentCache full:https://registry.npmjs.org/package-json-from-dist set size:undefined disposed:false
+225 http fetch GET 200 https://registry.npmjs.org/brace-expansion 44ms (cache miss)
+226 silly packumentCache full:https://registry.npmjs.org/brace-expansion set size:undefined disposed:false
+227 http fetch GET 200 https://registry.npmjs.org/path-scurry 45ms (cache miss)
+228 silly packumentCache full:https://registry.npmjs.org/path-scurry set size:undefined disposed:false
+229 http fetch GET 200 https://registry.npmjs.org/minipass 77ms (cache miss)
+230 silly packumentCache full:https://registry.npmjs.org/minipass set size:undefined disposed:false
+231 http fetch GET 200 https://registry.npmjs.org/jackspeak 220ms (cache miss)
+232 silly packumentCache full:https://registry.npmjs.org/jackspeak set size:undefined disposed:false
+233 silly placeDep ROOT jackspeak@3.4.3 OK for: glob@10.5.0 want: ^3.1.2
+234 silly placeDep node_modules/glob minimatch@9.0.9 OK for: glob@10.5.0 want: ^9.0.4
+235 silly placeDep ROOT minipass@7.1.3 OK for: glob@10.5.0 want: ^7.1.2
+236 silly placeDep ROOT package-json-from-dist@1.0.1 OK for: glob@10.5.0 want: ^1.0.0
+237 silly placeDep ROOT path-scurry@1.11.1 OK for: glob@10.5.0 want: ^1.11.1
+238 silly fetch manifest @isaacs/cliui@^8.0.2
+239 silly packumentCache full:https://registry.npmjs.org/@isaacs%2fcliui cache-miss
+240 silly fetch manifest @pkgjs/parseargs@^0.11.0
+241 silly packumentCache full:https://registry.npmjs.org/@pkgjs%2fparseargs cache-miss
+242 silly fetch manifest brace-expansion@^2.0.2
+243 silly packumentCache full:https://registry.npmjs.org/brace-expansion cache-miss
+244 silly fetch manifest lru-cache@^10.2.0
+245 silly packumentCache full:https://registry.npmjs.org/lru-cache cache-miss
+246 http cache https://registry.npmjs.org/brace-expansion 5ms (cache hit)
+247 silly packumentCache full:https://registry.npmjs.org/brace-expansion set size:55744 disposed:false
+248 http fetch GET 200 https://registry.npmjs.org/lru-cache 67ms (cache miss)
+249 silly packumentCache full:https://registry.npmjs.org/lru-cache set size:undefined disposed:false
+250 http fetch GET 200 https://registry.npmjs.org/@isaacs%2fcliui 391ms (cache miss)
+251 silly packumentCache full:https://registry.npmjs.org/@isaacs%2fcliui set size:undefined disposed:false
+252 http fetch GET 200 https://registry.npmjs.org/@pkgjs%2fparseargs 508ms (cache miss)
+253 silly packumentCache full:https://registry.npmjs.org/@pkgjs%2fparseargs set size:undefined disposed:false
+254 silly placeDep ROOT @isaacs/cliui@8.0.2 OK for: jackspeak@3.4.3 want: ^8.0.2
+255 silly placeDep ROOT @pkgjs/parseargs@0.11.0 OK for: jackspeak@3.4.3 want: ^0.11.0
+256 silly fetch manifest wrap-ansi@^8.1.0
+257 silly packumentCache full:https://registry.npmjs.org/wrap-ansi cache-miss
+258 silly fetch manifest strip-ansi@^7.0.1
+259 silly packumentCache full:https://registry.npmjs.org/strip-ansi cache-miss
+260 silly fetch manifest string-width@^5.1.2
+261 silly packumentCache full:https://registry.npmjs.org/string-width cache-miss
+262 silly fetch manifest wrap-ansi-cjs@npm:wrap-ansi@^7.0.0
+263 silly packumentCache full:https://registry.npmjs.org/wrap-ansi cache-miss
+264 silly fetch manifest strip-ansi-cjs@npm:strip-ansi@^6.0.1
+265 silly packumentCache full:https://registry.npmjs.org/strip-ansi cache-miss
+266 silly fetch manifest string-width-cjs@npm:string-width@^4.2.0
+267 silly packumentCache full:https://registry.npmjs.org/string-width cache-miss
+268 http cache https://registry.npmjs.org/string-width 5ms (cache hit)
+269 silly packumentCache full:https://registry.npmjs.org/string-width set size:68305 disposed:false
+270 http cache https://registry.npmjs.org/string-width 6ms (cache hit)
+271 silly packumentCache full:https://registry.npmjs.org/string-width set size:68305 disposed:false
+272 silly packumentCache full:https://registry.npmjs.org/string-width dispose
+273 http fetch GET 200 https://registry.npmjs.org/wrap-ansi 39ms (cache miss)
+274 silly packumentCache full:https://registry.npmjs.org/wrap-ansi set size:undefined disposed:false
+275 http fetch GET 200 https://registry.npmjs.org/wrap-ansi 44ms (cache miss)
+276 silly packumentCache full:https://registry.npmjs.org/wrap-ansi set size:undefined disposed:false
+277 http fetch GET 200 https://registry.npmjs.org/strip-ansi 48ms (cache miss)
+278 silly packumentCache full:https://registry.npmjs.org/strip-ansi set size:undefined disposed:false
+279 http fetch GET 200 https://registry.npmjs.org/strip-ansi 73ms (cache miss)
+280 silly packumentCache full:https://registry.npmjs.org/strip-ansi set size:undefined disposed:false
+281 silly placeDep ROOT string-width@5.1.2 OK for: @isaacs/cliui@8.0.2 want: ^5.1.2
+282 silly placeDep ROOT string-width-cjs@4.2.3 OK for: @isaacs/cliui@8.0.2 want: npm:string-width@^4.2.0
+283 silly placeDep ROOT strip-ansi@7.2.0 OK for: @isaacs/cliui@8.0.2 want: ^7.0.1
+284 silly placeDep ROOT strip-ansi-cjs@6.0.1 OK for: @isaacs/cliui@8.0.2 want: npm:strip-ansi@^6.0.1
+285 silly placeDep ROOT wrap-ansi@8.1.0 OK for: @isaacs/cliui@8.0.2 want: ^8.1.0
+286 silly placeDep ROOT wrap-ansi-cjs@7.0.0 OK for: @isaacs/cliui@8.0.2 want: npm:wrap-ansi@^7.0.0
+287 silly fetch manifest emoji-regex@^9.2.2
+288 silly packumentCache full:https://registry.npmjs.org/emoji-regex cache-miss
+289 silly fetch manifest eastasianwidth@^0.2.0
+290 silly packumentCache full:https://registry.npmjs.org/eastasianwidth cache-miss
+291 silly fetch manifest strip-ansi@^6.0.1
+292 silly packumentCache full:https://registry.npmjs.org/strip-ansi cache-miss
+293 silly fetch manifest emoji-regex@^8.0.0
+294 silly packumentCache full:https://registry.npmjs.org/emoji-regex cache-miss
+295 silly fetch manifest is-fullwidth-code-point@^3.0.0
+296 silly packumentCache full:https://registry.npmjs.org/is-fullwidth-code-point cache-miss
+297 silly fetch manifest ansi-regex@^6.2.2
+298 silly packumentCache full:https://registry.npmjs.org/ansi-regex cache-miss
+299 silly fetch manifest ansi-regex@^5.0.1
+300 silly packumentCache full:https://registry.npmjs.org/ansi-regex cache-miss
+301 silly fetch manifest ansi-styles@^6.1.0
+302 silly packumentCache full:https://registry.npmjs.org/ansi-styles cache-miss
+303 silly fetch manifest strip-ansi@^6.0.0
+304 silly packumentCache full:https://registry.npmjs.org/strip-ansi cache-miss
+305 silly fetch manifest ansi-styles@^4.0.0
+306 silly packumentCache full:https://registry.npmjs.org/ansi-styles cache-miss
+307 silly fetch manifest string-width@^4.1.0
+308 silly packumentCache full:https://registry.npmjs.org/string-width cache-hit
+309 http cache https://registry.npmjs.org/strip-ansi 29ms (cache hit)
+310 silly packumentCache full:https://registry.npmjs.org/strip-ansi set size:44998 disposed:false
+311 http cache https://registry.npmjs.org/strip-ansi 29ms (cache hit)
+312 silly packumentCache full:https://registry.npmjs.org/strip-ansi set size:44998 disposed:false
+313 silly packumentCache full:https://registry.npmjs.org/strip-ansi dispose
+314 http fetch GET 200 https://registry.npmjs.org/eastasianwidth 42ms (cache miss)
+315 silly packumentCache full:https://registry.npmjs.org/eastasianwidth set size:undefined disposed:false
+316 http fetch GET 200 https://registry.npmjs.org/emoji-regex 43ms (cache miss)
+317 silly packumentCache full:https://registry.npmjs.org/emoji-regex set size:undefined disposed:false
+318 http fetch GET 200 https://registry.npmjs.org/ansi-regex 43ms (cache miss)
+319 silly packumentCache full:https://registry.npmjs.org/ansi-regex set size:undefined disposed:false
+320 http fetch GET 200 https://registry.npmjs.org/is-fullwidth-code-point 44ms (cache miss)
+321 silly packumentCache full:https://registry.npmjs.org/is-fullwidth-code-point set size:undefined disposed:false
+322 http fetch GET 200 https://registry.npmjs.org/ansi-styles 45ms (cache miss)
+323 silly packumentCache full:https://registry.npmjs.org/ansi-styles set size:undefined disposed:false
+324 http fetch GET 200 https://registry.npmjs.org/emoji-regex 46ms (cache miss)
+325 silly packumentCache full:https://registry.npmjs.org/emoji-regex set size:undefined disposed:false
+326 http fetch GET 200 https://registry.npmjs.org/ansi-styles 46ms (cache miss)
+327 silly packumentCache full:https://registry.npmjs.org/ansi-styles set size:undefined disposed:false
+328 http fetch GET 200 https://registry.npmjs.org/ansi-regex 65ms (cache miss)
+329 silly packumentCache full:https://registry.npmjs.org/ansi-regex set size:undefined disposed:false
+330 silly placeDep ROOT brace-expansion@5.0.4 OK for: minimatch@10.2.4 want: ^5.0.2
+331 silly fetch manifest balanced-match@^4.0.2
+332 silly packumentCache full:https://registry.npmjs.org/balanced-match cache-miss
+333 http fetch GET 200 https://registry.npmjs.org/balanced-match 62ms (cache miss)
+334 silly packumentCache full:https://registry.npmjs.org/balanced-match set size:undefined disposed:false
+335 silly placeDep ROOT balanced-match@4.0.4 OK for: brace-expansion@5.0.4 want: ^4.0.2
+336 silly placeDep ROOT lru-cache@10.4.3 OK for: path-scurry@1.11.1 want: ^10.2.0
+337 silly placeDep ROOT eastasianwidth@0.2.0 OK for: string-width@5.1.2 want: ^0.2.0
+338 silly placeDep ROOT emoji-regex@9.2.2 OK for: string-width@5.1.2 want: ^9.2.2
+339 silly placeDep node_modules/string-width-cjs emoji-regex@8.0.0 OK for: string-width@4.2.3 want: ^8.0.0
+340 silly placeDep ROOT is-fullwidth-code-point@3.0.0 OK for: string-width@4.2.3 want: ^3.0.0
+341 silly placeDep node_modules/string-width-cjs strip-ansi@6.0.1 OK for: string-width@4.2.3 want: ^6.0.1
+342 silly placeDep ROOT ansi-regex@6.2.2 OK for: strip-ansi@7.2.0 want: ^6.2.2
+343 silly placeDep node_modules/strip-ansi-cjs ansi-regex@5.0.1 OK for: strip-ansi@6.0.1 want: ^5.0.1
+344 silly placeDep ROOT @jridgewell/trace-mapping@0.3.31 OK for: v8-to-istanbul@9.3.0 want: ^0.3.12
+345 silly placeDep ROOT @types/istanbul-lib-coverage@2.0.6 OK for: v8-to-istanbul@9.3.0 want: ^2.0.1
+346 silly placeDep ROOT convert-source-map@2.0.0 OK for: v8-to-istanbul@9.3.0 want: ^2.0.0
+347 silly fetch manifest @jridgewell/resolve-uri@^3.1.0
+348 silly packumentCache full:https://registry.npmjs.org/@jridgewell%2fresolve-uri cache-miss
+349 silly fetch manifest @jridgewell/sourcemap-codec@^1.4.14
+350 silly packumentCache full:https://registry.npmjs.org/@jridgewell%2fsourcemap-codec cache-miss
+351 http fetch GET 200 https://registry.npmjs.org/@jridgewell%2fresolve-uri 481ms (cache miss)
+352 silly packumentCache full:https://registry.npmjs.org/@jridgewell%2fresolve-uri set size:undefined disposed:false
+353 http fetch GET 200 https://registry.npmjs.org/@jridgewell%2fsourcemap-codec 506ms (cache miss)
+354 silly packumentCache full:https://registry.npmjs.org/@jridgewell%2fsourcemap-codec set size:undefined disposed:false
+355 silly placeDep ROOT @jridgewell/resolve-uri@3.1.2 OK for: @jridgewell/trace-mapping@0.3.31 want: ^3.1.0
+356 silly placeDep ROOT @jridgewell/sourcemap-codec@1.5.5 OK for: @jridgewell/trace-mapping@0.3.31 want: ^1.4.14
+357 silly placeDep ROOT isexe@2.0.0 OK for: which@2.0.2 want: ^2.0.0
+358 silly placeDep ROOT ansi-styles@6.2.3 OK for: wrap-ansi@8.1.0 want: ^6.1.0
+359 silly placeDep node_modules/wrap-ansi-cjs ansi-styles@4.3.0 OK for: wrap-ansi@7.0.0 want: ^4.0.0
+360 silly placeDep node_modules/wrap-ansi-cjs string-width@4.2.3 OK for: wrap-ansi@7.0.0 want: ^4.1.0
+361 silly placeDep node_modules/wrap-ansi-cjs strip-ansi@6.0.1 OK for: wrap-ansi@7.0.0 want: ^6.0.0
+362 silly fetch manifest color-convert@^2.0.1
+363 silly packumentCache full:https://registry.npmjs.org/color-convert cache-miss
+364 http fetch GET 200 https://registry.npmjs.org/color-convert 210ms (cache miss)
+365 silly packumentCache full:https://registry.npmjs.org/color-convert set size:undefined disposed:false
+366 silly placeDep ROOT cliui@8.0.1 OK for: yargs@17.7.2 want: ^8.0.1
+367 silly placeDep ROOT escalade@3.2.0 OK for: yargs@17.7.2 want: ^3.1.1
+368 silly placeDep ROOT get-caller-file@2.0.5 OK for: yargs@17.7.2 want: ^2.0.5
+369 silly placeDep ROOT require-directory@2.1.1 OK for: yargs@17.7.2 want: ^2.1.1
+370 silly placeDep node_modules/yargs string-width@4.2.3 OK for: yargs@17.7.2 want: ^4.2.3
+371 silly placeDep ROOT y18n@5.0.8 OK for: yargs@17.7.2 want: ^5.0.5
+372 silly fetch manifest wrap-ansi@^7.0.0
+373 silly packumentCache full:https://registry.npmjs.org/wrap-ansi cache-miss
+374 silly fetch manifest string-width@^4.2.0
+375 silly packumentCache full:https://registry.npmjs.org/string-width cache-hit
+376 http cache https://registry.npmjs.org/wrap-ansi 3ms (cache hit)
+377 silly packumentCache full:https://registry.npmjs.org/wrap-ansi set size:55299 disposed:false
+378 silly placeDep node_modules/cliui string-width@4.2.3 OK for: cliui@8.0.1 want: ^4.2.0
+379 silly placeDep node_modules/cliui strip-ansi@6.0.1 OK for: cliui@8.0.1 want: ^6.0.1
+380 silly placeDep node_modules/cliui wrap-ansi@7.0.0 OK for: cliui@8.0.1 want: ^7.0.0
+381 silly placeDep node_modules/cliui emoji-regex@8.0.0 OK for: string-width@4.2.3 want: ^8.0.0
+382 silly placeDep node_modules/cliui ansi-regex@5.0.1 OK for: strip-ansi@6.0.1 want: ^5.0.1
+383 silly placeDep node_modules/cliui ansi-styles@4.3.0 OK for: wrap-ansi@7.0.0 want: ^4.0.0
+384 silly placeDep ROOT color-convert@2.0.1 OK for: ansi-styles@4.3.0 want: ^2.0.1
+385 silly fetch manifest color-name@~1.1.4
+386 silly packumentCache full:https://registry.npmjs.org/color-name cache-miss
+387 http fetch GET 200 https://registry.npmjs.org/color-name 66ms (cache miss)
+388 silly packumentCache full:https://registry.npmjs.org/color-name set size:undefined disposed:false
+389 silly placeDep ROOT color-name@1.1.4 OK for: color-convert@2.0.1 want: ~1.1.4
+390 silly placeDep node_modules/glob brace-expansion@2.0.2 OK for: minimatch@9.0.9 want: ^2.0.2
+391 silly fetch manifest balanced-match@^1.0.0
+392 silly packumentCache full:https://registry.npmjs.org/balanced-match cache-miss
+393 http cache https://registry.npmjs.org/balanced-match 3ms (cache hit)
+394 silly packumentCache full:https://registry.npmjs.org/balanced-match set size:39082 disposed:false
+395 silly placeDep node_modules/glob balanced-match@1.0.2 OK for: brace-expansion@2.0.2 want: ^1.0.0
+396 silly placeDep node_modules/string-width-cjs ansi-regex@5.0.1 OK for: strip-ansi@6.0.1 want: ^5.0.1
+397 silly placeDep node_modules/wrap-ansi-cjs emoji-regex@8.0.0 OK for: string-width@4.2.3 want: ^8.0.0
+398 silly placeDep node_modules/wrap-ansi-cjs ansi-regex@5.0.1 OK for: strip-ansi@6.0.1 want: ^5.0.1
+399 silly placeDep node_modules/yargs emoji-regex@8.0.0 OK for: string-width@4.2.3 want: ^8.0.0
+400 silly placeDep node_modules/yargs strip-ansi@6.0.1 OK for: string-width@4.2.3 want: ^6.0.1
+401 silly placeDep node_modules/yargs ansi-regex@5.0.1 OK for: strip-ansi@6.0.1 want: ^5.0.1
+402 silly audit bulk request {
+402 silly audit   '@next/env': [ '14.2.5' ],
+402 silly audit   '@next/swc-darwin-arm64': [ '14.2.5' ],
+402 silly audit   '@next/swc-darwin-x64': [ '14.2.5' ],
+402 silly audit   '@next/swc-linux-arm64-gnu': [ '14.2.5' ],
+402 silly audit   '@next/swc-linux-arm64-musl': [ '14.2.5' ],
+402 silly audit   '@next/swc-linux-x64-gnu': [ '14.2.5' ],
+402 silly audit   '@next/swc-linux-x64-musl': [ '14.2.5' ],
+402 silly audit   '@next/swc-win32-arm64-msvc': [ '14.2.5' ],
+402 silly audit   '@next/swc-win32-ia32-msvc': [ '14.2.5' ],
+402 silly audit   '@next/swc-win32-x64-msvc': [ '14.2.5' ],
+402 silly audit   '@playwright/test': [ '1.41.2' ],
+402 silly audit   '@swc/counter': [ '0.1.3' ],
+402 silly audit   '@swc/helpers': [ '0.5.5' ],
+402 silly audit   '@types/node': [ '25.2.3' ],
+402 silly audit   '@types/react': [ '19.2.14' ],
+402 silly audit   ajv: [ '8.18.0' ],
+402 silly audit   'ajv-formats': [ '3.0.1' ],
+402 silly audit   busboy: [ '1.6.0' ],
+402 silly audit   'caniuse-lite': [ '1.0.30001769' ],
+402 silly audit   'client-only': [ '0.0.1' ],
+402 silly audit   csstype: [ '3.2.3' ],
+402 silly audit   'fast-deep-equal': [ '3.1.3' ],
+402 silly audit   'fast-uri': [ '3.1.0' ],
+402 silly audit   fsevents: [ '2.3.2' ],
+402 silly audit   'graceful-fs': [ '4.2.11' ],
+402 silly audit   'js-tokens': [ '4.0.0' ],
+402 silly audit   'json-schema-traverse': [ '1.0.0' ],
+402 silly audit   'loose-envify': [ '1.4.0' ],
+402 silly audit   nanoid: [ '3.3.11' ],
+402 silly audit   next: [ '14.2.5' ],
+402 silly audit   picocolors: [ '1.1.1' ],
+402 silly audit   playwright: [ '1.41.2' ],
+402 silly audit   'playwright-core': [ '1.41.2' ],
+402 silly audit   postcss: [ '8.4.31' ],
+402 silly audit   react: [ '18.3.1' ],
+402 silly audit   'react-dom': [ '18.3.1' ],
+402 silly audit   'require-from-string': [ '2.0.2' ],
+402 silly audit   scheduler: [ '0.23.2' ],
+402 silly audit   'source-map-js': [ '1.2.1' ],
+402 silly audit   streamsearch: [ '1.1.0' ],
+402 silly audit   'styled-jsx': [ '5.1.1' ],
+402 silly audit   tslib: [ '2.8.1' ],
+402 silly audit   typescript: [ '5.9.3' ],
+402 silly audit   'undici-types': [ '7.16.0' ],
+402 silly audit   c8: [ '10.1.3' ],
+402 silly audit   '@bcoe/v8-coverage': [ '1.0.2' ],
+402 silly audit   '@istanbuljs/schema': [ '0.1.3' ],
+402 silly audit   'find-up': [ '5.0.0' ],
+402 silly audit   'foreground-child': [ '3.3.1' ],
+402 silly audit   'istanbul-lib-coverage': [ '3.2.2' ],
+402 silly audit   'istanbul-lib-report': [ '3.0.1' ],
+402 silly audit   'istanbul-reports': [ '3.2.0' ],
+402 silly audit   'test-exclude': [ '7.0.2' ],
+402 silly audit   'v8-to-istanbul': [ '9.3.0' ],
+402 silly audit   yargs: [ '17.7.2' ],
+402 silly audit   'yargs-parser': [ '21.1.1' ],
+402 silly audit   'locate-path': [ '6.0.0' ],
+402 silly audit   'path-exists': [ '4.0.0' ],
+402 silly audit   'cross-spawn': [ '7.0.6' ],
+402 silly audit   'signal-exit': [ '4.1.0' ],
+402 silly audit   'path-key': [ '3.1.1' ],
+402 silly audit   'shebang-command': [ '2.0.0' ],
+402 silly audit   which: [ '2.0.2' ],
+402 silly audit   'make-dir': [ '4.0.0' ],
+402 silly audit   'supports-color': [ '7.2.0' ],
+402 silly audit   'html-escaper': [ '2.0.2' ],
+402 silly audit   'p-locate': [ '5.0.0' ],
+402 silly audit   semver: [ '7.7.4' ],
+402 silly audit   'p-limit': [ '3.1.0' ],
+402 silly audit   'yocto-queue': [ '0.1.0' ],
+402 silly audit   'shebang-regex': [ '3.0.0' ],
+402 silly audit   'has-flag': [ '4.0.0' ],
+402 silly audit   glob: [ '10.5.0' ],
+402 silly audit   minimatch: [ '10.2.4', '9.0.9' ],
+402 silly audit   jackspeak: [ '3.4.3' ],
+402 silly audit   minipass: [ '7.1.3' ],
+402 silly audit   'package-json-from-dist': [ '1.0.1' ],
+402 silly audit   'path-scurry': [ '1.11.1' ],
+402 silly audit   '@isaacs/cliui': [ '8.0.2' ],
+402 silly audit   '@pkgjs/parseargs': [ '0.11.0' ],
+402 silly audit   'string-width': [ '5.1.2', '4.2.3' ],
+402 silly audit   'strip-ansi': [ '7.2.0', '6.0.1' ],
+402 silly audit   'wrap-ansi': [ '8.1.0', '7.0.0' ],
+402 silly audit   'brace-expansion': [ '5.0.4', '2.0.2' ],
+402 silly audit   'balanced-match': [ '4.0.4', '1.0.2' ],
+402 silly audit   'lru-cache': [ '10.4.3' ],
+402 silly audit   eastasianwidth: [ '0.2.0' ],
+402 silly audit   'emoji-regex': [ '9.2.2', '8.0.0' ],
+402 silly audit   'is-fullwidth-code-point': [ '3.0.0' ],
+402 silly audit   'ansi-regex': [ '6.2.2', '5.0.1' ],
+402 silly audit   '@jridgewell/trace-mapping': [ '0.3.31' ],
+402 silly audit   '@types/istanbul-lib-coverage': [ '2.0.6' ],
+402 silly audit   'convert-source-map': [ '2.0.0' ],
+402 silly audit   '@jridgewell/resolve-uri': [ '3.1.2' ],
+402 silly audit   '@jridgewell/sourcemap-codec': [ '1.5.5' ],
+402 silly audit   isexe: [ '2.0.0' ],
+402 silly audit   'ansi-styles': [ '6.2.3', '4.3.0' ],
+402 silly audit   cliui: [ '8.0.1' ],
+402 silly audit   escalade: [ '3.2.0' ],
+402 silly audit   'get-caller-file': [ '2.0.5' ],
+402 silly audit   'require-directory': [ '2.1.1' ],
+402 silly audit   y18n: [ '5.0.8' ],
+402 silly audit   'color-convert': [ '2.0.1' ],
+402 silly audit   'color-name': [ '1.1.4' ]
+402 silly audit }
+403 http fetch POST 200 https://registry.npmjs.org/-/npm/v1/security/advisories/bulk 215ms
+404 silly audit report {
+404 silly audit report   next: [
+404 silly audit report     {
+404 silly audit report       id: 1099638,
+404 silly audit report       url: 'https://github.com/advisories/GHSA-gp8f-8m3g-qvj9',
+404 silly audit report       title: 'Next.js Cache Poisoning',
+404 silly audit report       severity: 'high',
+404 silly audit report       vulnerable_versions: '>=14.0.0 <14.2.10',
+404 silly audit report       cwe: [Array],
+404 silly audit report       cvss: [Object]
+404 silly audit report     },
+404 silly audit report     {
+404 silly audit report       id: 1100421,
+404 silly audit report       url: 'https://github.com/advisories/GHSA-g77x-44xx-532m',
+404 silly audit report       title: 'Denial of Service condition in Next.js image optimization',
+404 silly audit report       severity: 'moderate',
+404 silly audit report       vulnerable_versions: '>=10.0.0 <14.2.7',
+404 silly audit report       cwe: [Array],
+404 silly audit report       cvss: [Object]
+404 silly audit report     },
+404 silly audit report     {
+404 silly audit report       id: 1101438,
+404 silly audit report       url: 'https://github.com/advisories/GHSA-7m27-7ghc-44w9',
+404 silly audit report       title: 'Next.js Allows a Denial of Service (DoS) with Server Actions',
+404 silly audit report       severity: 'moderate',
+404 silly audit report       vulnerable_versions: '>=14.0.0 <14.2.21',
+404 silly audit report       cwe: [Array],
+404 silly audit report       cvss: [Object]
+404 silly audit report     },
+404 silly audit report     {
+404 silly audit report       id: 1105461,
+404 silly audit report       url: 'https://github.com/advisories/GHSA-3h52-269p-cp9r',
+404 silly audit report       title: 'Information exposure in Next.js dev server due to lack of origin verification',
+404 silly audit report       severity: 'low',
+404 silly audit report       vulnerable_versions: '>=13.0 <14.2.30',
+404 silly audit report       cwe: [Array],
+404 silly audit report       cvss: [Object]
+404 silly audit report     },
+404 silly audit report     {
+404 silly audit report       id: 1111391,
+404 silly audit report       url: 'https://github.com/advisories/GHSA-mwv6-3258-q52c',
+404 silly audit report       title: 'Next Vulnerable to Denial of Service with Server Components',
+404 silly audit report       severity: 'high',
+404 silly audit report       vulnerable_versions: '>=13.3.0 <14.2.34',
+404 silly audit report       cwe: [Array],
+404 silly audit report       cvss: [Object]
+404 silly audit report     },
+404 silly audit report     {
+404 silly audit report       id: 1107226,
+404 silly audit report       url: 'https://github.com/advisories/GHSA-g5qg-72qw-gw5v',
+404 silly audit report       title: 'Next.js Affected by Cache Key Confusion for Image Optimization API Routes',
+404 silly audit report       severity: 'moderate',
+404 silly audit report       vulnerable_versions: '>=0.9.9 <14.2.31',
+404 silly audit report       cwe: [Array],
+404 silly audit report       cvss: [Object]
+404 silly audit report     },
+404 silly audit report     {
+404 silly audit report       id: 1107420,
+404 silly audit report       url: 'https://github.com/advisories/GHSA-7gfc-8cq8-jh5f',
+404 silly audit report       title: 'Next.js authorization bypass vulnerability',
+404 silly audit report       severity: 'high',
+404 silly audit report       vulnerable_versions: '>=9.5.5 <14.2.15',
+404 silly audit report       cwe: [Array],
+404 silly audit report       cvss: [Object]
+404 silly audit report     },
+404 silly audit report     {
+404 silly audit report       id: 1107512,
+404 silly audit report       url: 'https://github.com/advisories/GHSA-4342-x723-ch2f',
+404 silly audit report       title: 'Next.js Improper Middleware Redirect Handling Leads to SSRF',
+404 silly audit report       severity: 'moderate',
+404 silly audit report       vulnerable_versions: '>=0.9.9 <14.2.32',
+404 silly audit report       cwe: [Array],
+404 silly audit report       cvss: [Object]
+404 silly audit report     },
+404 silly audit report     {
+404 silly audit report       id: 1107513,
+404 silly audit report       url: 'https://github.com/advisories/GHSA-xv57-4mr9-wg8v',
+404 silly audit report       title: 'Next.js Content Injection Vulnerability for Image Optimization',
+404 silly audit report       severity: 'moderate',
+404 silly audit report       vulnerable_versions: '>=0.9.9 <14.2.31',
+404 silly audit report       cwe: [Array],
+404 silly audit report       cvss: [Object]
+404 silly audit report     },
+404 silly audit report     {
+404 silly audit report       id: 1112182,
+404 silly audit report       url: 'https://github.com/advisories/GHSA-5j59-xgg2-r9c4',
+404 silly audit report       title: 'Next has a Denial of Service with Server Components - Incomplete Fix Follow-Up',
+404 silly audit report       severity: 'high',
+404 silly audit report       vulnerable_versions: '>=13.3.1-canary.0 <14.2.35',
+404 silly audit report       cwe: [Array],
+404 silly audit report       cvss: [Object]
+404 silly audit report     },
+404 silly audit report     {
+404 silly audit report       id: 1108291,
+404 silly audit report       url: 'https://github.com/advisories/GHSA-qpjv-v59x-3qc4',
+404 silly audit report       title: 'Next.js Race Condition to Cache Poisoning',
+404 silly audit report       severity: 'low',
+404 silly audit report       vulnerable_versions: '>=0.9.9 <14.2.24',
+404 silly audit report       cwe: [Array],
+404 silly audit report       cvss: [Object]
+404 silly audit report     },
+404 silly audit report     {
+404 silly audit report       id: 1112593,
+404 silly audit report       url: 'https://github.com/advisories/GHSA-9g9p-9gw9-jx7f',
+404 silly audit report       title: 'Next.js self-hosted applications vulnerable to DoS via Image Optimizer remotePatterns configuration',
+404 silly audit report       severity: 'moderate',
+404 silly audit report       vulnerable_versions: '>=10.0.0 <15.5.10',
+404 silly audit report       cwe: [Array],
+404 silly audit report       cvss: [Object]
+404 silly audit report     },
+404 silly audit report     {
+404 silly audit report       id: 1112653,
+404 silly audit report       url: 'https://github.com/advisories/GHSA-h25m-26qc-wcjf',
+404 silly audit report       title: 'Next.js HTTP request deserialization can lead to DoS when using insecure React Server Components',
+404 silly audit report       severity: 'high',
+404 silly audit report       vulnerable_versions: '>=13.0.0 <15.0.8',
+404 silly audit report       cwe: [Array],
+404 silly audit report       cvss: [Object]
+404 silly audit report     },
+404 silly audit report     {
+404 silly audit report       id: 1113689,
+404 silly audit report       url: 'https://github.com/advisories/GHSA-f82v-jwr5-mffw',
+404 silly audit report       title: 'Authorization Bypass in Next.js Middleware',
+404 silly audit report       severity: 'critical',
+404 silly audit report       vulnerable_versions: '>=14.0.0 <14.2.25',
+404 silly audit report       cwe: [Array],
+404 silly audit report       cvss: [Object]
+404 silly audit report     }
+404 silly audit report   ],
+404 silly audit report   playwright: [
+404 silly audit report     {
+404 silly audit report       id: 1109208,
+404 silly audit report       url: 'https://github.com/advisories/GHSA-7mvr-c777-76hp',
+404 silly audit report       title: 'Playwright downloads and installs browsers without verifying the authenticity of the SSL certificate',
+404 silly audit report       severity: 'high',
+404 silly audit report       vulnerable_versions: '<1.55.1',
+404 silly audit report       cwe: [Array],
+404 silly audit report       cvss: [Object]
+404 silly audit report     }
+404 silly audit report   ]
+404 silly audit report }
+405 silly packumentCache corgi:https://registry.npmjs.org/next cache-miss
+406 silly packumentCache corgi:https://registry.npmjs.org/playwright cache-miss
+407 http fetch GET 200 https://registry.npmjs.org/playwright 313ms (cache miss)
+408 silly packumentCache corgi:https://registry.npmjs.org/playwright set size:undefined disposed:false
+409 http fetch GET 200 https://registry.npmjs.org/next 561ms (cache miss)
+410 silly packumentCache corgi:https://registry.npmjs.org/next set size:undefined disposed:false
+411 silly packumentCache corgi:https://registry.npmjs.org/@playwright%2ftest cache-miss
+412 http fetch GET 200 https://registry.npmjs.org/@playwright%2ftest 438ms (cache miss)
+413 silly packumentCache corgi:https://registry.npmjs.org/@playwright%2ftest set size:undefined disposed:false
+414 verbose cwd C:\Users\jange\Scripts\pixel-sheriff\apps\web
+415 verbose os Windows_NT 10.0.26200
+416 verbose node v24.13.0
+417 verbose npm  v11.6.2
+418 notice
+418 notice New minor version of npm available! 11.6.2 -> 11.11.1
+418 notice Changelog: https://github.com/npm/cli/releases/tag/v11.11.1
+418 notice To update run: npm install -g npm@11.11.1
+418 notice  { force: true, Symbol(proc-log.meta): true }
+419 verbose exit 0
+420 info ok

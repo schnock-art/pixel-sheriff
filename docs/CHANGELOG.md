@@ -115,10 +115,16 @@ All notable changes to this project will be documented in this file.
   - added focused hooks:
     - `useProjectMultiLabelSettings`
     - `useWorkspaceHotkeys`
+    - `useProjectAssetsLabelManagement`
+    - `useProjectAssetsImportActions`
   - added extracted pure workspace-derivation helpers:
     - `apps/web/src/lib/workspace/projectAssetsDerived.*`
+    - `apps/web/src/lib/workspace/projectAssetsLabels.*`
+    - `apps/web/src/lib/workspace/projectAssetsImport.*`
   - added regression coverage for extracted derivations:
     - `apps/web/tests/projectAssetsDerived.test.js`
+    - `apps/web/tests/projectAssetsLabels.test.js`
+    - `apps/web/tests/projectAssetsImport.test.js`
 - Consistency hardening pass:
   - standardized project/category/export-download router failures onto `api_error` with stable domain codes (`project_not_found`, `category_not_found`, `export_path_invalid`, `export_file_not_found`)
   - extracted shared dataset export pipeline service used by both exports and experiments flows to remove duplicated selection/rebuild logic

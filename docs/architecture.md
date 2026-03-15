@@ -332,6 +332,12 @@ Main composition:
 
 - `apps/web/src/components/workspace/ProjectAssetsWorkspace.tsx`
 
+Current orchestration note:
+
+- `ProjectAssetsWorkspace` now acts primarily as the top-level composition/orchestration layer
+- label CRUD flow is delegated to `useProjectAssetsLabelManagement`
+- image import, video import, and webcam capture orchestration are delegated to `useProjectAssetsImportActions`
+
 Major UI regions:
 
 - asset browser and folder tree
@@ -354,6 +360,7 @@ Sequence-aware hooks:
 - `useSequenceNavigation`
 - `useWebcamCapture`
 - `usePrelabels`
+- `useProjectAssetsImportActions`
 
 Deployment review pieces:
 
@@ -422,6 +429,13 @@ Key trainer inference endpoints:
 - `apps/web/src/lib/hooks/`
 - `apps/web/src/lib/workspace/`
 - `apps/web/src/lib/api/`
+
+Recent workspace refactor seams:
+
+- `apps/web/src/lib/hooks/useProjectAssetsLabelManagement.ts`
+- `apps/web/src/lib/hooks/useProjectAssetsImportActions.ts`
+- `apps/web/src/lib/workspace/projectAssetsLabels.js`
+- `apps/web/src/lib/workspace/projectAssetsImport.js`
 
 Experiment editor behavior:
 
