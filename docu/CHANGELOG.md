@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- Deployment prediction review upgrades:
+  - API now exposes `POST /api/v1/projects/{project_id}/predict/batch` for folder-scoped deployment inference
+  - labeling workspace now supports folder batch prediction queues with auto-advance across pending images
+  - pending deployment bbox predictions can now be selected, moved, resized, or deleted before accept
+  - added focused API, helper, and Playwright demo coverage for batch deployment review flows
 - Sequence media + AI prelabels:
   - video imports can now create frame sequences and optional bbox prelabel sessions from `prelabel_config`
   - webcam capture can now create live frame sequences with sampled prelabel enqueue during capture

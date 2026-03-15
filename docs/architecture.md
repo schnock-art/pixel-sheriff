@@ -20,7 +20,7 @@ Task kinds:
 
 AI-assisted paths:
 
-- review-first active deployment predictions for single-asset `classification` and `bbox` review
+- review-first active deployment predictions for current-asset and folder-queue `classification` and `bbox` review
 - sequence-first AI prelabels for bbox video and webcam workflows
 
 ## Runtime Topology
@@ -248,19 +248,23 @@ Current request path:
 
 - browser loads compatible deployments from `/projects/{project_id}/deployments`
 - the labeling panel sends `POST /projects/{project_id}/predict` for the currently selected asset
+- folder review sends `POST /projects/{project_id}/predict/batch` for the asset ids in the selected folder scope
 - deployed prediction review is synchronous and separate from the legacy queued `/suggestions/batch` flow
 
 Frontend review state:
 
 - `/predict` responses are normalized into a `pendingReview` model in `useWorkspaceSuggestions`
-- bbox responses also create `preview_objects` for a read-only overlay in the viewer
-- while `pendingReview` exists, label toggles, geometry editing, edit mode, and submit are disabled to avoid mixed draft state
+- `/predict/batch` responses populate per-asset pending review queue state and auto-advance between pending assets after accept/reject
+- bbox responses also create `preview_objects` for the viewer overlay
+- while a pending classification review exists, label toggles, edit mode, and submit are disabled to avoid mixed draft state
+- while a pending bbox review exists, the normal draft remains protected, but the pending predicted boxes can be selected, moved, resized, or deleted before accept
 
 Accept and reject semantics:
 
 - `Reject prediction` clears the pending review only
 - classification accept stages the selected class in the normal draft and attaches shared `prediction_review` metadata
 - bbox accept replaces the current asset draft object set with the accepted prediction boxes
+- deleting the final pending bbox prediction is treated as rejecting that review
 - accepted predictions still require the normal annotation `Submit` flow to persist
 
 Persistence details:
@@ -273,7 +277,7 @@ Current UI scope:
 
 - supported in the labeling panel for `classification` and `bbox`
 - not yet surfaced for segmentation
-- no folder-level or batch accept/reject flow for deployment predictions yet
+- folder-scoped batch inference is available, but review decisions are still applied per image rather than via bulk accept-all/reject-all
 
 ## Labeling Workspace
 
@@ -375,7 +379,7 @@ Key trainer inference endpoints:
 
 Implemented system is broader than the original classification-only base, but some work is still intentionally open:
 
-- folder-level or batch accept/reject for deployment prediction review
+- one-click bulk accept-all/reject-all for deployment prediction review
 - segmentation deployment review in the labeling UI
 - broader end-to-end coverage for sequence AI prelabel review
 - deeper webcam frame-write diagnostics for intermittent browser/device issues

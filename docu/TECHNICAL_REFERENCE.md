@@ -203,6 +203,15 @@ Current design:
 - `GET /api/v1/projects/{project_id}/sequences/{sequence_id}`
 - `GET /api/v1/projects/{project_id}/sequences/{sequence_id}/status`
 
+### Deployments and Prediction Review
+
+- `POST /api/v1/projects/{project_id}/deployments`
+- `GET /api/v1/projects/{project_id}/deployments`
+- `PATCH /api/v1/projects/{project_id}/deployments/{deployment_id}`
+- `POST /api/v1/projects/{project_id}/predict`
+- `POST /api/v1/projects/{project_id}/predict/batch`
+- `POST /api/v1/projects/{project_id}/deployments/{deployment_id}/warmup`
+
 ### Prelabels
 
 - `POST /api/v1/projects/{project_id}/tasks/{task_id}/prelabels`

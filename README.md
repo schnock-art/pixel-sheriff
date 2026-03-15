@@ -18,7 +18,7 @@ Current task modes:
 - `segmentation`
 
 Current AI-assisted workflow:
-- review-first deployment predictions for the active asset in `classification` and `bbox` tasks
+- review-first deployment predictions for the active asset, plus folder-scoped batch prediction review in `classification` and `bbox` tasks
 - sequence-first AI prelabels for bbox tasks
 - pending prelabels stored separately from normal annotations until accepted or edited
 
@@ -140,11 +140,14 @@ Supported in the labeling workspace today:
 
 Current review behavior:
 
-- predictions are requested for the currently selected asset only
+- `Suggest` requests predictions for the currently selected asset
+- `Predict Folder` requests predictions for every image in the selected folder scope and builds a per-image review queue
 - clicking `Suggest` creates a pending review instead of mutating the draft immediately
-- while a pending review exists, label and geometry editing are temporarily locked
+- while a pending classification review exists, label editing is temporarily locked
+- while a pending bbox review exists, the normal draft remains locked but the predicted boxes themselves can be selected, moved, resized, and deleted before accept
 - `Reject prediction` clears the pending review and leaves the existing draft unchanged
 - `Accept selected` or `Accept prediction` copies the reviewed result into the normal draft
+- folder review accept/reject auto-advances to the next pending image when one exists
 - accepted predictions are not saved until the normal `Submit` action runs
 
 Task-specific behavior:
@@ -155,13 +158,14 @@ Task-specific behavior:
   - accepting stages exactly one class selection and stores shared `prediction_review` metadata in the annotation payload
 - bbox:
   - the UI shows predicted boxes as a separate preview overlay on top of the image
+  - pending predicted boxes can be edited or deleted before accept
   - accepting replaces the asset's current draft object set with the reviewed prediction
   - accepted boxes keep `deployment_prediction` provenance including model name, confidence, and review decision
 
 Current limitations:
 
 - segmentation deployment review is not wired into the labeling UI yet
-- folder-level or batch accept/reject for deployment predictions is not implemented yet
+- folder review is still image-by-image; there is no one-click bulk accept-all or reject-all action for deployment predictions yet
 
 ## AI Prelabels
 
@@ -188,7 +192,7 @@ Review behavior:
 
 Deployment predictions and AI prelabels are intentionally separate:
 
-- deployment predictions are current-asset review flows in the main labeling panel
+- deployment predictions are review-first helpers in the main labeling panel for the current asset or the current folder queue
 - AI prelabels are session-driven bbox proposals for video and webcam review
 
 ## Storage Model

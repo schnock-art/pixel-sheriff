@@ -470,6 +470,9 @@ Status reflects current repository behavior.
 ## Deferred (Roadmap-aligned)
 - [ ] Review/QA mode
 - [ ] Video ingestion + frame extraction
-- [ ] MAL batch inference endpoint/workflow (`/predict/batch`) for curation-scale operations
+- [x] MAL batch inference endpoint/workflow (`/predict/batch`) for curation-scale operations
+  - [x] folder-scoped deployment inference request path
+  - [x] per-asset review queue with auto-advance after accept/reject
+  - [x] editable/deletable pending bbox predictions before accept
 - [ ] Reference-mode asset ingestion (cloud/object-store links)
 - [ ] Shared asset library with project-specific annotations
