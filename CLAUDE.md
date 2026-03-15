@@ -104,6 +104,7 @@ Web (Next.js :3010) ──▶ API (FastAPI :8010) ──▶ PostgreSQL + Redis
 - `src/pixel_sheriff_trainer/main.py` — Two concurrent loops: Redis job worker (training) + FastAPI inference server (port 8020)
 - `src/pixel_sheriff_trainer/runner.py` — Orchestrates a full training run
 - `src/pixel_sheriff_trainer/classification/` — PyTorch dataset, train loop, eval
+- `src/pixel_sheriff_trainer/augmentation.py` — Shared augmentation resolution and runtime transforms for classification, detection, and segmentation
 - `src/pixel_sheriff_trainer/io/` — Writes artifacts (events.jsonl, metrics.jsonl, checkpoints, evaluation) to `./data/experiments/`
 
 ### Data model
@@ -126,6 +127,14 @@ Dataset versions are immutable snapshots containing a COCO-format manifest plus 
 - **DatasetVersion**: immutable once created. Class order, asset membership, and splits are frozen at creation time. Created via `POST /projects/{id}/datasets/versions` with a `task_id`.
 - **Experiment**: a training run referencing a model config + dataset version. Redis carries the job; the trainer worker picks it up and streams events/metrics as `.jsonl` files; the API tails these for SSE.
 - **Deployment**: links a trained ONNX model to the inference server. The trainer's inference loop loads the model on warmup and serves `/predict` requests for model-assisted labeling (MAL).
+
+Experiment training configs now support a hybrid augmentation model:
+- `augmentation_profile`: `none` | `light` | `medium` | `heavy` | `custom`
+- `augmentation_spec_version=1` enables the current contract
+- `augmentation_steps` stores an ordered custom step list with per-step probability
+- supported custom step types: `horizontal_flip`, `vertical_flip`, `color_jitter`, `rotate`
+- default augmentation is task-aware: classification uses `light`; detection and segmentation use `none`
+- legacy detection and segmentation experiments without `augmentation_spec_version=1` remain effectively unaugmented for backward compatibility
 
 ### Environment
 
@@ -154,6 +163,11 @@ Export zip contents (created by `dataset_export_pipeline.py`):
 
 Trainer classification reads `manifest.json`.
 Trainer detection/segmentation reads `coco_instances.json` (already has all geometry).
+
+Experiment analytics now expose effective augmentation metadata in addition to the raw config:
+- `augmentation` — categorical bucket used in charts
+- `augmentation_mode` — current effective mode
+- `augmentation_summary` — preset name or custom step summary
 
 ### ML adapter registry
 

@@ -1,0 +1,97 @@
+{
+  "classes": {
+    "class_names": [
+      "one",
+      "two"
+    ],
+    "class_order": [
+      1,
+      2
+    ],
+    "id_to_index": {
+      "1": 0,
+      "2": 1
+    }
+  },
+  "computed_at": "2025-01-01T00:00:00Z",
+  "confusion_matrix": {
+    "labels": {
+      "axis": "true_rows_pred_cols"
+    },
+    "matrix": [
+      [
+        2,
+        1
+      ],
+      [
+        0,
+        1
+      ]
+    ],
+    "normalized_by": "none"
+  },
+  "num_samples": 4,
+  "overall": {
+    "accuracy": 0.75,
+    "macro_f1": 0.73,
+    "macro_precision": 0.72,
+    "macro_recall": 0.74
+  },
+  "per_class": [
+    {
+      "class_id": 1,
+      "class_index": 0,
+      "f1": 0.73,
+      "name": "one",
+      "precision": 0.8,
+      "recall": 0.67,
+      "support": 3
+    },
+    {
+      "class_id": 2,
+      "class_index": 1,
+      "f1": 0.8,
+      "name": "two",
+      "precision": 0.67,
+      "recall": 1.0,
+      "support": 1
+    }
+  ],
+  "provenance": {
+    "attempt": 1,
+    "dataset_export_hash": "hash-1",
+    "dataset_export_relpath": "exports/eafa489e-c450-4f97-b4f4-7b3792687df5/hash-1.zip",
+    "dataset_version_id": "dv-1",
+    "experiment_id": "05203da5-4956-4022-976b-9e04c72fa06a",
+    "job_id": "job-1",
+    "model_id": "model-1",
+    "project_id": "eafa489e-c450-4f97-b4f4-7b3792687df5",
+    "task_id": "task-1"
+  },
+  "samples": {
+    "highest_confidence_wrong": [
+      {
+        "asset_id": "asset-1",
+        "confidence": 0.95,
+        "margin": 0.7,
+        "pred_class_index": 1,
+        "relative_path": "assets/a1.jpg",
+        "true_class_index": 0
+      }
+    ],
+    "lowest_confidence_correct": [],
+    "misclassified": [
+      {
+        "asset_id": "asset-1",
+        "confidence": 0.95,
+        "margin": 0.7,
+        "pred_class_index": 1,
+        "relative_path": "assets/a1.jpg",
+        "true_class_index": 0
+      }
+    ]
+  },
+  "schema_version": "1",
+  "split": "val",
+  "task": "classification"
+}

@@ -112,8 +112,8 @@ function hyperparamXValue(item, key) {
   if (key === "batch_size") return asNumber(config?.batch_size);
   if (key === "epochs") return asNumber(config?.epochs);
   if (key === "augmentation") {
-    const value = String(config?.augmentation ?? "none");
-    const map = { none: 0, light: 1, medium: 2, heavy: 3 };
+    const value = String(config?.augmentation_mode ?? config?.augmentation ?? "none");
+    const map = { none: 0, light: 1, medium: 2, heavy: 3, custom: 4 };
     return map[value] ?? 0;
   }
   return null;
@@ -148,6 +148,8 @@ function scatterPoints(items, xKey, yKey) {
       x,
       y,
       status: String(item.status ?? ""),
+      augmentationMode: String(item?.config?.augmentation_mode ?? item?.config?.augmentation ?? "none"),
+      augmentationSummary: typeof item?.config?.augmentation_summary === "string" ? item.config.augmentation_summary : null,
     });
   }
   return points;

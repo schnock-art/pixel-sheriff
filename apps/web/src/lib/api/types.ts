@@ -505,6 +505,8 @@ export interface ExperimentAnalyticsConfig {
   batch_size?: number | null;
   epochs?: number | null;
   augmentation?: string | null;
+  augmentation_mode?: string | null;
+  augmentation_summary?: string | null;
 }
 
 export interface ExperimentAnalyticsItem {

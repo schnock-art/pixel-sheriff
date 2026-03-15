@@ -1,0 +1,32 @@
+[
+  {
+    "epoch": null,
+    "error": null,
+    "kind": "best_metric",
+    "metric_name": null,
+    "status": "pending",
+    "updated_at": null,
+    "uri": null,
+    "value": null
+  },
+  {
+    "epoch": null,
+    "error": null,
+    "kind": "best_loss",
+    "metric_name": "val_loss",
+    "status": "pending",
+    "updated_at": null,
+    "uri": null,
+    "value": null
+  },
+  {
+    "epoch": null,
+    "error": null,
+    "kind": "latest",
+    "metric_name": null,
+    "status": "pending",
+    "updated_at": null,
+    "uri": null,
+    "value": null
+  }
+]

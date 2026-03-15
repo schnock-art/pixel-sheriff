@@ -11,20 +11,24 @@ from PIL import Image
 from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms
 
+from pixel_sheriff_trainer.augmentation import apply_image_augmentation, resolve_training_augmentation
+
 
 class ClassificationDataset(Dataset):
     def __init__(
         self,
         samples: list["ClassificationSample"],
         base_transform: Callable[[Image.Image], Image.Image] | None,
-        transform: Callable[[Image.Image], Any],
+        tensor_transform: Callable[[Image.Image], Any],
         *,
+        augmentation_transform: Callable[[Image.Image], Image.Image] | None = None,
         cache_base_images: bool = False,
         max_cached_images: int = 0,
     ) -> None:
         self.samples = samples
         self.base_transform = base_transform
-        self.transform = transform
+        self.tensor_transform = tensor_transform
+        self.augmentation_transform = augmentation_transform
         self.cache_base_images = bool(cache_base_images)
         self.max_cached_images = max(0, int(max_cached_images))
         self._base_image_cache: dict[int, Image.Image] = {}
@@ -43,7 +47,8 @@ class ClassificationDataset(Dataset):
                 base_image = self.base_transform(rgb) if self.base_transform is not None else rgb
             if self.cache_base_images and len(self._base_image_cache) < self.max_cached_images:
                 self._base_image_cache[index] = base_image.copy()
-        tensor = self.transform(base_image)
+        image = self.augmentation_transform(base_image) if self.augmentation_transform is not None else base_image
+        tensor = self.tensor_transform(image)
         return tensor, int(sample.label)
 
 
@@ -266,19 +271,13 @@ def build_classification_loaders(
     mean, std = _normalization_from_model(model_config)
 
     resize_transform = transforms.Resize((height, width))
+    _augmentation_mode, augmentation_steps = resolve_training_augmentation(training_config, "classification")
 
-    train_steps: list[Any] = []
-    augmentation = str(training_config.get("augmentation_profile") or "none")
-    if augmentation in {"light", "medium", "heavy"}:
-        train_steps.append(transforms.RandomHorizontalFlip(p=0.5))
-    if augmentation in {"medium", "heavy"}:
-        train_steps.append(transforms.ColorJitter(brightness=0.15, contrast=0.15, saturation=0.1, hue=0.05))
-    if augmentation == "heavy":
-        train_steps.append(transforms.RandomRotation(degrees=8))
-    train_steps.append(transforms.ToTensor())
+    train_steps: list[Any] = [transforms.ToTensor()]
     if mean is not None and std is not None:
         train_steps.append(transforms.Normalize(mean=mean, std=std))
     train_transform = transforms.Compose(train_steps)
+    train_augmentation = (lambda image: apply_image_augmentation(image, augmentation_steps)) if augmentation_steps else None
 
     val_steps: list[Any] = [transforms.ToTensor()]
     if mean is not None and std is not None:
@@ -330,6 +329,7 @@ def build_classification_loaders(
         train_samples,
         resize_transform,
         train_transform,
+        augmentation_transform=train_augmentation,
         cache_base_images=cache_base_images,
         max_cached_images=max_cached_images,
     )
@@ -337,6 +337,7 @@ def build_classification_loaders(
         val_samples,
         resize_transform,
         val_transform,
+        augmentation_transform=None,
         cache_base_images=cache_base_images,
         max_cached_images=max_cached_images,
     )

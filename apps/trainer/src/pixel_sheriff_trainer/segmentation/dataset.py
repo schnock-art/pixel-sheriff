@@ -12,6 +12,8 @@ from PIL import Image, ImageDraw
 from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms
 
+from pixel_sheriff_trainer.augmentation import apply_segmentation_augmentation, resolve_training_augmentation
+
 
 @dataclass
 class SegmentationSample:
@@ -37,6 +39,7 @@ class SegmentationDataset(Dataset):
         cat_id_to_idx: dict[int, int],
         image_transform: Any,
         *,
+        augmentation_steps: list[Any] | None = None,
         target_width: int,
         target_height: int,
     ) -> None:
@@ -44,6 +47,7 @@ class SegmentationDataset(Dataset):
         self.annotations = annotations
         self.cat_id_to_idx = cat_id_to_idx
         self.image_transform = image_transform
+        self.augmentation_steps = list(augmentation_steps or [])
         self.target_width = target_width
         self.target_height = target_height
 
@@ -57,7 +61,6 @@ class SegmentationDataset(Dataset):
 
         orig_width, orig_height = image.size
         image = image.resize((self.target_width, self.target_height), Image.BILINEAR)
-        tensor = self.image_transform(image)
 
         mask = Image.new("L", (self.target_width, self.target_height), 0)
         draw = ImageDraw.Draw(mask)
@@ -93,6 +96,10 @@ class SegmentationDataset(Dataset):
                     y1 = (float(y) + float(h)) * scale_y
                     draw.rectangle([x0, y0, x1, y1], fill=fill_val)
 
+        if self.augmentation_steps:
+            image, mask = apply_segmentation_augmentation(image, mask, self.augmentation_steps)
+
+        tensor = self.image_transform(image)
         mask_tensor = torch.as_tensor(np.array(mask), dtype=torch.long)
         return tensor, mask_tensor
 
@@ -229,15 +236,18 @@ def build_segmentation_loaders(
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
     ])
+    _augmentation_mode, augmentation_steps = resolve_training_augmentation(training_config, "segmentation")
 
     batch_size = max(1, int(training_config.get("batch_size", 4)))
 
     train_dataset = SegmentationDataset(
         train_samples, annotations_by_image, cat_id_to_idx, image_transform,
+        augmentation_steps=augmentation_steps,
         target_width=target_width, target_height=target_height,
     )
     val_dataset = SegmentationDataset(
         val_samples, annotations_by_image, cat_id_to_idx, image_transform,
+        augmentation_steps=[],
         target_width=target_width, target_height=target_height,
     )
 

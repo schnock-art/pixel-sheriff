@@ -52,6 +52,16 @@ import { buildDatasetVersionOptions } from "../../../../../lib/workspace/experim
 import { onnxClassNamesText, onnxInputShapeText, onnxStatusLabel, onnxValidationText } from "../../../../../lib/workspace/experimentOnnx";
 import { mergeLogChunk, runtimeBadgeLabel } from "../../../../../lib/workspace/experimentRuntime";
 import { deploymentTaskForExperiment } from "../../../../../lib/workspace/deployHelpers.js";
+import {
+  addAugmentationStep,
+  createAugmentationStep,
+  moveAugmentationStep,
+  readAugmentationProfile,
+  readAugmentationSteps,
+  removeAugmentationStep,
+  setAugmentationProfile,
+  updateAugmentationStep,
+} from "../../../../../lib/workspace/augmentationConfig";
 
 interface ExperimentDetailPageProps {
   params: {
@@ -856,7 +866,8 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
   const learningRate = typeof optimizer.lr === "number" ? String(optimizer.lr) : "";
   const epochs = typeof draftConfig?.epochs === "number" ? String(draftConfig.epochs) : "";
   const batchSize = typeof draftConfig?.batch_size === "number" ? String(draftConfig.batch_size) : "";
-  const augmentationProfile = typeof draftConfig?.augmentation_profile === "string" ? draftConfig.augmentation_profile : "light";
+  const augmentationProfile = readAugmentationProfile(draftConfig ?? {}, task);
+  const augmentationSteps = readAugmentationSteps(draftConfig ?? {});
   const precision = typeof draftConfig?.precision === "string" ? draftConfig.precision : "fp32";
   const seed = typeof advanced.seed === "number" ? String(advanced.seed) : "1337";
   const numWorkers =
@@ -1220,7 +1231,7 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
                       disabled={!isEditable}
                       onChange={(event) =>
                         patchConfig((next) => {
-                          next.augmentation_profile = event.target.value;
+                          setAugmentationProfile(next, event.target.value);
                         })
                       }
                     >
@@ -1228,8 +1239,174 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
                       <option value="light">light</option>
                       <option value="medium">medium</option>
                       <option value="heavy">heavy</option>
+                      <option value="custom">custom</option>
                     </select>
                   </label>
+                  {augmentationProfile === "custom" ? (
+                    <div className="project-field" style={{ gap: 10 }}>
+                      <span>Custom Augmentation Steps</span>
+                      <div style={{ display: "grid", gap: 10 }}>
+                        {augmentationSteps.length === 0 ? <p className="labels-empty">Add at least one step to use custom augmentation.</p> : null}
+                        {augmentationSteps.map((step, index) => (
+                          <div
+                            key={`augmentation-step-${index}`}
+                            style={{
+                              display: "grid",
+                              gap: 8,
+                              padding: 10,
+                              border: "1px solid var(--border-subtle, #d5dce8)",
+                              borderRadius: 10,
+                              background: "var(--panel-muted, #f8fbff)",
+                            }}
+                          >
+                            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
+                              <label className="project-field" style={{ flex: "1 1 180px", marginBottom: 0 }}>
+                                <span>Transform</span>
+                                <select
+                                  value={step.type}
+                                  disabled={!isEditable}
+                                  onChange={(event) =>
+                                    patchConfig((next) => {
+                                      updateAugmentationStep(next, index, createAugmentationStep(event.target.value));
+                                    })
+                                  }
+                                >
+                                  <option value="horizontal_flip">horizontal_flip</option>
+                                  <option value="vertical_flip">vertical_flip</option>
+                                  <option value="color_jitter">color_jitter</option>
+                                  <option value="rotate">rotate</option>
+                                </select>
+                              </label>
+                              <label className="project-field" style={{ width: 120, marginBottom: 0 }}>
+                                <span>Probability</span>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  max="1"
+                                  step="0.05"
+                                  value={String(step.p)}
+                                  disabled={!isEditable}
+                                  onChange={(event) =>
+                                    patchConfig((next) => {
+                                      const parsed = Number(event.target.value);
+                                      updateAugmentationStep(next, index, {
+                                        p: Number.isFinite(parsed) ? Math.max(0, Math.min(1, parsed)) : step.p,
+                                      });
+                                    })
+                                  }
+                                />
+                              </label>
+                            </div>
+
+                            {step.type === "color_jitter" ? (
+                              <div style={{ display: "grid", gap: 8, gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))" }}>
+                                {(["brightness", "contrast", "saturation", "hue"] as const).map((key) => (
+                                  <label key={key} className="project-field" style={{ marginBottom: 0 }}>
+                                    <span>{key}</span>
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      max={key === "hue" ? "0.5" : undefined}
+                                      step="0.01"
+                                      value={String(typeof step.params?.[key] === "number" ? step.params[key] : 0)}
+                                      disabled={!isEditable}
+                                      onChange={(event) =>
+                                        patchConfig((next) => {
+                                          const parsed = Number(event.target.value);
+                                          const nextParams = {
+                                            ...(step.params ?? {}),
+                                            [key]: Number.isFinite(parsed) ? Math.max(0, parsed) : 0,
+                                          };
+                                          if (key === "hue" && nextParams.hue > 0.5) nextParams.hue = 0.5;
+                                          updateAugmentationStep(next, index, { params: nextParams });
+                                        })
+                                      }
+                                    />
+                                  </label>
+                                ))}
+                              </div>
+                            ) : null}
+
+                            {step.type === "rotate" ? (
+                              <label className="project-field" style={{ maxWidth: 180, marginBottom: 0 }}>
+                                <span>Degrees</span>
+                                <input
+                                  type="number"
+                                  min="0.1"
+                                  step="0.5"
+                                  value={String(typeof step.params?.degrees === "number" ? step.params.degrees : 8)}
+                                  disabled={!isEditable}
+                                  onChange={(event) =>
+                                    patchConfig((next) => {
+                                      const parsed = Number(event.target.value);
+                                      updateAugmentationStep(next, index, {
+                                        params: {
+                                          degrees: Number.isFinite(parsed) && parsed > 0 ? parsed : 8,
+                                        },
+                                      });
+                                    })
+                                  }
+                                />
+                              </label>
+                            ) : null}
+
+                            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                              <button
+                                type="button"
+                                className="ghost-button"
+                                disabled={!isEditable || index < 1}
+                                onClick={() =>
+                                  patchConfig((next) => {
+                                    moveAugmentationStep(next, index, "up");
+                                  })
+                                }
+                              >
+                                Move Up
+                              </button>
+                              <button
+                                type="button"
+                                className="ghost-button"
+                                disabled={!isEditable || index >= augmentationSteps.length - 1}
+                                onClick={() =>
+                                  patchConfig((next) => {
+                                    moveAugmentationStep(next, index, "down");
+                                  })
+                                }
+                              >
+                                Move Down
+                              </button>
+                              <button
+                                type="button"
+                                className="ghost-button"
+                                disabled={!isEditable}
+                                onClick={() =>
+                                  patchConfig((next) => {
+                                    removeAugmentationStep(next, index);
+                                  })
+                                }
+                              >
+                                Remove
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                        <div>
+                          <button
+                            type="button"
+                            className="ghost-button"
+                            disabled={!isEditable}
+                            onClick={() =>
+                              patchConfig((next) => {
+                                addAugmentationStep(next, "horizontal_flip");
+                              })
+                            }
+                          >
+                            Add Step
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
 
                   <button type="button" className="ghost-button experiment-advanced-toggle" onClick={() => setShowAdvanced((v) => !v)}>
                     {showAdvanced ? "Hide Advanced Parameters" : "Advanced Parameters"}

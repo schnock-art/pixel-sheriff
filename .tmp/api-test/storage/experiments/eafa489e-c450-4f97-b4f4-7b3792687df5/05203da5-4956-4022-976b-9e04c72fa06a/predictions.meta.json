@@ -1,0 +1,19 @@
+{
+  "attempt": 1,
+  "computed_at": "2025-01-01T00:00:00Z",
+  "num_samples": 4,
+  "provenance": {
+    "attempt": 1,
+    "dataset_export_hash": "hash-1",
+    "dataset_export_relpath": "exports/eafa489e-c450-4f97-b4f4-7b3792687df5/hash-1.zip",
+    "dataset_version_id": "dv-1",
+    "experiment_id": "05203da5-4956-4022-976b-9e04c72fa06a",
+    "job_id": "job-1",
+    "model_id": "model-1",
+    "project_id": "eafa489e-c450-4f97-b4f4-7b3792687df5",
+    "task_id": "task-1"
+  },
+  "schema_version": "1",
+  "split": "val",
+  "task": "classification"
+}

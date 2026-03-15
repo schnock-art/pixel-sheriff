@@ -12,6 +12,7 @@ from sheriff_api.config import get_settings
 from sheriff_api.db.models import Annotation, Asset, Project, Task, TaskKind, TaskLabelMode, TaskType
 from sheriff_api.errors import api_error
 from sheriff_api.schemas.experiments import ExperimentSampleItem, ProjectExperimentRecord, ProjectExperimentSummary, TrainingConfigV0
+from sheriff_api.services.augmentation import effective_augmentation_metadata, task_default_augmentation_profile
 from sheriff_api.services.deployment_store import DeploymentStore
 from sheriff_api.services.dataset_store import DatasetStore
 from sheriff_api.services.experiment_store import ExperimentStore
@@ -219,6 +220,8 @@ def default_training_config(*, model_id: str, dataset_version_id: str, task_id: 
         dataset_version_id=dataset_version_id,
         task_id=task_id,
         task=normalized_task,
+        augmentation_profile=task_default_augmentation_profile(normalized_task),  # type: ignore[arg-type]
+        augmentation_spec_version=1,
     ).model_dump(mode="json")
 
 
@@ -325,11 +328,14 @@ def extract_experiment_config(config_json: dict[str, Any]) -> dict[str, Any]:
     if isinstance(optimizer, dict):
         optimizer_type = str(optimizer.get("type") or "") or None
         optimizer_lr = safe_float(optimizer.get("lr"))
+    augmentation = effective_augmentation_metadata(config_json)
     return {
         "optimizer": {"type": optimizer_type, "lr": optimizer_lr},
         "batch_size": safe_int(config_json.get("batch_size")),
         "epochs": safe_int(config_json.get("epochs")),
-        "augmentation": config_json.get("augmentation_profile"),
+        "augmentation": augmentation["augmentation"],
+        "augmentation_mode": augmentation["augmentation_mode"],
+        "augmentation_summary": augmentation["augmentation_summary"],
     }
 
 

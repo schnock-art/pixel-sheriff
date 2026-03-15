@@ -1,0 +1,11 @@
+{
+  "amp_enabled": true,
+  "cuda_available": true,
+  "device_selected": "cuda",
+  "mps_available": false,
+  "num_workers": 4,
+  "persistent_workers": true,
+  "pin_memory": true,
+  "torch_version": "2.x",
+  "torchvision_version": "0.x"
+}

@@ -125,6 +125,7 @@ Important services:
 - `services/dataset_export_builder.py`
 - `services/exporter_coco.py`
 - `services/inference_client.py`
+- `services/augmentation.py`
 
 ### Worker
 
@@ -146,6 +147,7 @@ Entrypoints and main modules:
 - `apps/trainer/src/pixel_sheriff_trainer/main.py`
 - `apps/trainer/src/pixel_sheriff_trainer/inference/app.py`
 - `apps/trainer/src/pixel_sheriff_trainer/inference/schemas.py`
+- `apps/trainer/src/pixel_sheriff_trainer/augmentation.py`
 
 Current inference endpoints:
 
@@ -153,6 +155,14 @@ Current inference endpoints:
 - detection infer/warmup
 - segmentation infer
 - Florence warmup/detect
+
+Current experiment helpers in the web app:
+
+- `apps/web/src/lib/api/types.ts`
+- `apps/web/src/lib/workspace/augmentationConfig.js`
+- `apps/web/src/lib/workspace/experimentAnalytics.js`
+- `apps/web/src/app/projects/[projectId]/experiments/page.tsx`
+- `apps/web/src/app/projects/[projectId]/experiments/[experimentId]/page.tsx`
 
 ## Current Backend Data Model Highlights
 
@@ -190,6 +200,47 @@ Current design:
 - proposals remain pending until reviewed
 - proposals never become normal annotations automatically
 - accepted or edited proposals are promoted into the annotation payload
+
+### Experiments and Augmentation
+
+Current experiment training config fields:
+
+- `augmentation_profile`: `none` | `light` | `medium` | `heavy` | `custom`
+- `augmentation_spec_version`: `1` for the current contract
+- `augmentation_steps`: ordered custom step list with `type`, `p`, and `params`
+
+Supported custom augmentation steps:
+
+- `horizontal_flip`
+- `vertical_flip`
+- `color_jitter`
+- `rotate`
+
+Current preset expansion:
+
+- `none`: no augmentation
+- `light`: `horizontal_flip(p=0.5)`
+- `medium`: `horizontal_flip(p=0.5)` plus `color_jitter(p=1.0)` with shared defaults
+- `heavy`: `medium` plus `rotate(p=1.0, degrees=8)`
+
+Task-aware defaults:
+
+- classification defaults to `light`
+- detection defaults to `none`
+- segmentation defaults to `none`
+
+Compatibility behavior:
+
+- legacy classification configs still honor stored preset profiles
+- legacy detection and segmentation configs without `augmentation_spec_version=1` remain effectively unaugmented
+- new or re-saved experiments in the current editor stamp `augmentation_spec_version=1`
+
+Runtime application:
+
+- classification applies image-only augmentation
+- detection applies paired image and bbox augmentation
+- segmentation applies paired image and mask augmentation
+- detection rotation reprojects bbox corners, clips back to image bounds, and drops degenerate boxes
 
 ## Current API Surfaces Worth Knowing
 
@@ -235,6 +286,12 @@ Current design:
 - project-scoped model CRUD
 - experiment CRUD/start/cancel/delete/runtime/logs/evaluation/analytics
 
+Current experiment analytics payload includes effective augmentation metadata:
+
+- `augmentation`
+- `augmentation_mode`
+- `augmentation_summary`
+
 ## Current UI Behavior Notes
 
 ### Asset Browser
@@ -263,6 +320,19 @@ Current design:
 - controls are shown only for bbox tasks
 - pending proposals render as dashed overlay boxes with an AI badge
 - review actions live in a dedicated AI Prelabels panel
+
+### Experiment Editor
+
+- the augmentation dropdown includes `none`, `light`, `medium`, `heavy`, and `custom`
+- choosing `custom` reveals an ordered step editor with add, remove, and reorder controls
+- each step stores its own probability and step-specific params
+- switching away from `custom` hides the editor but keeps the custom draft state intact
+
+### Experiment Analytics UI
+
+- scatter plots continue to use categorical augmentation buckets
+- custom configs plot under the `custom` bucket
+- tooltips display the full custom augmentation summary
 
 ## Current Known Gaps
 

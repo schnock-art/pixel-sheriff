@@ -1,0 +1,91 @@
+{
+  "active_dataset_version_id": "2a4b6686-fdd5-451c-840b-f75c01add803",
+  "items": [
+    {
+      "assets": {
+        "asset_ids": [
+          "eaf3236a-a9b5-4af8-aa43-98cedff91302"
+        ],
+        "count": 1
+      },
+      "created_at": "2026-03-15T06:23:10.535034Z",
+      "dataset_version_id": "2a4b6686-fdd5-451c-840b-f75c01add803",
+      "labels": {
+        "label_schema": {
+          "class_order": [
+            "3a024437-daf9-4e76-ae41-4ec5cd7b7a03"
+          ],
+          "classes": [
+            {
+              "category_id": "3a024437-daf9-4e76-ae41-4ec5cd7b7a03",
+              "export_name": "boat",
+              "is_active": true,
+              "name": "boat"
+            }
+          ],
+          "rules": {
+            "names_normalized": "lowercase_slug"
+          },
+          "version": "1.2"
+        }
+      },
+      "name": "v1",
+      "project_id": "8367edd0-1fe5-4647-a273-cba9fa8178c1",
+      "schema_version": "2.0",
+      "selection": {
+        "filters": {
+          "exclude_category_ids": [],
+          "exclude_folder_paths": [],
+          "exclude_statuses": [],
+          "include_category_ids": [],
+          "include_folder_paths": [],
+          "include_labeled_only": false,
+          "include_statuses": []
+        },
+        "mode": "filter_snapshot"
+      },
+      "source": {
+        "source_type": "project_assets_snapshot"
+      },
+      "splits": {
+        "items": [
+          {
+            "asset_id": "eaf3236a-a9b5-4af8-aa43-98cedff91302",
+            "split": "train"
+          }
+        ],
+        "ratios": {
+          "test": 0.0,
+          "train": 1.0,
+          "val": 0.0
+        },
+        "seed": 42,
+        "strategy": "random_seeded",
+        "stratify": {
+          "by": "label_primary",
+          "enabled": false
+        }
+      },
+      "stats": {
+        "asset_count": 1,
+        "class_counts": {
+          "3a024437-daf9-4e76-ae41-4ec5cd7b7a03": 1
+        },
+        "split_counts": {
+          "test": 0,
+          "train": 1,
+          "val": 0
+        },
+        "warnings": []
+      },
+      "task": "bbox",
+      "task_id": "3cb165af-0e37-4b28-9188-ec481a88bb88"
+    }
+  ],
+  "meta": {
+    "archived_ids": [],
+    "export_artifacts": {}
+  },
+  "project_id": "8367edd0-1fe5-4647-a273-cba9fa8178c1",
+  "schema_version": "1"
+}

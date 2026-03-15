@@ -1,0 +1,81 @@
+[
+  {
+    "config_json": {
+      "architecture": {
+        "backbone": {
+          "name": "resnet18",
+          "pretrained": true
+        },
+        "family": "resnet_classifier",
+        "framework": "torchvision",
+        "head": {
+          "num_classes": 1,
+          "type": "linear"
+        },
+        "neck": {
+          "type": "none"
+        },
+        "precision": "fp32"
+      },
+      "created_at": "2026-03-15T06:23:11.971118Z",
+      "export": {
+        "onnx": {
+          "dynamic_shapes": {
+            "batch": true,
+            "enabled": true,
+            "height_width": false
+          },
+          "enabled": true,
+          "opset": 17,
+          "output_names": [
+            "classification_logits"
+          ]
+        }
+      },
+      "input": {
+        "image_channels": 3,
+        "input_size": [
+          640,
+          640
+        ],
+        "normalization": {
+          "type": "imagenet"
+        },
+        "resize_policy": "letterbox"
+      },
+      "loss": {
+        "type": "classification_cross_entropy"
+      },
+      "name": "classification_model_1",
+      "outputs": {
+        "aux": [],
+        "primary": {
+          "format": "classification_logits",
+          "name": "classification_logits",
+          "task": "classification",
+          "type": "task_output"
+        }
+      },
+      "schema_version": "1.0",
+      "source_dataset": {
+        "class_names": [
+          "class_a"
+        ],
+        "class_order": [
+          "43afdc45-3f96-4956-aa61-16d6b302fddf"
+        ],
+        "label_mode": "single_label",
+        "manifest_id": "9ddd97c6-8d4d-47cf-927c-895aa427356c",
+        "num_classes": 1,
+        "task": "classification",
+        "task_id": "153f2a03-aed2-4335-aba4-a4a43afc47c0"
+      }
+    },
+    "created_at": "2026-03-15T06:23:11.972172Z",
+    "id": "660aa93c-d360-47ce-a1ca-c55ae2348cad",
+    "name": "classification_model_1",
+    "project_id": "a8bd7a5c-c032-4e88-88ba-ebf8a9f0de8c",
+    "task_id": "153f2a03-aed2-4335-aba4-a4a43afc47c0",
+    "updated_at": "2026-03-15T06:23:11.972172Z"
+  }
+]

@@ -3,7 +3,9 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from sheriff_api.services.augmentation import AUGMENTATION_STEP_TYPES, task_default_augmentation_profile
 
 
 ExperimentStatus = Literal["draft", "queued", "running", "completed", "failed", "canceled"]
@@ -87,6 +89,52 @@ class TrainingHpo(BaseModel):
     search_space: dict[str, Any] = Field(default_factory=dict)
 
 
+class TrainingAugmentationStep(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["horizontal_flip", "vertical_flip", "color_jitter", "rotate"]
+    p: float = Field(default=1.0, ge=0, le=1)
+    params: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_params(self) -> "TrainingAugmentationStep":
+        if self.type not in set(AUGMENTATION_STEP_TYPES):
+            raise ValueError(f"Unsupported augmentation type: {self.type}")
+
+        params = dict(self.params)
+        if self.type in {"horizontal_flip", "vertical_flip"}:
+            if params:
+                raise ValueError(f"{self.type} does not accept params")
+            return self
+
+        if self.type == "rotate":
+            if set(params.keys()) != {"degrees"}:
+                raise ValueError("rotate requires only a numeric degrees param")
+            degrees = params.get("degrees")
+            if not isinstance(degrees, (int, float)) or isinstance(degrees, bool) or float(degrees) <= 0:
+                raise ValueError("rotate degrees must be > 0")
+            self.params = {"degrees": float(degrees)}
+            return self
+
+        allowed_params = {"brightness", "contrast", "saturation", "hue"}
+        unknown = sorted(set(params.keys()) - allowed_params)
+        if unknown:
+            raise ValueError(f"color_jitter params are invalid: {', '.join(unknown)}")
+
+        normalized: dict[str, float] = {}
+        for key, value in params.items():
+            if not isinstance(value, (int, float)) or isinstance(value, bool):
+                raise ValueError(f"color_jitter {key} must be numeric")
+            parsed = float(value)
+            if parsed < 0:
+                raise ValueError(f"color_jitter {key} must be >= 0")
+            if key == "hue" and parsed > 0.5:
+                raise ValueError("color_jitter hue must be <= 0.5")
+            normalized[key] = parsed
+        self.params = normalized
+        return self
+
+
 class TrainingConfigV0(BaseModel):
     model_config = ConfigDict(extra="allow")
 
@@ -99,7 +147,9 @@ class TrainingConfigV0(BaseModel):
     scheduler: TrainingScheduler = Field(default_factory=TrainingScheduler)
     epochs: int = Field(default=30, ge=1)
     batch_size: int = Field(default=16, ge=1)
-    augmentation_profile: Literal["none", "light", "medium", "heavy"] = "light"
+    augmentation_profile: Literal["none", "light", "medium", "heavy", "custom"] = "light"
+    augmentation_spec_version: Literal[1] | None = None
+    augmentation_steps: list[TrainingAugmentationStep] = Field(default_factory=list)
     precision: Literal["fp32", "amp"] = "fp32"
     advanced: TrainingAdvanced = Field(default_factory=TrainingAdvanced)
     training: TrainingBatching = Field(default_factory=TrainingBatching)
@@ -108,6 +158,14 @@ class TrainingConfigV0(BaseModel):
     logging: TrainingLogging = Field(default_factory=TrainingLogging)
     resume: TrainingResume = Field(default_factory=TrainingResume)
     hpo: TrainingHpo = Field(default_factory=TrainingHpo)
+
+    @model_validator(mode="after")
+    def validate_augmentation(self) -> "TrainingConfigV0":
+        if "augmentation_profile" not in self.model_fields_set:
+            self.augmentation_profile = task_default_augmentation_profile(self.task)  # type: ignore[assignment]
+        if self.augmentation_profile == "custom" and not self.augmentation_steps:
+            raise ValueError("augmentation_steps must include at least one step when augmentation_profile is custom")
+        return self
 
 
 class ExperimentSummaryJson(BaseModel):

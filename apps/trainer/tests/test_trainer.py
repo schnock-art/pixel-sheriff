@@ -11,6 +11,11 @@ import pytest
 try:
     import torch  # noqa: F401
     from pixel_sheriff_ml.model_factory import build_classifier_model, build_resnet_classifier
+    from pixel_sheriff_trainer.augmentation import (
+        apply_detection_augmentation,
+        apply_segmentation_augmentation,
+        resolve_training_augmentation,
+    )
     from pixel_sheriff_trainer.classification.dataset import build_classification_loaders
     from pixel_sheriff_trainer.detection.dataset import build_detection_loaders
     from pixel_sheriff_trainer.detection.eval import DetectionEvaluation
@@ -32,6 +37,9 @@ except Exception:
     HAS_TORCH = False
     build_classifier_model = None  # type: ignore[assignment]
     build_resnet_classifier = None  # type: ignore[assignment]
+    apply_detection_augmentation = None  # type: ignore[assignment]
+    apply_segmentation_augmentation = None  # type: ignore[assignment]
+    resolve_training_augmentation = None  # type: ignore[assignment]
     build_classification_loaders = None  # type: ignore[assignment]
     build_detection_loaders = None  # type: ignore[assignment]
     DetectionEvaluation = None  # type: ignore[assignment]
@@ -538,6 +546,89 @@ def test_dataset_loader_runtime_prefetch_and_cache_overrides(tmp_path: Path) -> 
     )
     assert bool(getattr(loaded.train_loader.dataset, "cache_base_images", True)) is False
     assert int(getattr(loaded.train_loader, "prefetch_factor", 0)) == 3
+
+
+def test_resolve_training_augmentation_preserves_legacy_non_classification_behavior() -> None:
+    if not HAS_TORCH:
+        pytest.skip("torch/torchvision not available")
+
+    legacy_detection_mode, legacy_detection_steps = resolve_training_augmentation(
+        {"task": "detection", "augmentation_profile": "light"},
+        "detection",
+    )
+    assert legacy_detection_mode == "none"
+    assert legacy_detection_steps == []
+
+    classification_mode, classification_steps = resolve_training_augmentation(
+        {"task": "classification", "augmentation_profile": "medium"},
+        "classification",
+    )
+    assert classification_mode == "medium"
+    assert [step.type for step in classification_steps] == ["horizontal_flip", "color_jitter"]
+
+
+def test_apply_detection_augmentation_rotates_boxes_without_dropping_valid_targets(monkeypatch: pytest.MonkeyPatch) -> None:
+    if not HAS_TORCH:
+        pytest.skip("torch/torchvision not available")
+
+    from PIL import Image
+
+    monkeypatch.setattr("pixel_sheriff_trainer.augmentation.random.random", lambda: 0.0)
+    monkeypatch.setattr("pixel_sheriff_trainer.augmentation.random.uniform", lambda _low, _high: 8.0)
+
+    image = Image.new("RGB", (32, 32), color=(255, 255, 255))
+    rotated_image, rotated_boxes, rotated_labels = apply_detection_augmentation(
+        image,
+        [[8.0, 8.0, 20.0, 20.0]],
+        [1],
+        [resolve_training_augmentation(
+            {
+                "task": "detection",
+                "augmentation_profile": "custom",
+                "augmentation_spec_version": 1,
+                "augmentation_steps": [{"type": "rotate", "p": 1.0, "params": {"degrees": 8}}],
+            },
+            "detection",
+        )[1][0]],
+    )
+    assert rotated_image.size == (32, 32)
+    assert rotated_labels == [1]
+    assert len(rotated_boxes) == 1
+    assert rotated_boxes[0][2] > rotated_boxes[0][0]
+    assert rotated_boxes[0][3] > rotated_boxes[0][1]
+
+
+def test_apply_segmentation_augmentation_preserves_mask_labels(monkeypatch: pytest.MonkeyPatch) -> None:
+    if not HAS_TORCH:
+        pytest.skip("torch/torchvision not available")
+
+    from PIL import Image
+
+    monkeypatch.setattr("pixel_sheriff_trainer.augmentation.random.random", lambda: 0.0)
+    monkeypatch.setattr("pixel_sheriff_trainer.augmentation.random.uniform", lambda _low, _high: 6.0)
+
+    image = Image.new("RGB", (16, 16), color=(255, 255, 255))
+    mask = Image.new("L", (16, 16), color=0)
+    for x in range(4, 10):
+        for y in range(4, 10):
+            mask.putpixel((x, y), 1)
+
+    rotated_image, rotated_mask = apply_segmentation_augmentation(
+        image,
+        mask,
+        resolve_training_augmentation(
+            {
+                "task": "segmentation",
+                "augmentation_profile": "custom",
+                "augmentation_spec_version": 1,
+                "augmentation_steps": [{"type": "rotate", "p": 1.0, "params": {"degrees": 6}}],
+            },
+            "segmentation",
+        )[1],
+    )
+    assert rotated_image.size == (16, 16)
+    assert rotated_mask.size == (16, 16)
+    assert set(rotated_mask.getdata()).issubset({0, 1})
 
 
 def test_detection_loader_accepts_uuid_image_ids(tmp_path: Path) -> None:

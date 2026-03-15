@@ -93,3 +93,29 @@ test("filterAnalyticsItems and scatterPoints apply model/failed filters", () => 
   assert.equal(points[0].x, 0.001);
   assert.equal(points[0].y, 0.84);
 });
+
+test("scatterPoints maps custom augmentation to a dedicated bucket", () => {
+  const points = scatterPoints(
+    [
+      {
+        experiment_id: "custom-run",
+        name: "custom-run",
+        status: "completed",
+        config: {
+          augmentation: "custom",
+          augmentation_mode: "custom",
+          augmentation_summary: "custom: rotate@1.00(8)",
+        },
+        best: { metric_name: "val_accuracy", metric_value: 0.9 },
+        final: { val_accuracy: 0.88 },
+        series: { epochs: [1, 2], val_accuracy: [0.7, 0.9] },
+      },
+    ],
+    "augmentation",
+    "best_val_accuracy",
+  );
+  assert.equal(points.length, 1);
+  assert.equal(points[0].x, 4);
+  assert.equal(points[0].augmentationMode, "custom");
+  assert.equal(points[0].augmentationSummary, "custom: rotate@1.00(8)");
+});

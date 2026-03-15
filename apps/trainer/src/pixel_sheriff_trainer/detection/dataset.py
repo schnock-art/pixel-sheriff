@@ -11,6 +11,8 @@ from PIL import Image
 from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms
 
+from pixel_sheriff_trainer.augmentation import apply_detection_augmentation, resolve_training_augmentation
+
 
 @dataclass
 class DetectionSample:
@@ -35,12 +37,14 @@ class DetectionDataset(Dataset):
         annotations: dict[str, list[dict[str, Any]]],  # image_id → [ann, ...]
         transform: Any,
         *,
+        augmentation_steps: list[Any] | None = None,
         target_width: int,
         target_height: int,
     ) -> None:
         self.samples = samples
         self.annotations = annotations
         self.transform = transform
+        self.augmentation_steps = list(augmentation_steps or [])
         self.target_width = target_width
         self.target_height = target_height
 
@@ -54,7 +58,6 @@ class DetectionDataset(Dataset):
 
         orig_width, orig_height = image.size
         image = image.resize((self.target_width, self.target_height), Image.BILINEAR)
-        tensor = self.transform(image)
 
         anns = self.annotations.get(sample.image_id, [])
         boxes: list[list[float]] = []
@@ -76,6 +79,11 @@ class DetectionDataset(Dataset):
             y_max = (y + h) * scale_y
             boxes.append([x_min, y_min, x_max, y_max])
             labels.append(int(cat))
+
+        if self.augmentation_steps:
+            image, boxes, labels = apply_detection_augmentation(image, boxes, labels, self.augmentation_steps)
+
+        tensor = self.transform(image)
 
         if boxes:
             boxes_tensor = torch.tensor(boxes, dtype=torch.float32)
@@ -246,6 +254,7 @@ def build_detection_loaders(
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
     ])
+    _augmentation_mode, augmentation_steps = resolve_training_augmentation(training_config, "detection")
 
     batch_size = max(1, int(training_config.get("batch_size", 4)))
     training_block = training_config.get("training")
@@ -258,10 +267,12 @@ def build_detection_loaders(
 
     train_dataset = DetectionDataset(
         train_samples, annotations_by_image, transform,
+        augmentation_steps=augmentation_steps,
         target_width=target_width, target_height=target_height,
     )
     val_dataset = DetectionDataset(
         val_samples, annotations_by_image, transform,
+        augmentation_steps=[],
         target_width=target_width, target_height=target_height,
     )
 

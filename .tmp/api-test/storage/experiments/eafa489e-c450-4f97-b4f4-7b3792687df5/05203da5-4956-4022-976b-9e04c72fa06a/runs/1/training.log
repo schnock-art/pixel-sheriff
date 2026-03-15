@@ -1,0 +1,2 @@
+epoch=1 train_loss=0.90 val_loss=0.80 val_accuracy=0.50
+epoch=2 train_loss=0.70 val_loss=0.60 val_accuracy=0.65

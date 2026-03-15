@@ -1,0 +1,72 @@
+{
+  "advanced": {
+    "grad_clip_norm": null,
+    "num_workers": 0,
+    "seed": 1337
+  },
+  "augmentation_profile": "custom",
+  "augmentation_spec_version": 1,
+  "augmentation_steps": [
+    {
+      "p": 0.5,
+      "params": {},
+      "type": "horizontal_flip"
+    },
+    {
+      "p": 1.0,
+      "params": {
+        "degrees": 8
+      },
+      "type": "rotate"
+    }
+  ],
+  "batch_size": 16,
+  "dataset_version_id": "b4b046e0-230f-469c-8e2f-fc68fd4dab87",
+  "epochs": 30,
+  "evaluation": {
+    "eval_interval_epochs": 1
+  },
+  "hpo": {
+    "budget": {
+      "max_trials": 10
+    },
+    "enabled": false,
+    "search_space": {},
+    "strategy": "random"
+  },
+  "logging": {
+    "keep_best": true,
+    "keep_last": 1,
+    "save_every_epochs": 1
+  },
+  "model_id": "e4062486-2b1f-462c-ba65-94b833f2b2ef",
+  "optimizer": {
+    "lr": 0.001,
+    "type": "adam",
+    "weight_decay": 0.0
+  },
+  "precision": "fp32",
+  "resume": {
+    "checkpoint_kind": "latest",
+    "enabled": false
+  },
+  "runtime": {
+    "cache_resized_images": null,
+    "device": "auto",
+    "max_cached_images": 1024,
+    "num_workers": 0,
+    "persistent_workers": null,
+    "pin_memory": null,
+    "prefetch_factor": 2
+  },
+  "scheduler": {
+    "params": {},
+    "type": "none"
+  },
+  "schema_version": "0.1",
+  "task": "detection",
+  "task_id": "18192e56-f245-4598-b75e-d9086bf9d9a6",
+  "training": {
+    "drop_last": true
+  }
+}

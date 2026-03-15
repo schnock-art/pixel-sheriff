@@ -1,0 +1,9 @@
+{
+  "active_job_id": null,
+  "cancel_requested": false,
+  "current_run_attempt": null,
+  "error": null,
+  "last_completed_attempt": null,
+  "status": "draft",
+  "updated_at": "2026-03-15T06:23:10.432134Z"
+}

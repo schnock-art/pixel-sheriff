@@ -1,0 +1,92 @@
+[
+  {
+    "artifacts_json": {},
+    "config_json": {
+      "advanced": {
+        "grad_clip_norm": null,
+        "num_workers": 0,
+        "seed": 1337
+      },
+      "augmentation_profile": "custom",
+      "augmentation_spec_version": 1,
+      "augmentation_steps": [
+        {
+          "p": 0.5,
+          "params": {},
+          "type": "horizontal_flip"
+        },
+        {
+          "p": 1.0,
+          "params": {
+            "brightness": 0.1,
+            "contrast": 0.1
+          },
+          "type": "color_jitter"
+        }
+      ],
+      "batch_size": 16,
+      "dataset_version_id": "9ddd97c6-8d4d-47cf-927c-895aa427356c",
+      "epochs": 30,
+      "evaluation": {
+        "eval_interval_epochs": 1
+      },
+      "hpo": {
+        "budget": {
+          "max_trials": 10
+        },
+        "enabled": false,
+        "search_space": {},
+        "strategy": "random"
+      },
+      "logging": {
+        "keep_best": true,
+        "keep_last": 1,
+        "save_every_epochs": 1
+      },
+      "model_id": "660aa93c-d360-47ce-a1ca-c55ae2348cad",
+      "optimizer": {
+        "lr": 0.001,
+        "type": "adam",
+        "weight_decay": 0.0
+      },
+      "precision": "fp32",
+      "resume": {
+        "checkpoint_kind": "latest",
+        "enabled": false
+      },
+      "runtime": {
+        "cache_resized_images": null,
+        "device": "auto",
+        "max_cached_images": 1024,
+        "num_workers": 0,
+        "persistent_workers": null,
+        "pin_memory": null,
+        "prefetch_factor": 2
+      },
+      "scheduler": {
+        "params": {},
+        "type": "none"
+      },
+      "schema_version": "0.1",
+      "task": "classification",
+      "task_id": "153f2a03-aed2-4335-aba4-a4a43afc47c0",
+      "training": {
+        "drop_last": true
+      }
+    },
+    "created_at": "2026-03-15T06:23:11.988124Z",
+    "id": "934f27e4-94da-4979-964e-f7ab63b379a7",
+    "model_id": "660aa93c-d360-47ce-a1ca-c55ae2348cad",
+    "name": "invalid-custom-augmentation",
+    "project_id": "a8bd7a5c-c032-4e88-88ba-ebf8a9f0de8c",
+    "status": "draft",
+    "summary_json": {
+      "best_epoch": null,
+      "best_metric_name": null,
+      "best_metric_value": null,
+      "last_epoch": null
+    },
+    "task_id": "153f2a03-aed2-4335-aba4-a4a43afc47c0",
+    "updated_at": "2026-03-15T06:23:12.032183Z"
+  }
+]

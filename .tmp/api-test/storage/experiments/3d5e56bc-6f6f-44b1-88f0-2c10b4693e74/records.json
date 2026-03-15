@@ -1,0 +1,78 @@
+[
+  {
+    "artifacts_json": {},
+    "config_json": {
+      "advanced": {
+        "grad_clip_norm": null,
+        "num_workers": 0,
+        "seed": 1337
+      },
+      "augmentation_profile": "light",
+      "augmentation_spec_version": 1,
+      "augmentation_steps": [],
+      "batch_size": 16,
+      "dataset_version_id": "25c0c420-9b94-4079-90a2-8bcf1c3d7793",
+      "epochs": 30,
+      "evaluation": {
+        "eval_interval_epochs": 1
+      },
+      "hpo": {
+        "budget": {
+          "max_trials": 10
+        },
+        "enabled": false,
+        "search_space": {},
+        "strategy": "random"
+      },
+      "logging": {
+        "keep_best": true,
+        "keep_last": 1,
+        "save_every_epochs": 1
+      },
+      "model_id": "da659094-156f-4a5c-b0a6-8026cf3e622b",
+      "optimizer": {
+        "lr": 0.001,
+        "type": "adam",
+        "weight_decay": 0.0
+      },
+      "precision": "fp32",
+      "resume": {
+        "checkpoint_kind": "latest",
+        "enabled": false
+      },
+      "runtime": {
+        "cache_resized_images": null,
+        "device": "auto",
+        "max_cached_images": 1024,
+        "num_workers": 0,
+        "persistent_workers": null,
+        "pin_memory": null,
+        "prefetch_factor": 2
+      },
+      "scheduler": {
+        "params": {},
+        "type": "none"
+      },
+      "schema_version": "0.1",
+      "task": "classification",
+      "task_id": "d1f20867-aa29-4c8a-82ef-0d0fdfd12461",
+      "training": {
+        "drop_last": true
+      }
+    },
+    "created_at": "2026-03-15T06:23:11.226039Z",
+    "id": "b4a85905-add2-4548-bc7c-427d8850fc74",
+    "model_id": "da659094-156f-4a5c-b0a6-8026cf3e622b",
+    "name": "classification-defaults",
+    "project_id": "3d5e56bc-6f6f-44b1-88f0-2c10b4693e74",
+    "status": "draft",
+    "summary_json": {
+      "best_epoch": null,
+      "best_metric_name": null,
+      "best_metric_value": null,
+      "last_epoch": null
+    },
+    "task_id": "d1f20867-aa29-4c8a-82ef-0d0fdfd12461",
+    "updated_at": "2026-03-15T06:23:11.226039Z"
+  }
+]

@@ -17,6 +17,7 @@ import {
   scatterPoints,
   seriesPoints,
 } from "../../../../lib/workspace/experimentAnalytics";
+import { augmentationCategoryLabel } from "../../../../lib/workspace/augmentationConfig";
 import {
   buildTicks,
   computeSeriesDomain,
@@ -206,7 +207,7 @@ export default function ExperimentsPage({ params }: ExperimentsPageProps) {
   const scatter = useMemo(() => scatterPoints(visibleItems, xParam, yParam), [visibleItems, xParam, yParam]);
   const scatterYIsBounded = yParam === "best_val_accuracy" || yParam === "final_val_accuracy";
   const scatterXDomain = useMemo(() => {
-    if (xParam === "augmentation") return { min: 0, max: 3 };
+    if (xParam === "augmentation") return { min: 0, max: 4 };
     return computeSeriesDomain(scatter.map((row) => row.x), { useLog: false, clamp01: false });
   }, [scatter, xParam]);
   const scatterYDomain = useMemo(
@@ -218,7 +219,7 @@ export default function ExperimentsPage({ params }: ExperimentsPageProps) {
     [scatter, scatterYIsBounded],
   );
   const scatterXTicks = useMemo(() => {
-    if (xParam === "augmentation") return [0, 1, 2, 3];
+    if (xParam === "augmentation") return [0, 1, 2, 3, 4];
     return buildTicks(scatterXDomain, { count: 5 });
   }, [scatterXDomain, xParam]);
   const scatterYTicks = useMemo(
@@ -469,10 +470,7 @@ export default function ExperimentsPage({ params }: ExperimentsPageProps) {
                     })}
                     {scatterXTicks.map((tick) => {
                       const x = 50 + (((tick - scatterXDomain.min) / Math.max(1e-9, scatterXDomain.max - scatterXDomain.min)) * 740);
-                      const label =
-                        xParam === "augmentation"
-                          ? (["none", "light", "medium", "heavy"][Math.max(0, Math.min(3, Math.round(tick)))] ?? String(tick))
-                          : formatTick(tick);
+                      const label = xParam === "augmentation" ? augmentationCategoryLabel(tick) : formatTick(tick);
                       return (
                         <g key={`scatter-x-${tick.toFixed(8)}`}>
                           <line x1={x} y1="24" x2={x} y2="240" stroke="#edf1f7" strokeWidth="1" />
@@ -512,7 +510,8 @@ export default function ExperimentsPage({ params }: ExperimentsPageProps) {
                       const hx = 50 + (((hoveredScatterPoint.x - scatterXDomain.min) / Math.max(1e-9, scatterXDomain.max - scatterXDomain.min)) * 740);
                       const hy = 24 + (((scatterYDomain.max - hoveredScatterPoint.y) / Math.max(1e-9, scatterYDomain.max - scatterYDomain.min)) * 216);
                       const tooltipWidth = 228;
-                      const tooltipHeight = 56;
+                      const showAugmentationSummary = xParam === "augmentation" && Boolean(hoveredScatterPoint.augmentationSummary);
+                      const tooltipHeight = showAugmentationSummary ? 72 : 56;
                       const tooltipX = Math.min(790 - tooltipWidth, Math.max(54, hx + 10));
                       const tooltipY = Math.min(236 - tooltipHeight, Math.max(28, hy - tooltipHeight - 8));
                       return (
@@ -522,11 +521,16 @@ export default function ExperimentsPage({ params }: ExperimentsPageProps) {
                             {hoveredScatterPoint.name}
                           </text>
                           <text x={tooltipX + 10} y={tooltipY + 34} fontSize="11" fill="#3d5779">
-                            {xParam}: {formatTick(hoveredScatterPoint.x)}
+                            {xParam}: {xParam === "augmentation" ? augmentationCategoryLabel(hoveredScatterPoint.x) : formatTick(hoveredScatterPoint.x)}
                           </text>
                           <text x={tooltipX + 10} y={tooltipY + 48} fontSize="11" fill="#3d5779">
                             {yParam}: {formatTick(hoveredScatterPoint.y, { bounded: scatterYIsBounded })}
                           </text>
+                          {showAugmentationSummary ? (
+                            <text x={tooltipX + 10} y={tooltipY + 62} fontSize="11" fill="#3d5779">
+                              {hoveredScatterPoint.augmentationSummary}
+                            </text>
+                          ) : null}
                         </g>
                       );
                     })() : null}

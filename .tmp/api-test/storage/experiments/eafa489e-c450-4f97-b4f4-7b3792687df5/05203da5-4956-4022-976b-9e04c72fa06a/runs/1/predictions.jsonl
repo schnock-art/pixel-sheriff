@@ -1,0 +1,4 @@
+{"asset_id": "asset-0", "confidence": 0.81, "margin": 0.52, "pred_class_index": 0, "relative_path": "assets/a0.jpg", "true_class_index": 0}
+{"asset_id": "asset-1", "confidence": 0.95, "margin": 0.7, "pred_class_index": 1, "relative_path": "assets/a1.jpg", "true_class_index": 0}
+{"asset_id": "asset-2", "confidence": 0.55, "margin": 0.11, "pred_class_index": 0, "relative_path": "assets/a2.jpg", "true_class_index": 0}
+{"asset_id": "asset-3", "confidence": 0.6, "margin": 0.22, "pred_class_index": 1, "relative_path": "assets/a3.jpg", "true_class_index": 1}

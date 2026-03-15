@@ -1,0 +1,59 @@
+{
+  "advanced": {
+    "grad_clip_norm": null,
+    "num_workers": 0,
+    "seed": 1337
+  },
+  "augmentation_profile": "none",
+  "augmentation_spec_version": 1,
+  "augmentation_steps": [],
+  "batch_size": 16,
+  "dataset_version_id": "49cd592f-d1f1-499b-9b4b-67ca1a8eb229",
+  "epochs": 30,
+  "evaluation": {
+    "eval_interval_epochs": 1
+  },
+  "hpo": {
+    "budget": {
+      "max_trials": 10
+    },
+    "enabled": false,
+    "search_space": {},
+    "strategy": "random"
+  },
+  "logging": {
+    "keep_best": true,
+    "keep_last": 1,
+    "save_every_epochs": 1
+  },
+  "model_id": "270761da-27e3-4a8b-83ce-ca61763016e3",
+  "optimizer": {
+    "lr": 0.001,
+    "type": "adam",
+    "weight_decay": 0.0
+  },
+  "precision": "fp32",
+  "resume": {
+    "checkpoint_kind": "latest",
+    "enabled": false
+  },
+  "runtime": {
+    "cache_resized_images": null,
+    "device": "auto",
+    "max_cached_images": 1024,
+    "num_workers": 0,
+    "persistent_workers": null,
+    "pin_memory": null,
+    "prefetch_factor": 2
+  },
+  "scheduler": {
+    "params": {},
+    "type": "none"
+  },
+  "schema_version": "0.1",
+  "task": "detection",
+  "task_id": "07e9a4ce-d4aa-4a07-ad76-bcb6d02dd423",
+  "training": {
+    "drop_last": true
+  }
+}

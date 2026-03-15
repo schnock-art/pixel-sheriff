@@ -2072,6 +2072,67 @@ async def test_experiment_analytics_endpoint_returns_series_and_honors_max_point
 
 
 @pytest.mark.asyncio
+async def test_experiment_analytics_reports_custom_and_legacy_augmentation_modes(client: AsyncClient) -> None:
+    project_id, model_id = await _create_project_model(client, project_name="exp-analytics-augmentation")
+    created = await client.post(
+        f"/api/v1/projects/{project_id}/experiments",
+        json={"model_id": model_id, "name": "analytics-aug"},
+    )
+    assert created.status_code == 200
+    experiment_payload = created.json()
+    config_json = dict(experiment_payload["config_json"])
+    config_json["augmentation_profile"] = "custom"
+    config_json["augmentation_spec_version"] = 1
+    config_json["augmentation_steps"] = [
+        {"type": "horizontal_flip", "p": 0.5, "params": {}},
+        {"type": "rotate", "p": 1.0, "params": {"degrees": 8}},
+    ]
+    updated = await client.put(
+        f"/api/v1/projects/{project_id}/experiments/{experiment_payload['id']}",
+        json={"config_json": config_json},
+    )
+    assert updated.status_code == 200
+
+    analytics = await client.get(f"/api/v1/projects/{project_id}/experiments/analytics")
+    assert analytics.status_code == 200
+    item = next(row for row in analytics.json()["items"] if row["experiment_id"] == experiment_payload["id"])
+    assert item["config"]["augmentation"] == "custom"
+    assert item["config"]["augmentation_mode"] == "custom"
+    assert item["config"]["augmentation_summary"].startswith("custom:")
+
+    detection_project_id, task_id, dataset_version_id = await _create_detection_project_with_dataset_version(
+        client, project_name="exp-analytics-legacy-detection"
+    )
+    created_model = await client.post(
+        f"/api/v1/projects/{detection_project_id}/models",
+        json={"dataset_version_id": dataset_version_id},
+    )
+    assert created_model.status_code == 200
+    detection_experiment = await client.post(
+        f"/api/v1/projects/{detection_project_id}/experiments",
+        json={"model_id": created_model.json()["id"], "name": "legacy-detection"},
+    )
+    assert detection_experiment.status_code == 200
+    legacy_config = dict(detection_experiment.json()["config_json"])
+    legacy_config["task_id"] = task_id
+    legacy_config["augmentation_profile"] = "light"
+    legacy_config.pop("augmentation_spec_version", None)
+    legacy_config.pop("augmentation_steps", None)
+    updated_detection = await client.put(
+        f"/api/v1/projects/{detection_project_id}/experiments/{detection_experiment.json()['id']}",
+        json={"config_json": legacy_config},
+    )
+    assert updated_detection.status_code == 200
+
+    detection_analytics = await client.get(f"/api/v1/projects/{detection_project_id}/experiments/analytics")
+    assert detection_analytics.status_code == 200
+    detection_item = next(row for row in detection_analytics.json()["items"] if row["experiment_id"] == detection_experiment.json()["id"])
+    assert detection_item["config"]["augmentation"] == "none"
+    assert detection_item["config"]["augmentation_mode"] == "none"
+    assert detection_item["config"]["augmentation_summary"] == "none"
+
+
+@pytest.mark.asyncio
 async def test_experiment_evaluation_endpoint_returns_attempt_payload(client: AsyncClient) -> None:
     project_id, model_id = await _create_project_model(client, project_name="exp-evaluation")
     created = await client.post(
@@ -3501,6 +3562,117 @@ async def test_experiment_create_rejects_dataset_version_mismatch_with_model_sou
     payload = created_experiment.json()
     assert payload["error"]["details"]["dataset_version_id"] == newer_dataset_version_id
     assert payload["error"]["details"]["issues"][0]["path"] == "source_dataset.manifest_id"
+
+
+@pytest.mark.asyncio
+async def test_experiment_create_defaults_augmentation_by_task_and_stamps_spec_version(client: AsyncClient) -> None:
+    classification_project_id, classification_model_id, _classification_task_id = await _create_classification_project_model(
+        client,
+        project_name="exp-augmentation-default-classification",
+    )
+    classification_experiment = await client.post(
+        f"/api/v1/projects/{classification_project_id}/experiments",
+        json={"model_id": classification_model_id, "name": "classification-defaults"},
+    )
+    assert classification_experiment.status_code == 200
+    classification_config = classification_experiment.json()["config_json"]
+    assert classification_config["augmentation_profile"] == "light"
+    assert classification_config["augmentation_spec_version"] == 1
+    assert classification_config["augmentation_steps"] == []
+
+    detection_project_id, _detection_task_id, detection_dataset_version_id = await _create_detection_project_with_dataset_version(
+        client,
+        project_name="exp-augmentation-default-detection",
+    )
+    detection_model = await client.post(
+        f"/api/v1/projects/{detection_project_id}/models",
+        json={"dataset_version_id": detection_dataset_version_id},
+    )
+    assert detection_model.status_code == 200
+    detection_experiment = await client.post(
+        f"/api/v1/projects/{detection_project_id}/experiments",
+        json={"model_id": detection_model.json()["id"], "name": "detection-defaults"},
+    )
+    assert detection_experiment.status_code == 200
+    detection_config = detection_experiment.json()["config_json"]
+    assert detection_config["augmentation_profile"] == "none"
+    assert detection_config["augmentation_spec_version"] == 1
+    assert detection_config["augmentation_steps"] == []
+
+
+@pytest.mark.asyncio
+async def test_experiment_update_rejects_invalid_custom_augmentation_configs(client: AsyncClient) -> None:
+    project_id, model_id, _task_id = await _create_classification_project_model(
+        client,
+        project_name="exp-augmentation-validation",
+    )
+    created_experiment = await client.post(
+        f"/api/v1/projects/{project_id}/experiments",
+        json={"model_id": model_id, "name": "invalid-custom-augmentation"},
+    )
+    assert created_experiment.status_code == 200
+    base_config = dict(created_experiment.json()["config_json"])
+
+    empty_custom = dict(base_config)
+    empty_custom["augmentation_profile"] = "custom"
+    empty_custom["augmentation_spec_version"] = 1
+    empty_custom["augmentation_steps"] = []
+    empty_response = await client.put(
+        f"/api/v1/projects/{project_id}/experiments/{created_experiment.json()['id']}",
+        json={"config_json": empty_custom},
+    )
+    assert_api_error(
+        empty_response,
+        status_code=422,
+        code="validation_error",
+        message="Experiment config validation failed",
+    )
+
+    bad_rotate = dict(base_config)
+    bad_rotate["augmentation_profile"] = "custom"
+    bad_rotate["augmentation_spec_version"] = 1
+    bad_rotate["augmentation_steps"] = [{"type": "rotate", "p": 1.0, "params": {}}]
+    rotate_response = await client.put(
+        f"/api/v1/projects/{project_id}/experiments/{created_experiment.json()['id']}",
+        json={"config_json": bad_rotate},
+    )
+    assert_api_error(
+        rotate_response,
+        status_code=422,
+        code="validation_error",
+        message="Experiment config validation failed",
+    )
+
+    bad_color_jitter = dict(base_config)
+    bad_color_jitter["augmentation_profile"] = "custom"
+    bad_color_jitter["augmentation_spec_version"] = 1
+    bad_color_jitter["augmentation_steps"] = [
+        {"type": "color_jitter", "p": 1.2, "params": {"brightness": 0.1, "bogus": 0.2}},
+    ]
+    color_jitter_response = await client.put(
+        f"/api/v1/projects/{project_id}/experiments/{created_experiment.json()['id']}",
+        json={"config_json": bad_color_jitter},
+    )
+    assert_api_error(
+        color_jitter_response,
+        status_code=422,
+        code="validation_error",
+        message="Experiment config validation failed",
+    )
+
+    valid_custom = dict(base_config)
+    valid_custom["augmentation_profile"] = "custom"
+    valid_custom["augmentation_spec_version"] = 1
+    valid_custom["augmentation_steps"] = [
+        {"type": "horizontal_flip", "p": 0.5, "params": {}},
+        {"type": "color_jitter", "p": 1.0, "params": {"brightness": 0.1, "contrast": 0.1}},
+    ]
+    valid_response = await client.put(
+        f"/api/v1/projects/{project_id}/experiments/{created_experiment.json()['id']}",
+        json={"config_json": valid_custom},
+    )
+    assert valid_response.status_code == 200
+    assert valid_response.json()["config_json"]["augmentation_profile"] == "custom"
 
 
 @pytest.mark.asyncio

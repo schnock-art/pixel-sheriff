@@ -1,0 +1,81 @@
+[
+  {
+    "config_json": {
+      "architecture": {
+        "backbone": {
+          "name": "resnet50",
+          "pretrained": true
+        },
+        "family": "retinanet",
+        "framework": "torchvision",
+        "head": {
+          "num_classes": 1,
+          "type": "retinanet"
+        },
+        "neck": {
+          "fpn_channels": 256,
+          "type": "fpn"
+        },
+        "precision": "fp32"
+      },
+      "created_at": "2026-03-15T06:23:10.416298Z",
+      "export": {
+        "onnx": {
+          "dynamic_shapes": {
+            "batch": true,
+            "enabled": true,
+            "height_width": false
+          },
+          "enabled": true,
+          "opset": 17,
+          "output_names": [
+            "coco_detections"
+          ]
+        }
+      },
+      "input": {
+        "image_channels": 3,
+        "input_size": [
+          640,
+          640
+        ],
+        "normalization": {
+          "type": "imagenet"
+        },
+        "resize_policy": "letterbox"
+      },
+      "loss": {
+        "type": "retinanet_default"
+      },
+      "name": "detection_model_1",
+      "outputs": {
+        "aux": [],
+        "primary": {
+          "format": "coco_detections",
+          "name": "coco_detections",
+          "task": "detection",
+          "type": "task_output"
+        }
+      },
+      "schema_version": "1.0",
+      "source_dataset": {
+        "class_names": [
+          "boat"
+        ],
+        "class_order": [
+          "9bdd714d-c0e1-4f9e-a4ca-c97a169b1d15"
+        ],
+        "manifest_id": "b4b046e0-230f-469c-8e2f-fc68fd4dab87",
+        "num_classes": 1,
+        "task": "detection",
+        "task_id": "18192e56-f245-4598-b75e-d9086bf9d9a6"
+      }
+    },
+    "created_at": "2026-03-15T06:23:10.417291Z",
+    "id": "e4062486-2b1f-462c-ba65-94b833f2b2ef",
+    "name": "detection_model_1",
+    "project_id": "7a815512-bffd-4cd5-a3e7-9ccf8d6b3df4",
+    "task_id": "18192e56-f245-4598-b75e-d9086bf9d9a6",
+    "updated_at": "2026-03-15T06:23:10.417291Z"
+  }
+]

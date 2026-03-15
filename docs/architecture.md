@@ -242,6 +242,52 @@ Separate from prelabels:
 - deployment predictions are current-asset, deployment-driven review helpers
 - prelabels are sequence/session-driven pending proposals for frame review
 
+### Experiment Training Config
+
+Training configs now support both preset and custom augmentation.
+
+Current augmentation contract:
+
+- `augmentation_profile`: `none` | `light` | `medium` | `heavy` | `custom`
+- `augmentation_spec_version`: `1` for the new contract, omitted for legacy configs
+- `augmentation_steps`: ordered list of step objects with `type`, `p`, and `params`
+
+Supported custom step types:
+
+- `horizontal_flip`
+- `vertical_flip`
+- `color_jitter`
+- `rotate`
+
+Current preset expansion:
+
+- `none`: no augmentation
+- `light`: `horizontal_flip(p=0.5)`
+- `medium`: `horizontal_flip(p=0.5)` + `color_jitter(p=1.0)` with shared defaults
+- `heavy`: `medium` + `rotate(p=1.0, degrees=8)`
+
+Task-aware defaults:
+
+- classification experiments default to `light`
+- detection and segmentation experiments default to `none`
+
+Compatibility rule:
+
+- legacy classification experiments still honor their stored preset profile
+- legacy detection and segmentation experiments without `augmentation_spec_version=1` stay effectively unaugmented
+- re-saving an experiment through the current editor stamps `augmentation_spec_version=1`
+
+Execution model:
+
+- classification applies image-only augmentation
+- detection applies paired image and bbox augmentation, including bbox rotation and clipping
+- segmentation applies paired image and mask augmentation, with nearest-neighbor mask rotation
+
+Shared implementation lives in:
+
+- API config helpers: `apps/api/src/sheriff_api/services/augmentation.py`
+- trainer runtime augmentation: `apps/trainer/src/pixel_sheriff_trainer/augmentation.py`
+
 ### Deployment Prediction Review
 
 Current request path:
@@ -356,6 +402,7 @@ Trainer:
 - training execution and experiment artifacts
 - deployment-backed inference endpoints
 - Florence warmup and detect endpoints
+- shared augmentation resolution and execution for classification, detection, and segmentation
 
 Key trainer inference endpoints:
 
@@ -374,6 +421,19 @@ Key trainer inference endpoints:
 - `apps/web/src/lib/hooks/`
 - `apps/web/src/lib/workspace/`
 - `apps/web/src/lib/api/`
+
+Experiment editor behavior:
+
+- preset dropdown includes `none`, `light`, `medium`, `heavy`, and `custom`
+- selecting `custom` reveals an ordered step editor with add, remove, and reorder controls
+- each custom step stores an independent probability and step-specific params
+- switching away from `custom` hides the editor but preserves the draft custom step list
+
+Analytics behavior:
+
+- experiment analytics emit `augmentation`, `augmentation_mode`, and `augmentation_summary`
+- scatter plots keep categorical buckets of `none`, `light`, `medium`, `heavy`, and `custom`
+- custom runs plot in the `custom` bucket and surface the full step summary in tooltips
 
 ## Current Gaps
 
