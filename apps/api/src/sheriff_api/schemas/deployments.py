@@ -72,6 +72,13 @@ class PredictRequest(BaseModel):
     score_threshold: float = Field(default=0.3, ge=0.0, le=1.0)
 
 
+class PredictBatchRequest(BaseModel):
+    asset_ids: list[str] = Field(min_length=1, max_length=5000)
+    deployment_id: str | None = None
+    top_k: int = Field(default=5, ge=1, le=100)
+    score_threshold: float = Field(default=0.3, ge=0.0, le=1.0)
+
+
 class PredictPrediction(BaseModel):
     class_index: int = Field(ge=0)
     class_id: str
@@ -108,6 +115,26 @@ class PredictBBoxResponse(BaseModel):
 
 
 PredictResponse = Annotated[PredictClassificationResponse | PredictBBoxResponse, Field(discriminator="task")]
+
+
+class PredictBatchError(BaseModel):
+    asset_id: str
+    code: str
+    message: str
+
+
+class PredictBatchResponse(BaseModel):
+    deployment_id: str
+    task: Literal["classification", "bbox"]
+    requested_count: int = Field(ge=0)
+    completed_count: int = Field(ge=0)
+    pending_review_count: int = Field(ge=0)
+    empty_count: int = Field(ge=0)
+    error_count: int = Field(ge=0)
+    predictions: list[PredictResponse] = Field(default_factory=list)
+    errors: list[PredictBatchError] = Field(default_factory=list)
+    deployment_name: str | None = None
+    device_preference: DevicePreference | None = None
 
 
 class InferencePrediction(BaseModel):

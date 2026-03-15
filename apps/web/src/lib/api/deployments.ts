@@ -4,6 +4,8 @@ import type {
   DeploymentItem,
   DeploymentListResponse,
   PatchDeploymentPayload,
+  PredictBatchPayload,
+  PredictBatchResponse,
   PredictPayload,
   PredictResponse,
 } from "./types";
@@ -30,6 +32,10 @@ export function patchDeployment(
 
 export function predict(projectId: string, payload: PredictPayload): Promise<PredictResponse> {
   return apiPost<PredictResponse, PredictPayload>(`/projects/${projectId}/predict`, payload);
+}
+
+export function predictBatch(projectId: string, payload: PredictBatchPayload): Promise<PredictBatchResponse> {
+  return apiPost<PredictBatchResponse, PredictBatchPayload>(`/projects/${projectId}/predict/batch`, payload);
 }
 
 export function warmupDeployment(projectId: string, deploymentId: string): Promise<{ ok: boolean; device_selected: "cuda" | "cpu" }> {

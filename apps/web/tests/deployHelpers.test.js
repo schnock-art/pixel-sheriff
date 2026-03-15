@@ -2,6 +2,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 
 const {
+  buildPredictBatchPayload,
   buildPredictPayload,
   buildAcceptedPredictionReview,
   detectionBoxesToPreviewObjects,
@@ -35,6 +36,25 @@ test("buildPredictPayload sends score threshold only for bbox suggestions", () =
     deployment_id: "dep-1",
     score_threshold: 0.7,
   });
+});
+
+test("buildPredictBatchPayload sends asset ids and task-specific inference options", () => {
+  assert.deepEqual(
+    buildPredictBatchPayload({ assetIds: ["asset-1", "asset-2"], deploymentId: "dep-1", task: "classification", scoreThreshold: 0.7 }),
+    {
+      asset_ids: ["asset-1", "asset-2"],
+      deployment_id: "dep-1",
+      top_k: 5,
+    },
+  );
+  assert.deepEqual(
+    buildPredictBatchPayload({ assetIds: ["asset-1", "asset-2"], deploymentId: "dep-1", task: "bbox", scoreThreshold: 0.7 }),
+    {
+      asset_ids: ["asset-1", "asset-2"],
+      deployment_id: "dep-1",
+      score_threshold: 0.7,
+    },
+  );
 });
 
 test("detectionBoxesToPreviewObjects converts predict response boxes into preview overlay objects", () => {

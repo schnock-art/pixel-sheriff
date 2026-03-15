@@ -150,9 +150,10 @@ async function routeBrowserApiToHost(page) {
   });
 }
 
-async function stubDeploymentRoutes(page, { projectId, taskId, task, predictResponse }) {
+async function stubDeploymentRoutes(page, { projectId, taskId, task, predictResponse, predictBatchResponse = null }) {
   const deploymentsUrl = `${browserRequestApiBaseUrl}/api/v1/projects/${projectId}/deployments`;
   const predictUrl = `${browserRequestApiBaseUrl}/api/v1/projects/${projectId}/predict`;
+  const predictBatchUrl = `${browserRequestApiBaseUrl}/api/v1/projects/${projectId}/predict/batch`;
 
   await page.route((url) => url.toString() === deploymentsUrl, async (route) => {
     await route.fulfill({
@@ -181,6 +182,16 @@ async function stubDeploymentRoutes(page, { projectId, taskId, task, predictResp
       body: JSON.stringify(predictResponse),
     });
   });
+
+  if (predictBatchResponse) {
+    await page.route((url) => url.toString() === predictBatchUrl, async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(predictBatchResponse),
+      });
+    });
+  }
 }
 
 test("reviews deployed bbox predictions in the browser and saves accepted boxes", async ({ page }) => {
@@ -240,17 +251,20 @@ test("reviews deployed bbox predictions in the browser and saves accepted boxes"
   await page.getByRole("button", { name: "Suggest" }).click();
   await page.locator(`${attrSelector("prediction-review-item", "data-review-item-id", "prediction-bbox-2")}[data-selected="false"]`).click();
   await page.locator(`${attrSelector("prediction-review-item", "data-review-item-id", "prediction-bbox-2")}[data-selected="true"]`).waitFor();
+  await page.locator("[data-testid='prediction-review-delete-selected']").click();
+  await expect(page.locator("[data-testid='pending-deployment-prediction']")).toHaveCount(1);
+  await page.locator(`${attrSelector("prediction-review-item", "data-review-item-id", "prediction-bbox-1")}[data-selected="true"]`).waitFor();
   await page.locator("[data-testid='prediction-review-accept']").click();
 
   await expect(page.locator("[data-testid='pending-deployment-prediction']")).toHaveCount(0);
-  await expect(page.locator("[data-testid='geometry-object-item']")).toHaveCount(predictedBoxCount);
+  await expect(page.locator("[data-testid='geometry-object-item']")).toHaveCount(1);
 
   await page.locator("[data-testid='annotation-submit-button']").click();
   await expect(page.locator(".status-toast")).toContainText(/Submitted \d+ staged annotations\./);
 
   const annotations = await listAnnotations(demo.projectId, demo.taskId);
   const savedAnnotation = annotations.find((annotation) => annotation.asset_id === heroAsset.id);
-  expect(savedAnnotation.payload_json.objects).toHaveLength(predictedBoxCount);
+  expect(savedAnnotation.payload_json.objects).toHaveLength(1);
   expect(savedAnnotation.payload_json.objects[0].provenance.origin_kind).toBe("deployment_prediction");
   expect(savedAnnotation.payload_json.objects[0].provenance.review_decision).toBe("accepted");
 });
@@ -312,4 +326,127 @@ test("reviews deployed classification predictions in the browser and saves the a
   expect(savedAnnotation.payload_json.category_ids).toEqual([demo.categoryIdsByName.Dog]);
   expect(savedAnnotation.payload_json.prediction_review.selected_class_id).toBe(demo.categoryIdsByName.Dog);
   expect(savedAnnotation.payload_json.prediction_review.origin_kind).toBe("deployment_prediction");
+});
+
+test("reviews folder batch bbox predictions in the browser and advances across pending images", async ({ page }) => {
+  const demo = await bootstrapDemo();
+  const catAssets = demo.assets.filter((asset) => asset.relativePath.startsWith("cats/"));
+  const [firstCatAsset, secondCatAsset, thirdCatAsset] = catAssets;
+  if (!firstCatAsset || !secondCatAsset || !thirdCatAsset) {
+    throw new Error("Expected at least three cat assets in the seeded demo project.");
+  }
+
+  await routeBrowserApiToHost(page);
+  await stubDeploymentRoutes(page, {
+    projectId: demo.projectId,
+    taskId: demo.taskId,
+    task: "bbox",
+    predictResponse: {
+      asset_id: firstCatAsset.id,
+      deployment_id: "demo-deployment-1",
+      task: "bbox",
+      device_selected: "cpu",
+      deployment_name: "Demo Pet Detector",
+      device_preference: "auto",
+      boxes: [],
+    },
+    predictBatchResponse: {
+      deployment_id: "demo-deployment-1",
+      task: "bbox",
+      requested_count: catAssets.length,
+      completed_count: catAssets.length,
+      pending_review_count: 2,
+      empty_count: 1,
+      error_count: 0,
+      deployment_name: "Demo Pet Detector",
+      device_preference: "auto",
+      predictions: [
+        {
+          asset_id: firstCatAsset.id,
+          deployment_id: "demo-deployment-1",
+          task: "bbox",
+          device_selected: "cpu",
+          deployment_name: "Demo Pet Detector",
+          device_preference: "auto",
+          boxes: [
+            {
+              class_index: 0,
+              class_id: demo.categoryIdsByName.Cat,
+              class_name: "Cat",
+              score: 0.92,
+              bbox: [390, 280, 980, 1820],
+            },
+            {
+              class_index: 0,
+              class_id: demo.categoryIdsByName.Cat,
+              class_name: "Cat",
+              score: 0.61,
+              bbox: [1220, 1320, 310, 470],
+            },
+          ],
+        },
+        {
+          asset_id: secondCatAsset.id,
+          deployment_id: "demo-deployment-1",
+          task: "bbox",
+          device_selected: "cpu",
+          deployment_name: "Demo Pet Detector",
+          device_preference: "auto",
+          boxes: [
+            {
+              class_index: 0,
+              class_id: demo.categoryIdsByName.Cat,
+              class_name: "Cat",
+              score: 0.87,
+              bbox: [1680, 900, 2040, 1160],
+            },
+          ],
+        },
+        {
+          asset_id: thirdCatAsset.id,
+          deployment_id: "demo-deployment-1",
+          task: "bbox",
+          device_selected: "cpu",
+          deployment_name: "Demo Pet Detector",
+          device_preference: "auto",
+          boxes: [],
+        },
+      ],
+      errors: [],
+    },
+  });
+
+  await page.goto(buildLabelingUrl(demo.projectId, demo.taskId), { waitUntil: "domcontentloaded" });
+  await waitForLabelingReady(page);
+  await page.locator(attrSelector("folder-tree-folder", "data-demo-path", "cats")).click();
+  await page.locator(".tree-scope-caption").getByText("cats").waitFor();
+  await page.locator("[data-testid='prediction-review-batch-suggest']").click();
+
+  await expect(page.getByText('Batch review: 2 pending, 0 accepted, 0 rejected, 1 empty, 0 failed.')).toBeVisible();
+  await expect(page.locator("[data-testid='pending-deployment-prediction']")).toHaveCount(2);
+
+  await page.locator("[data-testid='prediction-review-accept']").click();
+
+  await expect(page.getByText('Batch review: 1 pending, 1 accepted, 0 rejected, 1 empty, 0 failed.')).toBeVisible();
+  await expect(page.locator("[data-testid='pending-deployment-prediction']")).toHaveCount(1);
+  await expect(page.getByText("Accepted 2 predicted boxes into the draft. Moved to the next pending image.")).toBeVisible();
+
+  await page.locator("[data-testid='prediction-review-reject']").click();
+
+  await expect(page.getByText('Batch review: 0 pending, 1 accepted, 1 rejected, 1 empty, 0 failed.')).toBeVisible();
+  await expect(page.locator("[data-testid='pending-deployment-prediction']")).toHaveCount(0);
+  await expect(page.getByText("Prediction rejected.")).toBeVisible();
+  await expect(page.getByText("Current image review status: rejected.")).toBeVisible();
+
+  await page.locator("[data-testid='annotation-submit-button']").click();
+  await expect(page.locator(".status-toast")).toContainText(/Submitted \d+ staged annotations\./);
+
+  const annotations = await listAnnotations(demo.projectId, demo.taskId);
+  const acceptedAnnotation = annotations.find((annotation) => annotation.asset_id === firstCatAsset.id);
+  const rejectedAnnotation = annotations.find((annotation) => annotation.asset_id === secondCatAsset.id);
+  expect(acceptedAnnotation.payload_json.objects).toHaveLength(2);
+  expect(acceptedAnnotation.payload_json.objects[0].provenance.origin_kind).toBe("deployment_prediction");
+  expect(acceptedAnnotation.payload_json.objects[0].provenance.review_decision).toBe("accepted");
+  expect(rejectedAnnotation.payload_json.objects).toHaveLength(1);
+  expect(rejectedAnnotation.payload_json.objects[0].id).toBe(secondCatAsset.objectId);
 });

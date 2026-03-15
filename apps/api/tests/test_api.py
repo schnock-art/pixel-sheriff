@@ -2624,6 +2624,168 @@ async def test_predict_returns_output_dim_mismatch(client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
+async def test_predict_batch_returns_folder_review_summary(client: AsyncClient) -> None:
+    project_id, model_id, _task_id, class_ids = await _create_classification_project_model_with_categories(
+        client,
+        project_name="predict-batch-summary",
+        category_names=["rock", "paper"],
+    )
+    upload_first = await client.post(
+        f"/api/v1/projects/{project_id}/assets/upload",
+        data={"relative_path": "batch/sample-1.jpg"},
+        files={"file": ("sample-1.jpg", b"fake-image-bytes-1", "image/jpeg")},
+    )
+    upload_second = await client.post(
+        f"/api/v1/projects/{project_id}/assets/upload",
+        data={"relative_path": "batch/sample-2.jpg"},
+        files={"file": ("sample-2.jpg", b"fake-image-bytes-2", "image/jpeg")},
+    )
+    assert upload_first.status_code == 200
+    assert upload_second.status_code == 200
+    first_asset_id = upload_first.json()["id"]
+    second_asset_id = upload_second.json()["id"]
+
+    created = await client.post(
+        f"/api/v1/projects/{project_id}/experiments",
+        json={"model_id": model_id, "name": "predict-batch-exp"},
+    )
+    assert created.status_code == 200
+    experiment_id = created.json()["id"]
+    _seed_experiment_run_artifacts(project_id=project_id, experiment_id=experiment_id, attempt=1, include_onnx=True)
+
+    settings = get_settings()
+    metadata_path = Path(settings.storage_root) / "experiments" / project_id / experiment_id / "runs" / "1" / "onnx" / "onnx.metadata.json"
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    metadata["class_ids"] = class_ids
+    metadata_path.write_text(json.dumps(metadata, indent=2, sort_keys=True), encoding="utf-8")
+
+    deployed = await client.post(
+        f"/api/v1/projects/{project_id}/deployments",
+        json={
+            "name": "predict-batch-deploy",
+            "task": "classification",
+            "device_preference": "auto",
+            "source": {"experiment_id": experiment_id, "attempt": 1, "checkpoint_kind": "best_metric"},
+            "is_active": True,
+        },
+    )
+    assert deployed.status_code == 200
+
+    infer_calls = {"count": 0}
+
+    async def _infer(_payload: dict) -> dict:
+        infer_calls["count"] += 1
+        if infer_calls["count"] == 1:
+            return {
+                "device_selected": "cpu",
+                "predictions": [{"class_index": 0, "score": 0.9}],
+                "output_dim": 2,
+            }
+        return {
+            "device_selected": "cpu",
+            "predictions": [],
+            "output_dim": 2,
+        }
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(deployments_router.inference_client, "infer_classification", _infer)
+    response = await client.post(
+        f"/api/v1/projects/{project_id}/predict/batch",
+        json={"asset_ids": [first_asset_id, second_asset_id, "missing-asset-id"], "top_k": 5},
+    )
+    monkeypatch.undo()
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["requested_count"] == 3
+    assert payload["completed_count"] == 2
+    assert payload["pending_review_count"] == 1
+    assert payload["empty_count"] == 1
+    assert payload["error_count"] == 1
+    assert payload["predictions"][0]["asset_id"] == first_asset_id
+    assert payload["predictions"][0]["predictions"][0]["class_id"] == class_ids[0]
+    assert payload["errors"][0]["asset_id"] == "missing-asset-id"
+    assert payload["errors"][0]["code"] == "asset_not_found"
+
+
+@pytest.mark.asyncio
+async def test_predict_batch_detection_captures_per_asset_inference_errors(client: AsyncClient) -> None:
+    project_id, model_id, _task_id, category_ids = await _create_detection_project_model_with_categories(
+        client,
+        project_name="predict-batch-detection-errors",
+        category_names=["boat"],
+    )
+    upload_first = await client.post(
+        f"/api/v1/projects/{project_id}/assets/upload",
+        data={"relative_path": "batch/detect-1.jpg"},
+        files={"file": ("detect-1.jpg", b"fake-image-1", "image/jpeg")},
+    )
+    upload_second = await client.post(
+        f"/api/v1/projects/{project_id}/assets/upload",
+        data={"relative_path": "batch/detect-2.jpg"},
+        files={"file": ("detect-2.jpg", b"fake-image-2", "image/jpeg")},
+    )
+    assert upload_first.status_code == 200
+    assert upload_second.status_code == 200
+    first_asset_id = upload_first.json()["id"]
+    second_asset_id = upload_second.json()["id"]
+
+    created = await client.post(
+        f"/api/v1/projects/{project_id}/experiments",
+        json={"model_id": model_id, "name": "predict-batch-detect-exp"},
+    )
+    assert created.status_code == 200
+    experiment_id = created.json()["id"]
+    _seed_experiment_run_artifacts(project_id=project_id, experiment_id=experiment_id, attempt=1, include_onnx=True)
+
+    settings = get_settings()
+    metadata_path = Path(settings.storage_root) / "experiments" / project_id / experiment_id / "runs" / "1" / "onnx" / "onnx.metadata.json"
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    metadata["class_ids"] = category_ids
+    metadata["task"] = "detection"
+    metadata_path.write_text(json.dumps(metadata, indent=2, sort_keys=True), encoding="utf-8")
+
+    deployed = await client.post(
+        f"/api/v1/projects/{project_id}/deployments",
+        json={
+            "name": "predict-batch-detect-deploy",
+            "task": "bbox",
+            "device_preference": "auto",
+            "source": {"experiment_id": experiment_id, "attempt": 1, "checkpoint_kind": "best_metric"},
+            "is_active": True,
+        },
+    )
+    assert deployed.status_code == 200
+
+    infer_calls = {"count": 0}
+
+    async def _infer(_payload: dict) -> dict:
+        infer_calls["count"] += 1
+        if infer_calls["count"] == 1:
+            return {
+                "device_selected": "cpu",
+                "boxes": [{"class_index": 0, "score": 0.8, "bbox": [10, 20, 30, 40]}],
+            }
+        raise api_error(status_code=503, code="inference_unavailable", message="Inference service unavailable")
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(deployments_router.inference_client, "infer_detection", _infer)
+    response = await client.post(
+        f"/api/v1/projects/{project_id}/predict/batch",
+        json={"asset_ids": [first_asset_id, second_asset_id], "score_threshold": 0.3},
+    )
+    monkeypatch.undo()
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["task"] == "bbox"
+    assert payload["completed_count"] == 1
+    assert payload["pending_review_count"] == 1
+    assert payload["error_count"] == 1
+    assert payload["predictions"][0]["boxes"][0]["class_id"] == category_ids[0]
+    assert payload["errors"][0]["asset_id"] == second_asset_id
+    assert payload["errors"][0]["code"] == "inference_unavailable"
+
+
+@pytest.mark.asyncio
 async def test_warmup_deployment_supports_detection(client: AsyncClient) -> None:
     project_id, model_id, _task_id, category_ids = await _create_detection_project_model_with_categories(
         client,

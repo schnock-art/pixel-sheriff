@@ -21,6 +21,16 @@ function buildPredictPayload({ assetId, deploymentId = null, task, scoreThreshol
   return payload;
 }
 
+function buildPredictBatchPayload({ assetIds, deploymentId = null, task, scoreThreshold }) {
+  const payload = { asset_ids: Array.isArray(assetIds) ? assetIds.filter((value) => typeof value === "string" && value.trim()) : [], deployment_id: deploymentId };
+  if (task === "bbox") {
+    payload.score_threshold = scoreThreshold;
+    return payload;
+  }
+  payload.top_k = 5;
+  return payload;
+}
+
 function detectionBoxesToPreviewObjects(boxes) {
   if (!Array.isArray(boxes)) return [];
   return boxes
@@ -186,6 +196,7 @@ function buildAcceptedPredictionReview(review, selectedReviewItemId = null) {
 }
 
 module.exports = {
+  buildPredictBatchPayload,
   buildPredictPayload,
   buildAcceptedPredictionReview,
   detectionBoxesToPreviewObjects,

@@ -79,11 +79,26 @@ interface LabelPanelProps {
   suggestionScoreThreshold?: number;
   onChangeSuggestionScoreThreshold?: (value: number) => void;
   isSuggesting?: boolean;
+  isBatchSuggesting?: boolean;
   hasPendingReview?: boolean;
   hasCompatibleDeployment?: boolean;
+  selectedFolderPath?: string | null;
+  selectedFolderAssetCount?: number;
+  batchPredictionSummary?: {
+    folderPath: string;
+    total: number;
+    pending: number;
+    accepted: number;
+    rejected: number;
+    empty: number;
+    failed: number;
+  } | null;
+  currentAssetReviewStatus?: "pending" | "accepted" | "rejected" | "empty" | "failed" | "none";
   onChangeSelectedDeploymentId?: (deploymentId: string) => void;
   onSuggest?: () => void;
+  onSuggestFolder?: () => void;
   onSelectReviewItem?: (reviewItemId: string) => void;
+  onDeleteSelectedPredictionReviewItem?: () => void;
   onAcceptReview?: () => void;
   onRejectReview?: () => void;
   annotationEditingDisabled?: boolean;
@@ -130,11 +145,18 @@ export function LabelPanel({
   suggestionScoreThreshold = 0.3,
   onChangeSuggestionScoreThreshold,
   isSuggesting = false,
+  isBatchSuggesting = false,
   hasPendingReview = false,
   hasCompatibleDeployment = false,
+  selectedFolderPath = null,
+  selectedFolderAssetCount = 0,
+  batchPredictionSummary = null,
+  currentAssetReviewStatus = "none",
   onChangeSelectedDeploymentId,
   onSuggest,
+  onSuggestFolder,
   onSelectReviewItem,
+  onDeleteSelectedPredictionReviewItem,
   onAcceptReview,
   onRejectReview,
   annotationEditingDisabled = false,
@@ -480,6 +502,19 @@ export function LabelPanel({
                 <button type="button" className="ghost-button" onClick={onSuggest} disabled={isSuggesting || !onSuggest}>
                   {isSuggesting ? "Suggesting..." : "Suggest"}
                 </button>
+                <button
+                  type="button"
+                  className="ghost-button"
+                  onClick={onSuggestFolder}
+                  disabled={isBatchSuggesting || !onSuggestFolder || !selectedFolderPath || selectedFolderAssetCount === 0}
+                  data-testid="prediction-review-batch-suggest"
+                >
+                  {isBatchSuggesting
+                    ? "Predicting Folder..."
+                    : selectedFolderPath
+                      ? `Predict Folder (${selectedFolderAssetCount})`
+                      : "Select Folder to Predict"}
+                </button>
                 {pendingReview ? (
                   <button
                     type="button"
@@ -489,6 +524,17 @@ export function LabelPanel({
                     data-testid="prediction-review-accept"
                   >
                     {pendingReview.task === "bbox" ? "Accept prediction" : "Accept selected"}
+                  </button>
+                ) : null}
+                {pendingReview?.task === "bbox" ? (
+                  <button
+                    type="button"
+                    className="ghost-button danger-button"
+                    onClick={onDeleteSelectedPredictionReviewItem}
+                    disabled={!selectedReviewItemId || !onDeleteSelectedPredictionReviewItem}
+                    data-testid="prediction-review-delete-selected"
+                  >
+                    Delete selected
                   </button>
                 ) : null}
                 {pendingReview ? (
@@ -503,6 +549,21 @@ export function LabelPanel({
                   </button>
                 ) : null}
               </div>
+              {selectedFolderPath ? (
+                <p className="labels-empty">
+                  Folder scope: {selectedFolderPath} ({selectedFolderAssetCount} image{selectedFolderAssetCount === 1 ? "" : "s"})
+                </p>
+              ) : (
+                <p className="labels-empty">Select a folder in Assets to run batch predictions.</p>
+              )}
+              {batchPredictionSummary && batchPredictionSummary.folderPath === selectedFolderPath ? (
+                <p className="labels-empty">
+                  Batch review: {batchPredictionSummary.pending} pending, {batchPredictionSummary.accepted} accepted, {batchPredictionSummary.rejected} rejected, {batchPredictionSummary.empty} empty, {batchPredictionSummary.failed} failed.
+                </p>
+              ) : null}
+              {currentAssetReviewStatus !== "none" && currentAssetReviewStatus !== "pending" ? (
+                <p className="labels-empty">Current image review status: {currentAssetReviewStatus}.</p>
+              ) : null}
               {hasPendingReview ? (
                 <p className="labels-empty">Resolve this prediction before editing labels or boxes.</p>
               ) : null}

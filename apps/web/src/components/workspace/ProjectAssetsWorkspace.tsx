@@ -303,6 +303,11 @@ export default function ProjectAssetsWorkspace() {
     selectedTaskId: selectedTask?.id ?? null,
     currentAssetId: treeState.currentAsset?.id ?? null,
     selectedTaskKind: selectedTask?.kind ?? null,
+    selectedFolderPath: treeState.selectedTreeFolderPath,
+    selectedFolderAssetIds: treeState.selectedTreeFolderPath
+      ? treeState.treeBuild.folderAssetIds[treeState.selectedTreeFolderPath] ?? []
+      : [],
+    onSelectAsset: treeState.handleSelectTreeAsset,
     onAcceptDetectionReview: replaceGeometryObjects,
     onAcceptClassificationReview: applyPredictedLabelSelection,
     setMessage,
@@ -902,6 +907,9 @@ export default function ProjectAssetsWorkspace() {
               geometryObjects={currentObjects}
               pendingPredictionObjects={suggestionState.pendingPreviewObjects}
               selectedPendingPredictionId={suggestionState.selectedReviewItemId}
+              onSelectPendingPrediction={suggestionState.setSelectedReviewItemId}
+              onUpsertPendingPredictionBBox={suggestionState.updatePendingBBoxReviewItem}
+              onDeleteSelectedPendingPrediction={suggestionState.deleteSelectedPendingBBoxReviewItem}
               pendingPrelabelObjects={pendingPrelabelObjects}
               selectedPendingPrelabelId={prelabelState.selectedProposalId}
               annotationEditingDisabled={suggestionState.hasPendingReview}
@@ -1004,11 +1012,18 @@ export default function ProjectAssetsWorkspace() {
               suggestionScoreThreshold={suggestionState.suggestionScoreThreshold}
               onChangeSuggestionScoreThreshold={suggestionState.setSuggestionScoreThreshold}
               isSuggesting={suggestionState.isSuggesting}
+              isBatchSuggesting={suggestionState.isBatchSuggesting}
               hasPendingReview={suggestionState.hasPendingReview}
               hasCompatibleDeployment={suggestionState.availableDeployments.length > 0}
+              selectedFolderPath={treeState.selectedTreeFolderPath}
+              selectedFolderAssetCount={treeState.selectedFolderAssetCount}
+              batchPredictionSummary={suggestionState.batchPredictionSummary}
+              currentAssetReviewStatus={suggestionState.currentAssetReviewStatus}
               onChangeSelectedDeploymentId={suggestionState.setSelectedDeploymentId}
               onSuggest={suggestionState.handleSuggest}
+              onSuggestFolder={suggestionState.handleSuggestFolder}
               onSelectReviewItem={suggestionState.setSelectedReviewItemId}
+              onDeleteSelectedPredictionReviewItem={suggestionState.deleteSelectedPendingBBoxReviewItem}
               onAcceptReview={suggestionState.acceptReview}
               onRejectReview={suggestionState.rejectReview}
               annotationEditingDisabled={suggestionState.hasPendingReview}

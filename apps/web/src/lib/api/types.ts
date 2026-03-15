@@ -681,6 +681,13 @@ export interface PredictPayload {
   score_threshold?: number;
 }
 
+export interface PredictBatchPayload {
+  asset_ids: string[];
+  deployment_id?: string | null;
+  top_k?: number;
+  score_threshold?: number;
+}
+
 export interface PredictPrediction {
   class_index: number;
   class_id: string;
@@ -717,6 +724,26 @@ export interface PredictBBoxResponse {
 }
 
 export type PredictResponse = PredictClassificationResponse | PredictBBoxResponse;
+
+export interface PredictBatchError {
+  asset_id: string;
+  code: string;
+  message: string;
+}
+
+export interface PredictBatchResponse {
+  deployment_id: string;
+  task: "classification" | "bbox";
+  requested_count: number;
+  completed_count: number;
+  pending_review_count: number;
+  empty_count: number;
+  error_count: number;
+  predictions: PredictResponse[];
+  errors: PredictBatchError[];
+  deployment_name?: string | null;
+  device_preference?: DeploymentDevicePreference | null;
+}
 
 export type ExperimentEvent =
   | { type: "status"; status: ExperimentStatus; attempt?: number; job_id?: string; ts?: string; message?: string }

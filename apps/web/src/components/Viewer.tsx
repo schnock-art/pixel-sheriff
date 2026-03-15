@@ -67,6 +67,9 @@ interface ViewerProps {
     confidence: number;
   }>;
   selectedPendingPredictionId?: string | null;
+  onSelectPendingPrediction?: (reviewItemId: string | null) => void;
+  onUpsertPendingPredictionBBox?: (reviewItemId: string, bbox: number[]) => void;
+  onDeleteSelectedPendingPrediction?: () => void;
   pendingPrelabelObjects?: Array<{
     id: string;
     category_id: string;
@@ -203,6 +206,9 @@ export function Viewer({
   geometryObjects,
   pendingPredictionObjects = [],
   selectedPendingPredictionId = null,
+  onSelectPendingPrediction,
+  onUpsertPendingPredictionBBox,
+  onDeleteSelectedPendingPrediction,
   pendingPrelabelObjects = [],
   selectedPendingPrelabelId = null,
   annotationEditingDisabled = false,
@@ -236,6 +242,18 @@ export function Viewer({
     handle: BBoxHandle;
     original: number[];
   } | null>(null);
+  const [pendingPredictionMoveState, setPendingPredictionMoveState] = useState<{
+    objectId: string;
+    pointerId: number;
+    anchor: { x: number; y: number };
+    original: number[];
+  } | null>(null);
+  const [pendingPredictionResizeState, setPendingPredictionResizeState] = useState<{
+    objectId: string;
+    pointerId: number;
+    handle: BBoxHandle;
+    original: number[];
+  } | null>(null);
 
   const imageBasis = useMemo(() => {
     return resolveImageBasis(
@@ -256,6 +274,12 @@ export function Viewer({
   const canDrawBBox = !annotationEditingDisabled && annotationMode === "bbox" && canvasTool === "bbox";
   const canDrawPolygon = !annotationEditingDisabled && annotationMode === "segmentation" && canvasTool === "polygon";
   const canInteractWithGeometry = !annotationEditingDisabled && annotationMode !== "labels" && canvasTool !== "pan";
+  const canInteractWithPendingPredictions =
+    annotationMode === "bbox" &&
+    canvasTool !== "pan" &&
+    pendingPredictionObjects.length > 0 &&
+    typeof onSelectPendingPrediction === "function" &&
+    typeof onUpsertPendingPredictionBBox === "function";
 
   useEffect(() => {
     setBboxDraft(null);
@@ -263,6 +287,8 @@ export function Viewer({
     setActivePointerId(null);
     setBboxMoveState(null);
     setBboxResizeState(null);
+    setPendingPredictionMoveState(null);
+    setPendingPredictionResizeState(null);
     setImageLoadError(false);
   }, [currentAsset?.id, annotationMode, canvasTool, resetToken]);
 
@@ -308,6 +334,16 @@ export function Viewer({
     return null;
   }
 
+  function hitTestPendingPrediction(point: { x: number; y: number }): string | null {
+    for (let index = pendingPredictionObjects.length - 1; index >= 0; index -= 1) {
+      const object = pendingPredictionObjects[index];
+      if (bboxContainsPoint(object.bbox, point.x, point.y, 2)) {
+        return object.id;
+      }
+    }
+    return null;
+  }
+
   const finalizePolygon = useCallback(() => {
     if (!canDrawPolygon) return;
     if (!imageBasis || !defaultCategoryId) return;
@@ -325,7 +361,7 @@ export function Viewer({
 
   useEffect(() => {
     if (annotationMode === "labels") return;
-    if (annotationEditingDisabled) return;
+    if (annotationEditingDisabled && !canInteractWithPendingPredictions) return;
 
     function onKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
@@ -333,7 +369,14 @@ export function Viewer({
         setPolygonDraft([]);
         setBboxMoveState(null);
         setBboxResizeState(null);
+        setPendingPredictionMoveState(null);
+        setPendingPredictionResizeState(null);
         onHoverObject(null);
+        return;
+      }
+      if ((event.key === "Delete" || event.key === "Backspace") && selectedPendingPredictionId && canInteractWithPendingPredictions) {
+        event.preventDefault();
+        onDeleteSelectedPendingPrediction?.();
         return;
       }
       if ((event.key === "Delete" || event.key === "Backspace") && selectedObjectId) {
@@ -349,14 +392,77 @@ export function Viewer({
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [annotationEditingDisabled, annotationMode, canDrawPolygon, finalizePolygon, onDeleteSelectedObject, onHoverObject, selectedObjectId]);
+  }, [
+    annotationEditingDisabled,
+    annotationMode,
+    canDrawPolygon,
+    canInteractWithPendingPredictions,
+    finalizePolygon,
+    onDeleteSelectedObject,
+    onDeleteSelectedPendingPrediction,
+    onHoverObject,
+    selectedObjectId,
+    selectedPendingPredictionId,
+  ]);
 
   function handlePointerDown(event: PointerEvent<SVGSVGElement>) {
     if (event.button !== 0) return;
     onCanvasInteraction?.();
-    if (!canInteractWithGeometry || !imageBasis || !viewport) return;
+    if ((!canInteractWithGeometry && !canInteractWithPendingPredictions) || !imageBasis || !viewport) return;
     const point = toImagePoint(event);
     if (!point) return;
+
+    if (canInteractWithPendingPredictions) {
+      if (selectedPendingPredictionId) {
+        const selectedObject = pendingPredictionObjects.find((object) => object.id === selectedPendingPredictionId);
+        if (selectedObject) {
+          const handleThreshold = viewport ? 12 / viewport.scale : 12;
+          const resizeHandle = resolveBBoxHandle(point, selectedObject.bbox, handleThreshold);
+          if (resizeHandle) {
+            try {
+              event.currentTarget.setPointerCapture(event.pointerId);
+              setActivePointerId(event.pointerId);
+            } catch {
+              setActivePointerId(null);
+            }
+            setPendingPredictionResizeState({
+              objectId: selectedObject.id,
+              pointerId: event.pointerId,
+              handle: resizeHandle,
+              original: selectedObject.bbox.slice(),
+            });
+            setPendingPredictionMoveState(null);
+            onSelectPendingPrediction?.(selectedObject.id);
+            return;
+          }
+        }
+      }
+
+      const hitPredictionId = hitTestPendingPrediction(point);
+      if (hitPredictionId) {
+        const hitObject = pendingPredictionObjects.find((object) => object.id === hitPredictionId);
+        onSelectPendingPrediction?.(hitPredictionId);
+        if (hitObject) {
+          try {
+            event.currentTarget.setPointerCapture(event.pointerId);
+            setActivePointerId(event.pointerId);
+          } catch {
+            setActivePointerId(null);
+          }
+          setPendingPredictionMoveState({
+            objectId: hitPredictionId,
+            pointerId: event.pointerId,
+            anchor: point,
+            original: hitObject.bbox.slice(),
+          });
+          setPendingPredictionResizeState(null);
+        }
+        return;
+      }
+
+      onSelectPendingPrediction?.(null);
+      return;
+    }
 
     if (canDrawBBox) {
       if (selectedObjectId) {
@@ -461,9 +567,45 @@ export function Viewer({
   }
 
   function handlePointerMove(event: PointerEvent<SVGSVGElement>) {
-    if (!canInteractWithGeometry) return;
+    if (!canInteractWithGeometry && !canInteractWithPendingPredictions) return;
     const point = toImagePoint(event);
     if (!point) return;
+
+    if (pendingPredictionResizeState && canInteractWithPendingPredictions) {
+      if (event.pointerId !== pendingPredictionResizeState.pointerId) return;
+      const objectToResize = pendingPredictionObjects.find((object) => object.id === pendingPredictionResizeState.objectId);
+      if (!objectToResize) return;
+
+      const resizedBbox = resizeBBoxFromHandle(
+        pendingPredictionResizeState.original,
+        pendingPredictionResizeState.handle,
+        point,
+        imageBasis,
+        2,
+      );
+
+      onUpsertPendingPredictionBBox?.(objectToResize.id, resizedBbox);
+      return;
+    }
+
+    if (pendingPredictionMoveState && canInteractWithPendingPredictions) {
+      if (event.pointerId !== pendingPredictionMoveState.pointerId) return;
+      const objectToMove = pendingPredictionObjects.find((object) => object.id === pendingPredictionMoveState.objectId);
+      if (!objectToMove) return;
+
+      const deltaX = point.x - pendingPredictionMoveState.anchor.x;
+      const deltaY = point.y - pendingPredictionMoveState.anchor.y;
+      const movedBbox = [
+        pendingPredictionMoveState.original[0] + deltaX,
+        pendingPredictionMoveState.original[1] + deltaY,
+        pendingPredictionMoveState.original[2],
+        pendingPredictionMoveState.original[3],
+      ];
+      const clamped = imageBasis ? clampBBoxWithinImage(movedBbox, imageBasis.width, imageBasis.height) : movedBbox;
+
+      onUpsertPendingPredictionBBox?.(objectToMove.id, clamped);
+      return;
+    }
 
     if (bboxResizeState && canDrawBBox) {
       if (event.pointerId !== bboxResizeState.pointerId) return;
@@ -514,6 +656,34 @@ export function Viewer({
   }
 
   function handlePointerUp(event: PointerEvent<SVGSVGElement>) {
+    if (pendingPredictionResizeState) {
+      if (event.pointerId !== pendingPredictionResizeState.pointerId) return;
+      if (activePointerId !== null) {
+        try {
+          event.currentTarget.releasePointerCapture(activePointerId);
+        } catch {
+          // Ignore release errors when capture is already gone.
+        }
+      }
+      setActivePointerId(null);
+      setPendingPredictionResizeState(null);
+      return;
+    }
+
+    if (pendingPredictionMoveState) {
+      if (event.pointerId !== pendingPredictionMoveState.pointerId) return;
+      if (activePointerId !== null) {
+        try {
+          event.currentTarget.releasePointerCapture(activePointerId);
+        } catch {
+          // Ignore release errors when capture is already gone.
+        }
+      }
+      setActivePointerId(null);
+      setPendingPredictionMoveState(null);
+      return;
+    }
+
     if (!canDrawBBox) return;
     if (activePointerId !== null && event.pointerId !== activePointerId) return;
 
@@ -585,6 +755,8 @@ export function Viewer({
     setBboxDraft(null);
     setBboxMoveState(null);
     setBboxResizeState(null);
+    setPendingPredictionMoveState(null);
+    setPendingPredictionResizeState(null);
   }
 
   function handleDoubleClick(event: MouseEvent<SVGSVGElement>) {
@@ -704,6 +876,10 @@ export function Viewer({
     const topLeft = toViewportCoords(object.bbox[0], object.bbox[1], viewport);
     const width = object.bbox[2] * viewport.scale;
     const height = object.bbox[3] * viewport.scale;
+    const handles = getBBoxHandlePoints(object.bbox).map((handlePoint) => ({
+      ...handlePoint,
+      viewport: toViewportCoords(handlePoint.x, handlePoint.y, viewport),
+    }));
     return (
       <g
         key={object.id}
@@ -730,6 +906,20 @@ export function Viewer({
             Prediction {object.label_text}
           </text>
         </g>
+        {canInteractWithPendingPredictions && isSelected
+          ? handles.map((handlePoint) => (
+              <rect
+                key={`${object.id}-${handlePoint.handle}`}
+                className={`geometry-handle geometry-handle-${handlePoint.handle}`}
+                x={handlePoint.viewport.x - 5}
+                y={handlePoint.viewport.y - 5}
+                width={10}
+                height={10}
+                rx={2}
+                ry={2}
+              />
+            ))
+          : null}
       </g>
     );
   }
@@ -799,7 +989,11 @@ export function Viewer({
         ) : null}
         {hasImage && viewport ? (
           <svg
-            className={annotationMode === "labels" || annotationEditingDisabled ? "viewer-geometry-overlay is-readonly" : "viewer-geometry-overlay"}
+            className={
+              annotationMode === "labels" || (annotationEditingDisabled && !canInteractWithPendingPredictions)
+                ? "viewer-geometry-overlay is-readonly"
+                : "viewer-geometry-overlay"
+            }
             data-testid="viewer-geometry-overlay"
             onPointerDown={handlePointerDown}
             onPointerMove={handlePointerMove}

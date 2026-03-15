@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,6 +20,9 @@ from sheriff_api.schemas.deployments import (
     DeploymentItem,
     DeploymentListResponse,
     DeploymentPatch,
+    PredictBatchError,
+    PredictBatchRequest,
+    PredictBatchResponse,
     PredictBBoxResponse,
     PredictClassificationResponse,
     PredictRequest,
@@ -193,6 +196,182 @@ def _resolve_deployment_for_predict(project_id: str, deployment_id: str | None) 
     return deployment
 
 
+def _storage_uri_for_asset(asset: Asset) -> str:
+    storage_uri = asset.metadata_json.get("storage_uri") if isinstance(asset.metadata_json, dict) else None
+    if not isinstance(storage_uri, str) or not storage_uri:
+        raise api_error(status_code=404, code="asset_path_missing", message="Asset file path missing")
+    return storage_uri
+
+
+def _prediction_has_review_items(response: PredictResponse) -> bool:
+    if response.task == "bbox":
+        return len(response.boxes) > 0
+    return len(response.predictions) > 0
+
+
+def _error_payload_from_http_exception(exc: HTTPException) -> tuple[str, str]:
+    detail = exc.detail
+    if isinstance(detail, dict):
+        code = detail.get("code")
+        message = detail.get("message")
+        if isinstance(code, str) and code and isinstance(message, str) and message:
+            return code, message
+    return "request_failed", str(detail) if detail is not None else "Request failed"
+
+
+async def _prepare_prediction_context(
+    project_id: str,
+    deployment_id: str | None,
+    db: AsyncSession,
+) -> tuple[dict[str, Any], str, dict[str, Any], str, list[str], dict[str, str]]:
+    deployment = _resolve_deployment_for_predict(project_id, deployment_id)
+    deployment_task, task_id = _require_supported_deployment(deployment)
+    source = deployment.get("source")
+    if not isinstance(source, dict):
+        raise api_error(status_code=409, code="deployment_invalid", message="Deployment source is invalid")
+    metadata_relpath, metadata = _load_deployment_metadata(source)
+    categories = await _task_categories(project_id, task_id, db)
+    category_name_by_id = {category["id"]: category["name"] for category in categories}
+    class_ids = _resolve_class_mapping(metadata, categories=categories)
+    return deployment, deployment_task, source, metadata_relpath, class_ids, category_name_by_id
+
+
+async def _predict_for_asset(
+    *,
+    asset: Asset,
+    deployment: dict[str, Any],
+    deployment_task: str,
+    source: dict[str, Any],
+    metadata_relpath: str,
+    class_ids: list[str],
+    category_name_by_id: dict[str, str],
+    top_k: int,
+    score_threshold: float,
+) -> PredictResponse:
+    storage_uri = _storage_uri_for_asset(asset)
+
+    if deployment_task == "classification":
+        infer_payload = {
+            "onnx_relpath": source.get("onnx_relpath"),
+            "metadata_relpath": metadata_relpath,
+            "asset_relpath": storage_uri,
+            "device_preference": deployment.get("device_preference", "auto"),
+            "top_k": top_k,
+            "model_key": deployment.get("model_key"),
+        }
+        try:
+            infer_response = await inference_client.infer_classification(infer_payload)
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 503:
+                raise api_error(status_code=503, code="inference_unavailable", message="Inference service unavailable") from exc
+            raise api_error(status_code=502, code="inference_failed", message="Inference request failed") from exc
+        except Exception as exc:
+            raise api_error(status_code=503, code="inference_unavailable", message="Inference service unavailable") from exc
+
+        predictions_raw = infer_response.get("predictions")
+        if not isinstance(predictions_raw, list):
+            predictions_raw = []
+        output_dim = infer_response.get("output_dim")
+        if isinstance(output_dim, int) and output_dim > len(class_ids):
+            raise api_error(
+                status_code=409,
+                code="deployment_output_dim_mismatch",
+                message="Inference output does not match deployment class_ids",
+            )
+        max_class_index = max((int(item.get("class_index")) for item in predictions_raw if isinstance(item, dict)), default=-1)
+        if max_class_index >= len(class_ids):
+            raise api_error(
+                status_code=409,
+                code="deployment_output_dim_mismatch",
+                message="Inference output does not match deployment class_ids",
+            )
+
+        predictions: list[dict[str, Any]] = []
+        for row in predictions_raw:
+            if not isinstance(row, dict):
+                continue
+            class_index = row.get("class_index")
+            score = row.get("score")
+            if not isinstance(class_index, int) or class_index < 0 or class_index >= len(class_ids):
+                continue
+            class_id = class_ids[class_index]
+            predictions.append(
+                {
+                    "class_index": class_index,
+                    "class_id": class_id,
+                    "class_name": category_name_by_id[class_id],
+                    "score": float(score) if isinstance(score, (int, float)) else 0.0,
+                }
+            )
+
+        return PredictClassificationResponse(
+            asset_id=asset.id,
+            deployment_id=str(deployment.get("deployment_id")),
+            task="classification",
+            device_selected=str(infer_response.get("device_selected") or "cpu"),
+            predictions=predictions,
+            deployment_name=str(deployment.get("name") or ""),
+            device_preference=str(deployment.get("device_preference") or "auto"),
+        )
+
+    infer_payload = {
+        "onnx_relpath": source.get("onnx_relpath"),
+        "metadata_relpath": metadata_relpath,
+        "asset_relpath": storage_uri,
+        "device_preference": deployment.get("device_preference", "auto"),
+        "score_threshold": score_threshold,
+        "model_key": deployment.get("model_key"),
+    }
+    try:
+        infer_response = await inference_client.infer_detection(infer_payload)
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 503:
+            raise api_error(status_code=503, code="inference_unavailable", message="Inference service unavailable") from exc
+        raise api_error(status_code=502, code="inference_failed", message="Inference request failed") from exc
+    except Exception as exc:
+        raise api_error(status_code=503, code="inference_unavailable", message="Inference service unavailable") from exc
+
+    boxes_raw = infer_response.get("boxes")
+    if not isinstance(boxes_raw, list):
+        boxes_raw = []
+
+    boxes: list[dict[str, Any]] = []
+    for row in boxes_raw:
+        if not isinstance(row, dict):
+            continue
+        class_index = row.get("class_index")
+        score = row.get("score")
+        bbox = row.get("bbox")
+        if not isinstance(class_index, int) or class_index < 0 or class_index >= len(class_ids):
+            raise api_error(
+                status_code=409,
+                code="deployment_output_dim_mismatch",
+                message="Inference output does not match deployment class_ids",
+            )
+        if not isinstance(bbox, list) or len(bbox) != 4 or not all(isinstance(value, (int, float)) for value in bbox):
+            continue
+        class_id = class_ids[class_index]
+        boxes.append(
+            {
+                "class_index": class_index,
+                "class_id": class_id,
+                "class_name": category_name_by_id[class_id],
+                "score": float(score) if isinstance(score, (int, float)) else 0.0,
+                "bbox": [float(value) for value in bbox],
+            }
+        )
+
+    return PredictBBoxResponse(
+        asset_id=asset.id,
+        deployment_id=str(deployment.get("deployment_id")),
+        task="bbox",
+        device_selected=str(infer_response.get("device_selected") or "cpu"),
+        boxes=boxes,
+        deployment_name=str(deployment.get("name") or ""),
+        device_preference=str(deployment.get("device_preference") or "auto"),
+    )
+
+
 @router.post("/projects/{project_id}/deployments", response_model=DeploymentCreateResponse)
 async def create_deployment(
     project_id: str,
@@ -283,142 +462,93 @@ async def predict_classification(
     db: AsyncSession = Depends(get_db),
 ) -> PredictResponse:
     await require_project(db, project_id)
-    deployment = _resolve_deployment_for_predict(project_id, payload.deployment_id)
-    deployment_task, task_id = _require_supported_deployment(deployment)
+    deployment, deployment_task, source, metadata_relpath, class_ids, category_name_by_id = await _prepare_prediction_context(
+        project_id,
+        payload.deployment_id,
+        db,
+    )
 
     asset = await db.get(Asset, payload.asset_id)
     if asset is None or asset.project_id != project_id:
         raise api_error(status_code=404, code="asset_not_found", message="Asset not found in project")
 
-    storage_uri = asset.metadata_json.get("storage_uri") if isinstance(asset.metadata_json, dict) else None
-    if not isinstance(storage_uri, str) or not storage_uri:
-        raise api_error(status_code=404, code="asset_path_missing", message="Asset file path missing")
+    return await _predict_for_asset(
+        asset=asset,
+        deployment=deployment,
+        deployment_task=deployment_task,
+        source=source,
+        metadata_relpath=metadata_relpath,
+        class_ids=class_ids,
+        category_name_by_id=category_name_by_id,
+        top_k=payload.top_k,
+        score_threshold=payload.score_threshold,
+    )
 
-    source = deployment.get("source")
-    if not isinstance(source, dict):
-        raise api_error(status_code=409, code="deployment_invalid", message="Deployment source is invalid")
-    metadata_relpath, metadata = _load_deployment_metadata(source)
-    categories = await _task_categories(project_id, task_id, db)
-    category_name_by_id = {category["id"]: category["name"] for category in categories}
-    class_ids = _resolve_class_mapping(metadata, categories=categories)
 
-    if deployment_task == "classification":
-        infer_payload = {
-            "onnx_relpath": source.get("onnx_relpath"),
-            "metadata_relpath": metadata_relpath,
-            "asset_relpath": storage_uri,
-            "device_preference": deployment.get("device_preference", "auto"),
-            "top_k": payload.top_k,
-            "model_key": deployment.get("model_key"),
-        }
+@router.post("/projects/{project_id}/predict/batch", response_model=PredictBatchResponse)
+async def predict_batch(
+    project_id: str,
+    payload: PredictBatchRequest,
+    db: AsyncSession = Depends(get_db),
+) -> PredictBatchResponse:
+    await require_project(db, project_id)
+    deployment, deployment_task, source, metadata_relpath, class_ids, category_name_by_id = await _prepare_prediction_context(
+        project_id,
+        payload.deployment_id,
+        db,
+    )
+    requested_asset_ids = [asset_id for asset_id in payload.asset_ids if isinstance(asset_id, str) and asset_id.strip()]
+    if not requested_asset_ids:
+        raise api_error(status_code=422, code="validation_error", message="At least one asset_id is required")
+
+    asset_rows = (
+        await db.execute(select(Asset).where(Asset.project_id == project_id, Asset.id.in_(list(dict.fromkeys(requested_asset_ids)))))
+    ).scalars()
+    asset_by_id = {asset.id: asset for asset in asset_rows}
+
+    predictions: list[PredictResponse] = []
+    errors: list[PredictBatchError] = []
+    pending_review_count = 0
+    empty_count = 0
+
+    for asset_id in requested_asset_ids:
+        asset = asset_by_id.get(asset_id)
+        if asset is None:
+            errors.append(PredictBatchError(asset_id=asset_id, code="asset_not_found", message="Asset not found in project"))
+            continue
         try:
-            infer_response = await inference_client.infer_classification(infer_payload)
-        except httpx.HTTPStatusError as exc:
-            if exc.response.status_code == 503:
-                raise api_error(status_code=503, code="inference_unavailable", message="Inference service unavailable") from exc
-            raise api_error(status_code=502, code="inference_failed", message="Inference request failed") from exc
-        except Exception as exc:
-            raise api_error(status_code=503, code="inference_unavailable", message="Inference service unavailable") from exc
-
-        predictions_raw = infer_response.get("predictions")
-        if not isinstance(predictions_raw, list):
-            predictions_raw = []
-        output_dim = infer_response.get("output_dim")
-        if isinstance(output_dim, int) and output_dim > len(class_ids):
-            raise api_error(
-                status_code=409,
-                code="deployment_output_dim_mismatch",
-                message="Inference output does not match deployment class_ids",
+            response = await _predict_for_asset(
+                asset=asset,
+                deployment=deployment,
+                deployment_task=deployment_task,
+                source=source,
+                metadata_relpath=metadata_relpath,
+                class_ids=class_ids,
+                category_name_by_id=category_name_by_id,
+                top_k=payload.top_k,
+                score_threshold=payload.score_threshold,
             )
-        max_class_index = max((int(item.get("class_index")) for item in predictions_raw if isinstance(item, dict)), default=-1)
-        if max_class_index >= len(class_ids):
-            raise api_error(
-                status_code=409,
-                code="deployment_output_dim_mismatch",
-                message="Inference output does not match deployment class_ids",
-            )
-
-        predictions: list[dict[str, Any]] = []
-        for row in predictions_raw:
-            if not isinstance(row, dict):
-                continue
-            class_index = row.get("class_index")
-            score = row.get("score")
-            if not isinstance(class_index, int) or class_index < 0 or class_index >= len(class_ids):
-                continue
-            class_id = class_ids[class_index]
-            predictions.append(
-                {
-                    "class_index": class_index,
-                    "class_id": class_id,
-                    "class_name": category_name_by_id[class_id],
-                    "score": float(score) if isinstance(score, (int, float)) else 0.0,
-                }
-            )
-
-        return PredictClassificationResponse(
-            asset_id=payload.asset_id,
-            deployment_id=str(deployment.get("deployment_id")),
-            task="classification",
-            device_selected=str(infer_response.get("device_selected") or "cpu"),
-            predictions=predictions,
-            deployment_name=str(deployment.get("name") or ""),
-            device_preference=str(deployment.get("device_preference") or "auto"),
-        )
-
-    infer_payload = {
-        "onnx_relpath": source.get("onnx_relpath"),
-        "metadata_relpath": metadata_relpath,
-        "asset_relpath": storage_uri,
-        "device_preference": deployment.get("device_preference", "auto"),
-        "score_threshold": payload.score_threshold,
-        "model_key": deployment.get("model_key"),
-    }
-    try:
-        infer_response = await inference_client.infer_detection(infer_payload)
-    except httpx.HTTPStatusError as exc:
-        if exc.response.status_code == 503:
-            raise api_error(status_code=503, code="inference_unavailable", message="Inference service unavailable") from exc
-        raise api_error(status_code=502, code="inference_failed", message="Inference request failed") from exc
-    except Exception as exc:
-        raise api_error(status_code=503, code="inference_unavailable", message="Inference service unavailable") from exc
-
-    boxes_raw = infer_response.get("boxes")
-    if not isinstance(boxes_raw, list):
-        boxes_raw = []
-
-    boxes: list[dict[str, Any]] = []
-    for row in boxes_raw:
-        if not isinstance(row, dict):
+        except HTTPException as exc:
+            code, message = _error_payload_from_http_exception(exc)
+            errors.append(PredictBatchError(asset_id=asset_id, code=code, message=message))
             continue
-        class_index = row.get("class_index")
-        score = row.get("score")
-        bbox = row.get("bbox")
-        if not isinstance(class_index, int) or class_index < 0 or class_index >= len(class_ids):
-            raise api_error(
-                status_code=409,
-                code="deployment_output_dim_mismatch",
-                message="Inference output does not match deployment class_ids",
-            )
-        if not isinstance(bbox, list) or len(bbox) != 4 or not all(isinstance(value, (int, float)) for value in bbox):
-            continue
-        class_id = class_ids[class_index]
-        boxes.append(
-            {
-                "class_index": class_index,
-                "class_id": class_id,
-                "class_name": category_name_by_id[class_id],
-                "score": float(score) if isinstance(score, (int, float)) else 0.0,
-                "bbox": [float(value) for value in bbox],
-            }
-        )
 
-    return PredictBBoxResponse(
-        asset_id=payload.asset_id,
+        predictions.append(response)
+        if _prediction_has_review_items(response):
+            pending_review_count += 1
+        else:
+            empty_count += 1
+
+    return PredictBatchResponse(
         deployment_id=str(deployment.get("deployment_id")),
-        task="bbox",
-        device_selected=str(infer_response.get("device_selected") or "cpu"),
-        boxes=boxes,
+        task="classification" if deployment_task == "classification" else "bbox",
+        requested_count=len(requested_asset_ids),
+        completed_count=len(predictions),
+        pending_review_count=pending_review_count,
+        empty_count=empty_count,
+        error_count=len(errors),
+        predictions=predictions,
+        errors=errors,
         deployment_name=str(deployment.get("name") or ""),
         device_preference=str(deployment.get("device_preference") or "auto"),
     )
