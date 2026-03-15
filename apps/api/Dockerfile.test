@@ -1,6 +1,7 @@
 # syntax=docker/dockerfile:1.7
 FROM python:3.11-slim
 WORKDIR /app
+ARG API_PIP_EXTRAS=dev
 
 COPY apps/api/pyproject.toml /app/apps/api/pyproject.toml
 COPY apps/api/src /app/apps/api/src
@@ -13,7 +14,7 @@ COPY packages/contracts /app/packages/contracts
 
 RUN --mount=type=cache,target=/root/.cache/pip \
   pip install /app/packages/pixel_sheriff_ml \
-  && pip install /app/apps/api[dev]
+  && pip install "/app/apps/api[${API_PIP_EXTRAS}]"
 
 WORKDIR /app/apps/api
 CMD ["python", "-m", "pytest", "-q"]

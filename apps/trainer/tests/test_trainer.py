@@ -1286,7 +1286,7 @@ def test_runner_fails_fast_for_batchnorm_small_batch(tmp_path: Path) -> None:
 
 
 @pytest.mark.skipif(not HAS_TORCH, reason="torch is required")
-def test_compact_completed_checkpoints_repoints_latest_to_best_metric(tmp_path: Path) -> None:
+def test_compact_completed_checkpoints_preserves_resumable_latest_artifact(tmp_path: Path) -> None:
     storage = ExperimentStorage(str(tmp_path))
     project_id = "project-1"
     experiment_id = "experiment-1"
@@ -1322,13 +1322,14 @@ def test_compact_completed_checkpoints_repoints_latest_to_best_metric(tmp_path: 
         attempt=attempt,
     )
 
-    assert compacted_kinds == ["latest"]
+    assert compacted_kinds == []
     rows = read_checkpoints(storage, project_id=project_id, experiment_id=experiment_id, attempt=attempt)
     by_kind = {row["kind"]: row for row in rows}
-    assert by_kind["latest"]["uri"] == by_kind["best_metric"]["uri"]
+    assert by_kind["latest"]["uri"] != by_kind["best_metric"]["uri"]
     assert storage.resolve(by_kind["best_metric"]["uri"]).exists()
-    assert (storage.checkpoints_dir(project_id, experiment_id, attempt) / "latest.pt").exists() is False
-    assert (storage.checkpoints_dir(project_id, experiment_id, attempt) / "latest_epoch_3.pt").exists() is False
+    assert storage.resolve(by_kind["latest"]["uri"]).exists()
+    assert (storage.checkpoints_dir(project_id, experiment_id, attempt) / "latest.pt").exists()
+    assert (storage.checkpoints_dir(project_id, experiment_id, attempt) / "latest_epoch_3.pt").exists()
 
 
 @pytest.mark.skipif(not HAS_TORCH, reason="torch is required")
@@ -1380,17 +1381,74 @@ def test_compact_completed_checkpoints_uses_best_metric_as_canonical(tmp_path: P
         attempt=attempt,
     )
 
-    assert compacted_kinds == ["best_loss", "latest"]
+    assert compacted_kinds == ["best_loss"]
     rows = read_checkpoints(storage, project_id=project_id, experiment_id=experiment_id, attempt=attempt)
     by_kind = {row["kind"]: row for row in rows}
     canonical_uri = by_kind["best_metric"]["uri"]
     assert by_kind["best_loss"]["uri"] == canonical_uri
-    assert by_kind["latest"]["uri"] == canonical_uri
+    assert by_kind["latest"]["uri"] != canonical_uri
     ckpt_dir = storage.checkpoints_dir(project_id, experiment_id, attempt)
     assert (ckpt_dir / "best_metric.pt").exists()
     assert (ckpt_dir / "best_loss.pt").exists() is False
-    assert (ckpt_dir / "latest.pt").exists() is False
-    assert (ckpt_dir / "latest_epoch_4.pt").exists() is False
+    assert (ckpt_dir / "latest.pt").exists()
+    assert (ckpt_dir / "latest_epoch_4.pt").exists()
+
+
+@pytest.mark.skipif(not HAS_TORCH, reason="torch is required")
+def test_compact_completed_checkpoints_keeps_latest_resumable_for_resume(tmp_path: Path) -> None:
+    storage = ExperimentStorage(str(tmp_path))
+    project_id = "project-resume"
+    experiment_id = "experiment-resume"
+    attempt = 1
+
+    save_checkpoint(
+        storage,
+        project_id=project_id,
+        experiment_id=experiment_id,
+        attempt=attempt,
+        kind="best_metric",
+        epoch=2,
+        metric_name="val_accuracy",
+        value=0.88,
+        state_dict={"epoch": 2, "model_state_dict": {"w": torch.tensor([5.0])}},
+    )
+    save_checkpoint(
+        storage,
+        project_id=project_id,
+        experiment_id=experiment_id,
+        attempt=attempt,
+        kind="latest",
+        epoch=2,
+        metric_name="val_accuracy",
+        value=0.88,
+        state_dict={
+            "epoch": 2,
+            "model_state_dict": {"w": torch.tensor([5.0])},
+            "optimizer_state_dict": {"lr": 0.1},
+            "scheduler_state_dict": {"gamma": 0.9},
+        },
+    )
+
+    compacted_kinds = compact_completed_checkpoints(
+        storage,
+        project_id=project_id,
+        experiment_id=experiment_id,
+        attempt=attempt,
+    )
+    assert compacted_kinds == []
+
+    runner = TrainRunner(str(tmp_path))
+    resume_state, resume_message = runner._try_load_resume_state(
+        project_id=project_id,
+        experiment_id=experiment_id,
+        attempt=attempt,
+        training_config={"resume": {"enabled": True, "checkpoint_kind": "latest"}},
+    )
+    assert resume_state is not None
+    assert resume_state["epoch"] == 2
+    assert resume_state["optimizer_state_dict"] == {"lr": 0.1}
+    assert resume_state["scheduler_state_dict"] == {"gamma": 0.9}
+    assert resume_message == "resume applied from latest checkpoint (epoch=2)"
 
 
 @pytest.mark.skipif(not HAS_TORCH, reason="torch is required")
@@ -1509,7 +1567,7 @@ def test_compact_completed_checkpoints_after_onnx_export_preserves_exported_arti
         attempt=attempt,
     )
 
-    assert compacted_kinds == ["latest"]
+    assert compacted_kinds == []
     assert storage.resolve(exported.model_uri).exists()
     assert storage.resolve(exported.metadata_uri).exists()
 

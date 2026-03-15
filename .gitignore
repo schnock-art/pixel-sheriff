@@ -1,13 +1,17 @@
 __pycache__/
 *.pyc
 .pytest_cache/
+.coverage
 .venv/
 node_modules/
 .next/
+.nyc_output/
 .env
 *.sqlite3
 *.db
 artifacts/
+coverage/
+htmlcov/
 
 
 data/

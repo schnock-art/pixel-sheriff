@@ -8,6 +8,7 @@ import zipfile
 from httpx import AsyncClient
 import pytest
 import sheriff_api.routers.assets as assets_router
+import sheriff_api.routers.datasets as datasets_router
 import sheriff_api.routers.deployments as deployments_router
 import sheriff_api.routers.exports as exports_router
 import sheriff_api.routers.models as models_router
@@ -29,6 +30,60 @@ def assert_api_error(response, *, status_code: int, code: str, message: str | No
     return payload
 
 
+async def _create_default_task_project(
+    client: AsyncClient,
+    *,
+    name: str,
+    task_type: str | None = None,
+) -> dict:
+    payload: dict[str, str] = {"name": name}
+    if task_type is not None:
+        payload["task_type"] = task_type
+    response = await client.post("/api/v1/projects", json=payload)
+    assert response.status_code == 200
+    project = response.json()
+    assert isinstance(project.get("default_task_id"), str) and project["default_task_id"]
+    return project
+
+
+async def _create_task_scoped_category(
+    client: AsyncClient,
+    *,
+    project_id: str,
+    task_id: str,
+    name: str,
+    display_order: int = 0,
+) -> dict:
+    response = await client.post(
+        f"/api/v1/projects/{project_id}/categories",
+        json={"task_id": task_id, "name": name, "display_order": display_order},
+    )
+    assert response.status_code == 200
+    return response.json()
+
+
+async def _create_dataset_export(
+    client: AsyncClient,
+    *,
+    project_id: str,
+    task_id: str,
+    version_name: str,
+    selection_filters: dict[str, object] | None = None,
+) -> tuple[str, dict]:
+    dataset_version_id = await _create_dataset_version_for_task(
+        client,
+        project_id=project_id,
+        task_id=task_id,
+        name=version_name,
+        selection_filters=selection_filters,
+    )
+    response = await client.post(f"/api/v1/projects/{project_id}/datasets/versions/{dataset_version_id}/export")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["dataset_version_id"] == dataset_version_id
+    return dataset_version_id, payload
+
+
 @pytest.mark.asyncio
 async def test_health(client: AsyncClient) -> None:
     response = await client.get("/api/v1/health")
@@ -38,13 +93,13 @@ async def test_health(client: AsyncClient) -> None:
 
 @pytest.mark.asyncio
 async def test_crud_and_export_flow(client: AsyncClient) -> None:
-    project = (await client.post("/api/v1/projects", json={"name": "demo"})).json()
+    project = await _create_default_task_project(client, name="demo")
     project_id = project["id"]
+    task_id = project["default_task_id"]
 
-    category = (
-        await client.post(f"/api/v1/projects/{project_id}/categories", json={"name": "cat", "display_order": 1})
-    ).json()
-    assert category["id"] > 0
+    category = await _create_task_scoped_category(client, project_id=project_id, task_id=task_id, name="cat", display_order=1)
+    assert isinstance(category["id"], str) and category["id"]
+    assert uuid.UUID(category["id"])
 
     patched = (await client.patch(f"/api/v1/categories/{category['id']}", json={"name": "kitty"})).json()
     assert patched["id"] == category["id"]
@@ -58,19 +113,28 @@ async def test_crud_and_export_flow(client: AsyncClient) -> None:
 
     await client.post(
         f"/api/v1/projects/{project_id}/annotations",
-        json={"asset_id": asset["id"], "status": "approved", "payload_json": {"category_ids": [category["id"]]}},
+        json={
+            "asset_id": asset["id"],
+            "task_id": task_id,
+            "status": "approved",
+            "payload_json": {"category_ids": [category["id"]]},
+        },
     )
 
     filtered_assets = await client.get(f"/api/v1/projects/{project_id}/assets", params={"status": "approved"})
     assert len(filtered_assets.json()) == 1
 
-    export = await client.post(f"/api/v1/projects/{project_id}/exports", json={"selection_criteria_json": {"status": "approved"}})
-    assert export.status_code == 200
-    assert "manifest_json" in export.json()
-    assert export.json()["manifest_json"]["label_schema"]["classes"][0]["name"] == "kitty"
-    assert export.json()["export_uri"].startswith(f"/api/v1/projects/{project_id}/exports/")
+    dataset_version_id, export = await _create_dataset_export(
+        client,
+        project_id=project_id,
+        task_id=task_id,
+        version_name="crud-flow",
+        selection_filters={"include_statuses": ["approved"]},
+    )
+    assert export["hash"]
+    assert export["export_uri"].startswith(f"/api/v1/projects/{project_id}/datasets/versions/{dataset_version_id}/export/download")
 
-    archive = await client.get(export.json()["export_uri"])
+    archive = await client.get(export["export_uri"])
     assert archive.status_code == 200
     assert archive.headers["content-type"].startswith("application/zip")
 
@@ -137,29 +201,47 @@ async def test_patch_category_returns_category_not_found_error_code(client: Asyn
 
 
 @pytest.mark.asyncio
-async def test_export_download_returns_export_file_not_found_error_code(client: AsyncClient) -> None:
-    response = await client.get(f"/api/v1/projects/{uuid.uuid4()}/exports/{uuid.uuid4().hex}/download")
+async def test_legacy_project_export_endpoints_return_gone_error_code(client: AsyncClient) -> None:
+    project_id = str(uuid.uuid4())
+    created = await client.post(f"/api/v1/projects/{project_id}/exports")
+    assert_api_error(created, status_code=410, code="exports_legacy_gone", message=exports_router.LEGACY_MESSAGE)
+
+    listed = await client.get(f"/api/v1/projects/{project_id}/exports")
+    assert_api_error(listed, status_code=410, code="exports_legacy_gone", message=exports_router.LEGACY_MESSAGE)
+
+    downloaded = await client.get(f"/api/v1/projects/{project_id}/exports/{uuid.uuid4().hex}/download")
+    assert_api_error(downloaded, status_code=410, code="exports_legacy_gone", message=exports_router.LEGACY_MESSAGE)
+
+
+@pytest.mark.asyncio
+async def test_dataset_version_export_download_returns_export_file_not_found_error_code(client: AsyncClient) -> None:
+    response = await client.get(f"/api/v1/projects/{uuid.uuid4()}/datasets/versions/{uuid.uuid4()}/export/download")
     assert_api_error(response, status_code=404, code="export_file_not_found", message="Export file not found")
 
 
 @pytest.mark.asyncio
-async def test_export_download_returns_export_path_invalid_error_code(
+async def test_dataset_version_export_download_returns_export_path_invalid_error_code(
     client: AsyncClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def _raise_value_error(_storage_uri: str) -> Path:
         raise ValueError("bad export relpath")
 
-    monkeypatch.setattr(exports_router.storage, "resolve", _raise_value_error)
-    response = await client.get(f"/api/v1/projects/{uuid.uuid4()}/exports/{uuid.uuid4().hex}/download")
+    monkeypatch.setattr(
+        datasets_router.dataset_store,
+        "get_export_artifact",
+        lambda _project_id, _dataset_version_id: {"hash": "bad-hash"},
+    )
+    monkeypatch.setattr(datasets_router.storage, "resolve", _raise_value_error)
+    response = await client.get(f"/api/v1/projects/{uuid.uuid4()}/datasets/versions/{uuid.uuid4()}/export/download")
     payload = assert_api_error(response, status_code=400, code="export_path_invalid", message="Invalid export path")
     assert payload["error"]["details"]["reason"] == "bad export relpath"
 
 
 @pytest.mark.asyncio
 async def test_annotation_upsert_rejects_asset_outside_project(client: AsyncClient) -> None:
-    project_a = (await client.post("/api/v1/projects", json={"name": "project-a"})).json()
-    project_b = (await client.post("/api/v1/projects", json={"name": "project-b"})).json()
+    project_a = await _create_default_task_project(client, name="project-a")
+    project_b = await _create_default_task_project(client, name="project-b")
 
     upload = await client.post(
         f"/api/v1/projects/{project_a['id']}/assets/upload",
@@ -170,14 +252,14 @@ async def test_annotation_upsert_rejects_asset_outside_project(client: AsyncClie
 
     wrong_project_upsert = await client.post(
         f"/api/v1/projects/{project_b['id']}/annotations",
-        json={"asset_id": asset["id"], "status": "labeled", "payload_json": {"category_ids": []}},
+        json={"asset_id": asset["id"], "task_id": project_b["default_task_id"], "status": "labeled", "payload_json": {"category_ids": []}},
     )
     assert_api_error(wrong_project_upsert, status_code=404, code="not_found", message="Asset not found in project")
 
 
 @pytest.mark.asyncio
 async def test_annotation_submit_stale_asset_context_returns_not_found(client: AsyncClient) -> None:
-    project = (await client.post("/api/v1/projects", json={"name": "stale-submit"})).json()
+    project = await _create_default_task_project(client, name="stale-submit")
     project_id = project["id"]
     upload = await client.post(
         f"/api/v1/projects/{project_id}/assets/upload",
@@ -191,14 +273,14 @@ async def test_annotation_submit_stale_asset_context_returns_not_found(client: A
 
     stale_submit = await client.post(
         f"/api/v1/projects/{project_id}/annotations",
-        json={"asset_id": asset_id, "status": "labeled", "payload_json": {"category_ids": []}},
+        json={"asset_id": asset_id, "task_id": project["default_task_id"], "status": "labeled", "payload_json": {"category_ids": []}},
     )
     assert_api_error(stale_submit, status_code=404, code="not_found", message="Asset not found in project")
 
 
 @pytest.mark.asyncio
 async def test_delete_asset_removes_asset_content_and_annotations(client: AsyncClient) -> None:
-    project = (await client.post("/api/v1/projects", json={"name": "delete-asset"})).json()
+    project = await _create_default_task_project(client, name="delete-asset")
     project_id = project["id"]
 
     upload = await client.post(
@@ -210,7 +292,7 @@ async def test_delete_asset_removes_asset_content_and_annotations(client: AsyncC
 
     annotation = await client.post(
         f"/api/v1/projects/{project_id}/annotations",
-        json={"asset_id": asset["id"], "status": "approved", "payload_json": {"category_ids": []}},
+        json={"asset_id": asset["id"], "task_id": project["default_task_id"], "status": "approved", "payload_json": {"category_ids": []}},
     )
     assert annotation.status_code == 200
 
@@ -224,14 +306,14 @@ async def test_delete_asset_removes_asset_content_and_annotations(client: AsyncC
     assert assets.status_code == 200
     assert assets.json() == []
 
-    annotations = await client.get(f"/api/v1/projects/{project_id}/annotations")
+    annotations = await client.get(f"/api/v1/projects/{project_id}/annotations", params={"task_id": project["default_task_id"]})
     assert annotations.status_code == 200
     assert annotations.json() == []
 
 
 @pytest.mark.asyncio
 async def test_delete_project_removes_related_resources(client: AsyncClient) -> None:
-    project = (await client.post("/api/v1/projects", json={"name": "delete-project"})).json()
+    project = await _create_default_task_project(client, name="delete-project")
     project_id = project["id"]
 
     upload = await client.post(
@@ -243,7 +325,7 @@ async def test_delete_project_removes_related_resources(client: AsyncClient) -> 
 
     annotation = await client.post(
         f"/api/v1/projects/{project_id}/annotations",
-        json={"asset_id": asset["id"], "status": "approved", "payload_json": {"category_ids": []}},
+        json={"asset_id": asset["id"], "task_id": project["default_task_id"], "status": "approved", "payload_json": {"category_ids": []}},
     )
     assert annotation.status_code == 200
 
@@ -328,9 +410,10 @@ async def test_validation_errors_use_structured_error_shape(client: AsyncClient)
 
 @pytest.mark.asyncio
 async def test_annotation_geometry_validation_rejects_out_of_bounds_bbox(client: AsyncClient) -> None:
-    project = (await client.post("/api/v1/projects", json={"name": "bbox-validation", "task_type": "bbox"})).json()
+    project = await _create_default_task_project(client, name="bbox-validation", task_type="bbox")
     project_id = project["id"]
-    category = (await client.post(f"/api/v1/projects/{project_id}/categories", json={"name": "car"})).json()
+    task_id = project["default_task_id"]
+    category = await _create_task_scoped_category(client, project_id=project_id, task_id=task_id, name="car")
 
     upload = await client.post(
         f"/api/v1/projects/{project_id}/assets/upload",
@@ -342,6 +425,7 @@ async def test_annotation_geometry_validation_rejects_out_of_bounds_bbox(client:
     invalid = await client.post(
         f"/api/v1/projects/{project_id}/annotations",
         json={
+            "task_id": task_id,
             "asset_id": asset["id"],
             "status": "labeled",
             "payload_json": {
@@ -364,9 +448,10 @@ async def test_annotation_geometry_validation_rejects_out_of_bounds_bbox(client:
 
 @pytest.mark.asyncio
 async def test_annotation_mode_rejects_geometry_for_classification_project(client: AsyncClient) -> None:
-    project = (await client.post("/api/v1/projects", json={"name": "classification-mode", "task_type": "classification_single"})).json()
+    project = await _create_default_task_project(client, name="classification-mode", task_type="classification_single")
     project_id = project["id"]
-    category = (await client.post(f"/api/v1/projects/{project_id}/categories", json={"name": "class-a"})).json()
+    task_id = project["default_task_id"]
+    category = await _create_task_scoped_category(client, project_id=project_id, task_id=task_id, name="class-a")
 
     upload = await client.post(
         f"/api/v1/projects/{project_id}/assets/upload",
@@ -378,6 +463,7 @@ async def test_annotation_mode_rejects_geometry_for_classification_project(clien
     invalid = await client.post(
         f"/api/v1/projects/{project_id}/annotations",
         json={
+            "task_id": task_id,
             "asset_id": asset["id"],
             "status": "labeled",
             "payload_json": {
@@ -394,16 +480,17 @@ async def test_annotation_mode_rejects_geometry_for_classification_project(clien
         invalid,
         status_code=422,
         code="annotation_task_mode_mismatch",
-        message="Project task mode does not allow geometry objects",
+        message="Task mode does not allow geometry objects",
     )
-    assert payload["error"]["details"]["task_type"] == "classification_single"
+    assert payload["error"]["details"]["task_kind"] == "classification"
 
 
 @pytest.mark.asyncio
 async def test_annotation_mode_rejects_polygon_for_bbox_project(client: AsyncClient) -> None:
-    project = (await client.post("/api/v1/projects", json={"name": "bbox-mode", "task_type": "bbox"})).json()
+    project = await _create_default_task_project(client, name="bbox-mode", task_type="bbox")
     project_id = project["id"]
-    category = (await client.post(f"/api/v1/projects/{project_id}/categories", json={"name": "class-b"})).json()
+    task_id = project["default_task_id"]
+    category = await _create_task_scoped_category(client, project_id=project_id, task_id=task_id, name="class-b")
 
     upload = await client.post(
         f"/api/v1/projects/{project_id}/assets/upload",
@@ -415,6 +502,7 @@ async def test_annotation_mode_rejects_polygon_for_bbox_project(client: AsyncCli
     invalid = await client.post(
         f"/api/v1/projects/{project_id}/annotations",
         json={
+            "task_id": task_id,
             "asset_id": asset["id"],
             "status": "labeled",
             "payload_json": {
@@ -431,16 +519,17 @@ async def test_annotation_mode_rejects_polygon_for_bbox_project(client: AsyncCli
         invalid,
         status_code=422,
         code="annotation_task_mode_mismatch",
-        message="Project task mode only allows bounding box objects",
+        message="Task mode only allows bounding box objects",
     )
-    assert payload["error"]["details"]["task_type"] == "bbox"
+    assert payload["error"]["details"]["task_kind"] == "bbox"
 
 
 @pytest.mark.asyncio
 async def test_annotation_mode_rejects_bbox_for_segmentation_project(client: AsyncClient) -> None:
-    project = (await client.post("/api/v1/projects", json={"name": "seg-mode", "task_type": "segmentation"})).json()
+    project = await _create_default_task_project(client, name="seg-mode", task_type="segmentation")
     project_id = project["id"]
-    category = (await client.post(f"/api/v1/projects/{project_id}/categories", json={"name": "class-c"})).json()
+    task_id = project["default_task_id"]
+    category = await _create_task_scoped_category(client, project_id=project_id, task_id=task_id, name="class-c")
 
     upload = await client.post(
         f"/api/v1/projects/{project_id}/assets/upload",
@@ -452,6 +541,7 @@ async def test_annotation_mode_rejects_bbox_for_segmentation_project(client: Asy
     invalid = await client.post(
         f"/api/v1/projects/{project_id}/annotations",
         json={
+            "task_id": task_id,
             "asset_id": asset["id"],
             "status": "labeled",
             "payload_json": {
@@ -468,16 +558,17 @@ async def test_annotation_mode_rejects_bbox_for_segmentation_project(client: Asy
         invalid,
         status_code=422,
         code="annotation_task_mode_mismatch",
-        message="Project task mode only allows segmentation polygon objects",
+        message="Task mode only allows segmentation polygon objects",
     )
-    assert payload["error"]["details"]["task_type"] == "segmentation"
+    assert payload["error"]["details"]["task_kind"] == "segmentation"
 
 
 @pytest.mark.asyncio
 async def test_annotation_upsert_accepts_bbox_geometry_payload(client: AsyncClient) -> None:
-    project = (await client.post("/api/v1/projects", json={"name": "bbox-ok", "task_type": "bbox"})).json()
+    project = await _create_default_task_project(client, name="bbox-ok", task_type="bbox")
     project_id = project["id"]
-    category = (await client.post(f"/api/v1/projects/{project_id}/categories", json={"name": "truck"})).json()
+    task_id = project["default_task_id"]
+    category = await _create_task_scoped_category(client, project_id=project_id, task_id=task_id, name="truck")
 
     upload = await client.post(
         f"/api/v1/projects/{project_id}/assets/upload",
@@ -489,7 +580,7 @@ async def test_annotation_upsert_accepts_bbox_geometry_payload(client: AsyncClie
     saved = await client.post(
         f"/api/v1/projects/{project_id}/annotations",
         json={
-            "task_id": project["default_task_id"],
+            "task_id": task_id,
             "asset_id": asset["id"],
             "status": "approved",
             "payload_json": {
@@ -620,9 +711,10 @@ async def test_annotation_upsert_accepts_deployment_prediction_bbox_provenance(c
 
 @pytest.mark.asyncio
 async def test_annotation_upsert_accepts_segmentation_geometry_payload(client: AsyncClient) -> None:
-    project = (await client.post("/api/v1/projects", json={"name": "seg-ok", "task_type": "segmentation"})).json()
+    project = await _create_default_task_project(client, name="seg-ok", task_type="segmentation")
     project_id = project["id"]
-    category = (await client.post(f"/api/v1/projects/{project_id}/categories", json={"name": "person"})).json()
+    task_id = project["default_task_id"]
+    category = await _create_task_scoped_category(client, project_id=project_id, task_id=task_id, name="person")
 
     upload = await client.post(
         f"/api/v1/projects/{project_id}/assets/upload",
@@ -634,6 +726,7 @@ async def test_annotation_upsert_accepts_segmentation_geometry_payload(client: A
     saved = await client.post(
         f"/api/v1/projects/{project_id}/annotations",
         json={
+            "task_id": task_id,
             "asset_id": asset["id"],
             "status": "approved",
             "payload_json": {
@@ -657,9 +750,10 @@ async def test_annotation_upsert_accepts_segmentation_geometry_payload(client: A
 
 @pytest.mark.asyncio
 async def test_export_includes_bbox_geometry_records(client: AsyncClient) -> None:
-    project = (await client.post("/api/v1/projects", json={"name": "geometry-export-bbox", "task_type": "bbox"})).json()
+    project = await _create_default_task_project(client, name="geometry-export-bbox", task_type="bbox")
     project_id = project["id"]
-    category = (await client.post(f"/api/v1/projects/{project_id}/categories", json={"name": "person"})).json()
+    task_id = project["default_task_id"]
+    category = await _create_task_scoped_category(client, project_id=project_id, task_id=task_id, name="person")
 
     upload = await client.post(
         f"/api/v1/projects/{project_id}/assets/upload",
@@ -671,6 +765,7 @@ async def test_export_includes_bbox_geometry_records(client: AsyncClient) -> Non
     upsert = await client.post(
         f"/api/v1/projects/{project_id}/annotations",
         json={
+            "task_id": task_id,
             "asset_id": asset["id"],
             "status": "approved",
             "payload_json": {
@@ -685,10 +780,14 @@ async def test_export_includes_bbox_geometry_records(client: AsyncClient) -> Non
     )
     assert upsert.status_code == 200
 
-    export = await client.post(f"/api/v1/projects/{project_id}/exports", json={"selection_criteria_json": {"status": "approved"}})
-    assert export.status_code == 200
-
-    archive = await client.get(export.json()["export_uri"])
+    _dataset_version_id, export = await _create_dataset_export(
+        client,
+        project_id=project_id,
+        task_id=task_id,
+        version_name="geometry-export-bbox",
+        selection_filters={"include_statuses": ["approved"]},
+    )
+    archive = await client.get(export["export_uri"])
     assert archive.status_code == 200
     with zipfile.ZipFile(BytesIO(archive.content), "r") as bundle:
         coco = json.loads(bundle.read("coco_instances.json").decode("utf-8"))
@@ -701,9 +800,10 @@ async def test_export_includes_bbox_geometry_records(client: AsyncClient) -> Non
 
 @pytest.mark.asyncio
 async def test_export_includes_segmentation_geometry_records(client: AsyncClient) -> None:
-    project = (await client.post("/api/v1/projects", json={"name": "geometry-export-seg", "task_type": "segmentation"})).json()
+    project = await _create_default_task_project(client, name="geometry-export-seg", task_type="segmentation")
     project_id = project["id"]
-    category = (await client.post(f"/api/v1/projects/{project_id}/categories", json={"name": "person"})).json()
+    task_id = project["default_task_id"]
+    category = await _create_task_scoped_category(client, project_id=project_id, task_id=task_id, name="person")
 
     upload = await client.post(
         f"/api/v1/projects/{project_id}/assets/upload",
@@ -715,6 +815,7 @@ async def test_export_includes_segmentation_geometry_records(client: AsyncClient
     upsert = await client.post(
         f"/api/v1/projects/{project_id}/annotations",
         json={
+            "task_id": task_id,
             "asset_id": asset["id"],
             "status": "approved",
             "payload_json": {
@@ -729,10 +830,14 @@ async def test_export_includes_segmentation_geometry_records(client: AsyncClient
     )
     assert upsert.status_code == 200
 
-    export = await client.post(f"/api/v1/projects/{project_id}/exports", json={"selection_criteria_json": {"status": "approved"}})
-    assert export.status_code == 200
-
-    archive = await client.get(export.json()["export_uri"])
+    _dataset_version_id, export = await _create_dataset_export(
+        client,
+        project_id=project_id,
+        task_id=task_id,
+        version_name="geometry-export-seg",
+        selection_filters={"include_statuses": ["approved"]},
+    )
+    archive = await client.get(export["export_uri"])
     assert archive.status_code == 200
     with zipfile.ZipFile(BytesIO(archive.content), "r") as bundle:
         coco = json.loads(bundle.read("coco_instances.json").decode("utf-8"))
@@ -744,9 +849,10 @@ async def test_export_includes_segmentation_geometry_records(client: AsyncClient
 
 @pytest.mark.asyncio
 async def test_export_detection_includes_negative_images_by_default(client: AsyncClient) -> None:
-    project = (await client.post("/api/v1/projects", json={"name": "detection-negatives-default", "task_type": "bbox"})).json()
+    project = await _create_default_task_project(client, name="detection-negatives-default", task_type="bbox")
     project_id = project["id"]
-    category = (await client.post(f"/api/v1/projects/{project_id}/categories", json={"name": "Road Sign"})).json()
+    task_id = project["default_task_id"]
+    category = await _create_task_scoped_category(client, project_id=project_id, task_id=task_id, name="Road Sign")
 
     positive = await client.post(
         f"/api/v1/projects/{project_id}/assets/upload",
@@ -765,6 +871,7 @@ async def test_export_detection_includes_negative_images_by_default(client: Asyn
     positive_annotation = await client.post(
         f"/api/v1/projects/{project_id}/annotations",
         json={
+            "task_id": task_id,
             "asset_id": positive_asset["id"],
             "status": "approved",
             "payload_json": {
@@ -780,6 +887,7 @@ async def test_export_detection_includes_negative_images_by_default(client: Asyn
     negative_annotation = await client.post(
         f"/api/v1/projects/{project_id}/annotations",
         json={
+            "task_id": task_id,
             "asset_id": negative_asset["id"],
             "status": "approved",
             "payload_json": {
@@ -792,10 +900,14 @@ async def test_export_detection_includes_negative_images_by_default(client: Asyn
     )
     assert negative_annotation.status_code == 200
 
-    export = await client.post(f"/api/v1/projects/{project_id}/exports", json={"selection_criteria_json": {"status": "approved"}})
-    assert export.status_code == 200
-
-    archive = await client.get(export.json()["export_uri"])
+    _dataset_version_id, export = await _create_dataset_export(
+        client,
+        project_id=project_id,
+        task_id=task_id,
+        version_name="detection-negatives-default",
+        selection_filters={"include_statuses": ["approved"]},
+    )
+    archive = await client.get(export["export_uri"])
     assert archive.status_code == 200
     with zipfile.ZipFile(BytesIO(archive.content), "r") as bundle:
         manifest = json.loads(bundle.read("manifest.json").decode("utf-8"))
@@ -810,9 +922,10 @@ async def test_export_detection_includes_negative_images_by_default(client: Asyn
 
 @pytest.mark.asyncio
 async def test_export_detection_excludes_negative_images_when_disabled(client: AsyncClient) -> None:
-    project = (await client.post("/api/v1/projects", json={"name": "detection-negatives-off", "task_type": "bbox"})).json()
+    project = await _create_default_task_project(client, name="detection-negatives-off", task_type="bbox")
     project_id = project["id"]
-    category = (await client.post(f"/api/v1/projects/{project_id}/categories", json={"name": "Road Sign"})).json()
+    task_id = project["default_task_id"]
+    category = await _create_task_scoped_category(client, project_id=project_id, task_id=task_id, name="Road Sign")
 
     positive = await client.post(
         f"/api/v1/projects/{project_id}/assets/upload",
@@ -831,6 +944,7 @@ async def test_export_detection_excludes_negative_images_when_disabled(client: A
     positive_annotation = await client.post(
         f"/api/v1/projects/{project_id}/annotations",
         json={
+            "task_id": task_id,
             "asset_id": positive_asset["id"],
             "status": "approved",
             "payload_json": {
@@ -846,6 +960,7 @@ async def test_export_detection_excludes_negative_images_when_disabled(client: A
     negative_annotation = await client.post(
         f"/api/v1/projects/{project_id}/annotations",
         json={
+            "task_id": task_id,
             "asset_id": negative_asset["id"],
             "status": "approved",
             "payload_json": {
@@ -858,13 +973,14 @@ async def test_export_detection_excludes_negative_images_when_disabled(client: A
     )
     assert negative_annotation.status_code == 200
 
-    export = await client.post(
-        f"/api/v1/projects/{project_id}/exports",
-        json={"selection_criteria_json": {"status": "approved", "include_negative_images": False}},
+    _dataset_version_id, export = await _create_dataset_export(
+        client,
+        project_id=project_id,
+        task_id=task_id,
+        version_name="detection-negatives-off",
+        selection_filters={"include_statuses": ["approved"], "include_negative_images": False},
     )
-    assert export.status_code == 200
-
-    archive = await client.get(export.json()["export_uri"])
+    archive = await client.get(export["export_uri"])
     assert archive.status_code == 200
     with zipfile.ZipFile(BytesIO(archive.content), "r") as bundle:
         manifest = json.loads(bundle.read("manifest.json").decode("utf-8"))
@@ -880,11 +996,10 @@ async def test_export_detection_excludes_negative_images_when_disabled(client: A
 
 @pytest.mark.asyncio
 async def test_export_normalizes_category_names_to_lowercase_slug(client: AsyncClient) -> None:
-    project = (await client.post("/api/v1/projects", json={"name": "slug-classes"})).json()
+    project = await _create_default_task_project(client, name="slug-classes")
     project_id = project["id"]
-    category = (
-        await client.post(f"/api/v1/projects/{project_id}/categories", json={"name": "Rock Face", "display_order": 1})
-    ).json()
+    task_id = project["default_task_id"]
+    category = await _create_task_scoped_category(client, project_id=project_id, task_id=task_id, name="Rock Face", display_order=1)
 
     upload = await client.post(
         f"/api/v1/projects/{project_id}/assets/upload",
@@ -895,14 +1010,18 @@ async def test_export_normalizes_category_names_to_lowercase_slug(client: AsyncC
 
     annotation = await client.post(
         f"/api/v1/projects/{project_id}/annotations",
-        json={"asset_id": asset["id"], "status": "approved", "payload_json": {"category_ids": [category["id"]]}},
+        json={"asset_id": asset["id"], "task_id": task_id, "status": "approved", "payload_json": {"category_ids": [category["id"]]}},
     )
     assert annotation.status_code == 200
 
-    export = await client.post(f"/api/v1/projects/{project_id}/exports", json={"selection_criteria_json": {"status": "approved"}})
-    assert export.status_code == 200
-
-    archive = await client.get(export.json()["export_uri"])
+    _dataset_version_id, export = await _create_dataset_export(
+        client,
+        project_id=project_id,
+        task_id=task_id,
+        version_name="slug-classes",
+        selection_filters={"include_statuses": ["approved"]},
+    )
+    archive = await client.get(export["export_uri"])
     assert archive.status_code == 200
     with zipfile.ZipFile(BytesIO(archive.content), "r") as bundle:
         manifest = json.loads(bundle.read("manifest.json").decode("utf-8"))
@@ -917,9 +1036,10 @@ async def test_export_normalizes_category_names_to_lowercase_slug(client: AsyncC
 
 @pytest.mark.asyncio
 async def test_export_hash_is_stable_for_equivalent_geometry_object_order(client: AsyncClient) -> None:
-    project = (await client.post("/api/v1/projects", json={"name": "geometry-hash", "task_type": "bbox"})).json()
+    project = await _create_default_task_project(client, name="geometry-hash", task_type="bbox")
     project_id = project["id"]
-    category = (await client.post(f"/api/v1/projects/{project_id}/categories", json={"name": "bike"})).json()
+    task_id = project["default_task_id"]
+    category = await _create_task_scoped_category(client, project_id=project_id, task_id=task_id, name="bike")
 
     upload = await client.post(
         f"/api/v1/projects/{project_id}/assets/upload",
@@ -949,32 +1069,43 @@ async def test_export_hash_is_stable_for_equivalent_geometry_object_order(client
 
     upsert_a = await client.post(
         f"/api/v1/projects/{project_id}/annotations",
-        json={"asset_id": asset["id"], "status": "approved", "payload_json": payload_a},
+        json={"asset_id": asset["id"], "task_id": task_id, "status": "approved", "payload_json": payload_a},
     )
     assert upsert_a.status_code == 200
 
-    export_a = await client.post(f"/api/v1/projects/{project_id}/exports", json={"selection_criteria_json": {"status": "approved"}})
-    assert export_a.status_code == 200
-    hash_a = export_a.json()["hash"]
+    _dataset_version_id_a, export_a = await _create_dataset_export(
+        client,
+        project_id=project_id,
+        task_id=task_id,
+        version_name="geometry-hash-a",
+        selection_filters={"include_statuses": ["approved"]},
+    )
+    hash_a = export_a["hash"]
 
     upsert_b = await client.post(
         f"/api/v1/projects/{project_id}/annotations",
-        json={"asset_id": asset["id"], "status": "approved", "payload_json": payload_b},
+        json={"asset_id": asset["id"], "task_id": task_id, "status": "approved", "payload_json": payload_b},
     )
     assert upsert_b.status_code == 200
 
-    export_b = await client.post(f"/api/v1/projects/{project_id}/exports", json={"selection_criteria_json": {"status": "approved"}})
-    assert export_b.status_code == 200
-    hash_b = export_b.json()["hash"]
+    _dataset_version_id_b, export_b = await _create_dataset_export(
+        client,
+        project_id=project_id,
+        task_id=task_id,
+        version_name="geometry-hash-b",
+        selection_filters={"include_statuses": ["approved"]},
+    )
+    hash_b = export_b["hash"]
 
     assert hash_a == hash_b
 
 
 @pytest.mark.asyncio
 async def test_regression_classification_preserves_label_when_classification_block_empty(client: AsyncClient) -> None:
-    project = (await client.post("/api/v1/projects", json={"name": "reg-classification", "task_type": "classification_single"})).json()
+    project = await _create_default_task_project(client, name="reg-classification", task_type="classification_single")
     project_id = project["id"]
-    category = (await client.post(f"/api/v1/projects/{project_id}/categories", json={"name": "mountain"})).json()
+    task_id = project["default_task_id"]
+    category = await _create_task_scoped_category(client, project_id=project_id, task_id=task_id, name="mountain")
 
     upload = await client.post(
         f"/api/v1/projects/{project_id}/assets/upload",
@@ -986,6 +1117,7 @@ async def test_regression_classification_preserves_label_when_classification_blo
     saved = await client.post(
         f"/api/v1/projects/{project_id}/annotations",
         json={
+            "task_id": task_id,
             "asset_id": asset["id"],
             "status": "labeled",
             "payload_json": {
@@ -1006,9 +1138,10 @@ async def test_regression_classification_preserves_label_when_classification_blo
 
 @pytest.mark.asyncio
 async def test_regression_bbox_preserves_class_from_object_when_classification_block_empty(client: AsyncClient) -> None:
-    project = (await client.post("/api/v1/projects", json={"name": "reg-bbox", "task_type": "bbox"})).json()
+    project = await _create_default_task_project(client, name="reg-bbox", task_type="bbox")
     project_id = project["id"]
-    category = (await client.post(f"/api/v1/projects/{project_id}/categories", json={"name": "lake"})).json()
+    task_id = project["default_task_id"]
+    category = await _create_task_scoped_category(client, project_id=project_id, task_id=task_id, name="lake")
 
     upload = await client.post(
         f"/api/v1/projects/{project_id}/assets/upload",
@@ -1020,6 +1153,7 @@ async def test_regression_bbox_preserves_class_from_object_when_classification_b
     saved = await client.post(
         f"/api/v1/projects/{project_id}/annotations",
         json={
+            "task_id": task_id,
             "asset_id": asset["id"],
             "status": "labeled",
             "payload_json": {
@@ -1039,9 +1173,10 @@ async def test_regression_bbox_preserves_class_from_object_when_classification_b
 
 @pytest.mark.asyncio
 async def test_regression_segmentation_preserves_class_from_object_when_classification_block_empty(client: AsyncClient) -> None:
-    project = (await client.post("/api/v1/projects", json={"name": "reg-seg", "task_type": "segmentation"})).json()
+    project = await _create_default_task_project(client, name="reg-seg", task_type="segmentation")
     project_id = project["id"]
-    category = (await client.post(f"/api/v1/projects/{project_id}/categories", json={"name": "stone"})).json()
+    task_id = project["default_task_id"]
+    category = await _create_task_scoped_category(client, project_id=project_id, task_id=task_id, name="stone")
 
     upload = await client.post(
         f"/api/v1/projects/{project_id}/assets/upload",
@@ -1053,6 +1188,7 @@ async def test_regression_segmentation_preserves_class_from_object_when_classifi
     saved = await client.post(
         f"/api/v1/projects/{project_id}/annotations",
         json={
+            "task_id": task_id,
             "asset_id": asset["id"],
             "status": "labeled",
             "payload_json": {
@@ -2010,11 +2146,15 @@ async def test_experiment_start_generates_metrics_and_checkpoints(client: AsyncC
 async def test_experiment_start_rebuilds_missing_dataset_zip(client: AsyncClient) -> None:
     project_id, model_id = await _create_project_model(client, project_name="exp-rebuild-zip")
 
-    export_rows = await client.get(f"/api/v1/projects/{project_id}/exports")
-    assert export_rows.status_code == 200
-    exports_payload = export_rows.json()
-    assert len(exports_payload) == 1
-    content_hash = exports_payload[0]["hash"]
+    versions = await client.get(f"/api/v1/projects/{project_id}/datasets/versions")
+    assert versions.status_code == 200
+    version_items = versions.json()["items"]
+    assert len(version_items) == 1
+    dataset_version_id = version_items[0]["version"]["dataset_version_id"]
+
+    export = await client.post(f"/api/v1/projects/{project_id}/datasets/versions/{dataset_version_id}/export")
+    assert export.status_code == 200
+    content_hash = export.json()["hash"]
 
     settings = get_settings()
     zip_path = Path(settings.storage_root) / "exports" / project_id / f"{content_hash}.zip"
@@ -3165,19 +3305,19 @@ async def test_dataset_preview_filters_respect_exclude_statuses_and_exclude_fold
 
     await client.post(
         f"/api/v1/projects/{project_id}/annotations",
-        json={"asset_id": cat_a["id"], "status": "labeled", "payload_json": {}},
+        json={"asset_id": cat_a["id"], "task_id": project["default_task_id"], "status": "labeled", "payload_json": {}},
     )
     await client.post(
         f"/api/v1/projects/{project_id}/annotations",
-        json={"asset_id": cat_b["id"], "status": "approved", "payload_json": {}},
+        json={"asset_id": cat_b["id"], "task_id": project["default_task_id"], "status": "approved", "payload_json": {}},
     )
     await client.post(
         f"/api/v1/projects/{project_id}/annotations",
-        json={"asset_id": dog_c["id"], "status": "needs_review", "payload_json": {}},
+        json={"asset_id": dog_c["id"], "task_id": project["default_task_id"], "status": "needs_review", "payload_json": {}},
     )
     await client.post(
         f"/api/v1/projects/{project_id}/annotations",
-        json={"asset_id": misc_d["id"], "status": "skipped", "payload_json": {}},
+        json={"asset_id": misc_d["id"], "task_id": project["default_task_id"], "status": "skipped", "payload_json": {}},
     )
 
     preview = await client.post(
@@ -3432,13 +3572,14 @@ async def _create_dataset_version_for_task(
     task_id: str,
     name: str,
     set_active: bool = True,
+    selection_filters: dict[str, object] | None = None,
 ) -> str:
     version_resp = await client.post(
         f"/api/v1/projects/{project_id}/datasets/versions",
         json={
             "name": name,
             "task_id": task_id,
-            "selection": {"mode": "filter_snapshot", "filters": {}},
+            "selection": {"mode": "filter_snapshot", "filters": selection_filters or {}},
             "split": {
                 "seed": 42,
                 "ratios": {"train": 1.0, "val": 0.0, "test": 0.0},

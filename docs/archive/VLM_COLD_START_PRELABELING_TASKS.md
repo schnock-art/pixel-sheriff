@@ -104,7 +104,7 @@ Demo / harness:
 - `scripts/run_demo_assets.sh`
 
 Docs:
-- `docu/VLM_COLD_START_PRELABELING_TASKS.md`
+- `docs/archive/VLM_COLD_START_PRELABELING_TASKS.md`
 
 ## Coverage Added In This Completion Pass
 

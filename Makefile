@@ -16,7 +16,9 @@ PYTHON          := apps/api/.venv/Scripts/python
 	build-web-api up-web-api \
 	build-trainer-base build-trainer build-trainer-bootstrap up-trainer \
 	build-all up-all \
-	test-web test-api-focused test-api-safe \
+	test-web test-web-smoke test-api test-api-ml test-api-focused test-api-safe \
+	test-trainer test-worker test-all \
+	coverage-api coverage-trainer coverage-worker coverage-python coverage-web coverage-all \
 	demo-hero demo-screenshots demo-assets \
 	typecheck-web verify-cross-boundary \
 	infra create-local-db dev-api dev-web \
@@ -36,9 +38,20 @@ help:
 	@echo "  make up-trainer          # run trainer in background"
 	@echo "  make build-all           # rebuild web+api+trainer images"
 	@echo "  make up-all              # run all services in background"
-	@echo "  make test-web            # run web tests"
+	@echo "  make test-web            # run the full web test suite"
+	@echo "  make test-web-smoke      # run a fast web smoke test"
+	@echo "  make test-api            # run the full API test suite"
+	@echo "  make test-api-ml         # run the API ML-only test suite"
 	@echo "  make test-api-focused    # run focused API dataset tests"
 	@echo "  make test-api-safe       # same tests + explicit DB safety guard"
+	@echo "  make test-trainer        # run the trainer test suite"
+	@echo "  make test-worker         # run the worker test suite"
+	@echo "  make test-all            # run web, api, trainer, and worker suites"
+	@echo "  make coverage-api        # generate API coverage reports"
+	@echo "  make coverage-trainer    # generate trainer coverage reports"
+	@echo "  make coverage-worker     # generate worker coverage reports"
+	@echo "  make coverage-web        # generate web coverage reports"
+	@echo "  make coverage-all        # generate coverage reports for all apps"
 	@echo "  make demo-hero           # generate README hero demo video"
 	@echo "  make demo-screenshots    # generate README screenshots"
 	@echo "  make demo-assets         # generate all README demo assets"
@@ -89,13 +102,46 @@ up-all:
 	docker compose up -d
 
 test-web:
+	./scripts/run_web_tests.sh
+
+test-web-smoke:
 	./scripts/run_web_tests.sh tests/datasetPage.test.js
+
+test-api:
+	bash ./scripts/run_api_tests.sh -q
+
+test-api-ml:
+	bash ./scripts/run_api_ml_tests.sh
 
 test-api-focused:
 	bash ./scripts/run_api_tests.sh -q tests/test_api.py -k "dataset_preview_filters_respect_exclude_statuses_and_exclude_folder_precedence or dataset_preview_include_folder_empty_means_no_restriction or dataset_saved_split_membership_comes_from_stored_split_map"
 
 test-api-safe:
 	bash ./scripts/run_api_tests.sh -q tests/test_api.py -k "dataset_preview_filters_respect_exclude_statuses_and_exclude_folder_precedence or dataset_preview_include_folder_empty_means_no_restriction or dataset_saved_split_membership_comes_from_stored_split_map"
+
+test-trainer:
+	bash ./scripts/run_trainer_tests.sh -q
+
+test-worker:
+	bash ./scripts/run_worker_tests.sh -q
+
+test-all: test-web test-api test-trainer test-worker
+
+coverage-api:
+	bash ./scripts/run_api_coverage.sh
+
+coverage-trainer:
+	bash ./scripts/run_trainer_coverage.sh
+
+coverage-worker:
+	bash ./scripts/run_worker_coverage.sh
+
+coverage-python: coverage-api coverage-trainer coverage-worker
+
+coverage-web:
+	./scripts/run_web_coverage.sh
+
+coverage-all: coverage-python coverage-web
 
 demo-hero:
 	./scripts/run_demo_assets.sh hero

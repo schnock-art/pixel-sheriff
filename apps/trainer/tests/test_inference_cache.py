@@ -24,6 +24,17 @@ class _DummySession:
         return []
 
 
+class _FakeClock:
+    def __init__(self, start: float = 0.0) -> None:
+        self.current = start
+
+    def __call__(self) -> float:
+        return self.current
+
+    def advance(self, seconds: float) -> None:
+        self.current += seconds
+
+
 @pytest.fixture(autouse=True)
 def _patch_ort(monkeypatch: pytest.MonkeyPatch) -> None:
     class _DummyOrt:
@@ -74,12 +85,12 @@ async def test_cache_busy_when_cpu_capacity_is_leased() -> None:
 
 @pytest.mark.asyncio
 async def test_cache_ttl_eviction_reloads_session() -> None:
-    cache = SessionCache(max_models_gpu=1, max_models_cpu=1, ttl_seconds=1)
+    clock = _FakeClock()
+    cache = SessionCache(max_models_gpu=1, max_models_cpu=1, ttl_seconds=1, clock=clock)
     session_a, device_a = await cache.acquire_session(model_key="m1", onnx_path=Path("/tmp/m1.onnx"), device_preference="cpu")
     await cache.release("m1", device_a)
-    import asyncio
 
-    await asyncio.sleep(1.1)
+    clock.advance(1.1)
     session_b, device_b = await cache.acquire_session(model_key="m1", onnx_path=Path("/tmp/m1.onnx"), device_preference="cpu")
     await cache.release("m1", device_b)
     assert session_a is not session_b

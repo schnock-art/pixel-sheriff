@@ -8,10 +8,10 @@ Status reflects current repository behavior.
 - [x] Core docs refreshed for the current repository structure and workflow surface:
   - [x] `README.md`
   - [x] `docs/architecture.md`
-  - [x] `docu/Architecture.md`
-  - [x] `docu/TECHNICAL_REFERENCE.md`
-  - [x] `docu/Roadplan.md`
-  - [x] `docu/VLM_COLD_START_PRELABELING_TASKS.md`
+  - [x] `docs/archive/Architecture.md`
+  - [x] `docs/archive/TECHNICAL_REFERENCE.md`
+  - [x] `docs/archive/Roadplan.md`
+  - [x] `docs/archive/VLM_COLD_START_PRELABELING_TASKS.md`
 
 ### Sequence Media + AI Prelabels
 - [x] Video import pipeline:

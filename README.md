@@ -282,7 +282,14 @@ Checks:
 
 ```bash
 make test-web
-./scripts/run_api_tests.sh
+make test-web-smoke
+make test-api
+make test-api-ml
+make test-api-focused
+make test-trainer
+make test-worker
+make test-all
+make coverage-all
 make verify-cross-boundary
 make contracts-sync
 make contracts-check
@@ -292,15 +299,18 @@ make contracts-check
 
 Current docs:
 
+- `docs/README.md`
 - `docs/architecture.md`
 - `docs/demo/README.md`
+- `docs/CHANGELOG.md`
 - `docs/plans/`
+- `docs/archive/`
 
 Other folders:
 
 - `docs/demo/` contains generated README/demo media
-- `docs/plans/` contains dated design notes and plan snapshots
-- `docu/` contains older reference material retained for historical context
+- `docs/plans/` contains dated design notes, active trackers, and plan snapshots
+- `docs/archive/` contains historical notes moved out of the former `docu/` directory
 
 ## Codebase Map
 
@@ -332,4 +342,5 @@ Shared contracts:
 ## Notes
 
 - Sequence frames export as normal images with lineage metadata.
-- Historical notes in `docu/` used to lag the codebase; they have been refreshed, but dated planning files under `docs/plans/` remain historical snapshots.
+- Current documentation now lives under `docs/`; use `docs/archive/` only for historical context.
+- See `docs/README.md` for test and coverage environment caveats before relying on local runners.

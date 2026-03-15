@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- Docs and test baseline cleanup:
+  - moved historical `docu/` references into `docs/archive/` and added `docs/README.md` as the current docs index
+  - moved the changelog into `docs/CHANGELOG.md` so the repo now has a single docs home
+  - added explicit full-suite Make targets for `web`, `api`, `trainer`, and `worker`, plus `make test-all`
+  - added baseline coverage commands for API, trainer, worker, and web suites
+  - documented Docker, Node, and local Python caveats for local test and coverage runs
 - Deployment prediction review upgrades:
   - API now exposes `POST /api/v1/projects/{project_id}/predict/batch` for folder-scoped deployment inference
   - labeling workspace now supports folder batch prediction queues with auto-advance across pending images
@@ -27,9 +33,15 @@ All notable changes to this project will be documented in this file.
   - API now supports `DELETE /api/v1/projects/{project_id}/experiments/{experiment_id}`
   - delete is blocked for `queued` / `running` experiments and for experiments referenced by non-archived deployments (`experiment_in_use`)
   - experiment detail page now exposes a `Danger Zone` delete action that removes runs, logs, checkpoints, evaluation, predictions, and ONNX artifacts
-  - completed-run checkpoint compaction now deduplicates same-epoch final artifacts across `best_metric`, `best_loss`, and `latest` while preserving checkpoint rows
+  - completed-run checkpoint compaction now deduplicates same-epoch best-checkpoint artifacts while preserving `latest` as a resumable checkpoint
   - `scripts/run_api_tests.sh` now falls back to local `apps/api` pytest when Docker Compose is unavailable
   - `make test-api-focused` / `make test-api-safe` now invoke the API test script through `bash` for better Windows compatibility
+
+### Changed
+- Failing test follow-up cleanup:
+  - realigned stale API tests to task-scoped category/annotation contracts and dataset-version export endpoints
+  - default API test and coverage commands now exclude `apps/api/tests/ml`, with `make test-api-ml` using an ML-enabled API test container
+  - trainer inference cache TTL tests now use an injected clock, checkpoint compaction preserves `latest` for resume safety, and trainer dev extras now include `pytest-asyncio`
 - Frontend workflow shell refresh:
   - project pages now share a reusable ribbon with global project/task selectors and live stats chips
   - labeling workspace now uses asset browser + canvas + annotation panel + bottom filmstrip layout

@@ -4,9 +4,10 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DB_USER="${DB_USER:-postgres}"
 TEST_DB_NAME="${TEST_DB_NAME:-pixel_sheriff_test}"
+API_TEST_SERVICE="${API_TEST_SERVICE:-api-test}"
 
 if [[ "$#" -eq 0 ]]; then
-  set -- python3 -m pytest -q
+  set -- python3 -m pytest -q tests --ignore=tests/ml
 elif [[ "$1" == -* || "$1" == tests/* || "$1" == *.py ]]; then
   set -- python3 -m pytest "$@"
 fi
@@ -35,4 +36,4 @@ fi
 
 # Rebuild the api-test image on invocation so test code and copied contract
 # artifacts stay in sync with the current workspace.
-docker compose --profile test run --build --rm api-test "$@"
+docker compose --profile test run --build --rm "$API_TEST_SERVICE" "$@"

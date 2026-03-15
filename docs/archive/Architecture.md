@@ -206,7 +206,7 @@ If you are modifying the current product, start here:
 
 - feature overview: `README.md`
 - architecture: `docs/architecture.md`
-- implementation status: `docu/IMPLEMENTATION_TASKS.md`
-- prelabel-specific status: `docu/VLM_COLD_START_PRELABELING_TASKS.md`
+- implementation status: `docs/archive/IMPLEMENTATION_TASKS.md`
+- prelabel-specific status: `docs/archive/VLM_COLD_START_PRELABELING_TASKS.md`
 
 If you are reading older dated notes under `docs/plans/`, treat them as historical design context, not source-of-truth runtime documentation.

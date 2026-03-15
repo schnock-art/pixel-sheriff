@@ -344,6 +344,6 @@ Current experiment analytics payload includes effective augmentation metadata:
 
 1. `README.md`
 2. `docs/architecture.md`
-3. `docu/Architecture.md`
-4. `docu/IMPLEMENTATION_TASKS.md`
-5. `docu/VLM_COLD_START_PRELABELING_TASKS.md`
+3. `docs/archive/Architecture.md`
+4. `docs/archive/IMPLEMENTATION_TASKS.md`
+5. `docs/archive/VLM_COLD_START_PRELABELING_TASKS.md`

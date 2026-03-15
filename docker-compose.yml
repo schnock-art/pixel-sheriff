@@ -105,6 +105,32 @@ services:
     build:
       context: .
       dockerfile: apps/api/Dockerfile.test
+      args:
+        API_PIP_EXTRAS: dev
+    environment:
+      DB_HOST: db-test
+      DB_PORT: 5432
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASS: ${DB_PASS:-postgres}
+      DB_NAME: ${TEST_DB_NAME:-pixel_sheriff_test}
+      REDIS_URL: redis://redis-test:6379/0
+      JOB_QUEUE_KEY: ${JOB_QUEUE_KEY:-pixel_sheriff:test_jobs:v1}
+      MEDIA_QUEUE_KEY: ${MEDIA_QUEUE_KEY:-pixel_sheriff:test_media_jobs:v1}
+      STORAGE_ROOT: ${TEST_STORAGE_ROOT:-/tmp/pixel_sheriff_test_data}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://localhost:3010,http://web-demo:3000}
+      TRAINER_INFERENCE_BASE_URL: ${TRAINER_INFERENCE_BASE_URL:-http://trainer:8020}
+    depends_on:
+      - db-test
+      - redis-test
+    profiles:
+      - test
+
+  api-test-ml:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile.test
+      args:
+        API_PIP_EXTRAS: dev,ml
     environment:
       DB_HOST: db-test
       DB_PORT: 5432

@@ -6,6 +6,7 @@ import time
 from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 try:
     import onnxruntime as ort
@@ -43,10 +44,12 @@ class SessionCache:
         max_models_gpu: int,
         max_models_cpu: int,
         ttl_seconds: int,
+        clock: Callable[[], float] | None = None,
     ) -> None:
         self._max_models_gpu = max(1, int(max_models_gpu))
         self._max_models_cpu = max(1, int(max_models_cpu))
         self._ttl_seconds = max(1, int(ttl_seconds))
+        self._clock = clock or time.monotonic
 
         self._entries: OrderedDict[tuple[str, str], CacheEntry] = OrderedDict()
         self._global_lock = asyncio.Lock()
@@ -124,7 +127,7 @@ class SessionCache:
             entry = self._entries.get(key)
             if entry is None:
                 return None
-            now = time.time()
+            now = self._clock()
             self._evict_expired(now)
             entry = self._entries.get(key)
             if entry is None:
@@ -140,7 +143,7 @@ class SessionCache:
             if entry is None:
                 return
             entry.in_use = max(0, int(entry.in_use) - 1)
-            entry.last_used = time.time()
+            entry.last_used = self._clock()
             self._entries.move_to_end(key)
 
     async def acquire_session(
@@ -192,7 +195,7 @@ class SessionCache:
         key = self._key(model_key, device_selected)
         fallback_to_cpu = False
         async with self._global_lock:
-            now = time.time()
+            now = self._clock()
             self._evict_expired(now)
             existing = self._entries.get(key)
             if existing is not None:

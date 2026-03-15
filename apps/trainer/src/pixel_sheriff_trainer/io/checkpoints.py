@@ -204,6 +204,9 @@ def compact_completed_checkpoints(
             continue
         if str(row.get("status") or "") != "ok":
             continue
+        kind = str(row.get("kind") or "")
+        if kind not in {"best_metric", "best_loss"}:
+            continue
         epoch = row.get("epoch")
         uri = str(row.get("uri") or "")
         if not isinstance(epoch, int) or epoch < 1 or not uri:
@@ -215,24 +218,28 @@ def compact_completed_checkpoints(
         if len(group) < 2:
             continue
         ordered = sorted(group, key=lambda row: (_checkpoint_priority(str(row.get("kind") or "")), str(row.get("kind") or "")))
-        canonical_row = ordered[0]
-        canonical_uri = str(canonical_row.get("uri") or "")
-        if not canonical_uri:
-            continue
-        canonical_path = storage.resolve(canonical_uri)
-        if not canonical_path.exists() or not canonical_path.is_file():
+        canonical_row = None
+        canonical_uri = ""
+        for candidate in ordered:
+            candidate_uri = str(candidate.get("uri") or "")
+            if not candidate_uri:
+                continue
+            candidate_path = storage.resolve(candidate_uri)
+            if candidate_path.exists() and candidate_path.is_file():
+                canonical_row = candidate
+                canonical_uri = candidate_uri
+                break
+        if canonical_row is None:
             continue
 
-        for duplicate_row in ordered[1:]:
+        for duplicate_row in ordered:
+            if duplicate_row is canonical_row:
+                continue
             duplicate_kind = str(duplicate_row.get("kind") or "")
             duplicate_uri = str(duplicate_row.get("uri") or "")
             if duplicate_uri and duplicate_uri != canonical_uri:
                 duplicate_path = storage.resolve(duplicate_uri)
-                if duplicate_kind == "latest":
-                    _remove_checkpoint_file(storage.checkpoints_dir(project_id, experiment_id, attempt) / f"latest_epoch_{epoch}.pt")
                 _remove_checkpoint_file(duplicate_path)
-            elif duplicate_kind == "latest":
-                _remove_checkpoint_file(storage.checkpoints_dir(project_id, experiment_id, attempt) / f"latest_epoch_{epoch}.pt")
 
             duplicate_row["uri"] = canonical_uri
             duplicate_row["updated_at"] = utc_now_iso()
