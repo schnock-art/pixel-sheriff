@@ -2,6 +2,25 @@
 
 Local-first labeling, dataset, training, deployment, and AI-prelabel platform for images plus frame-based video and webcam workflows.
 
+## Product Demo
+
+Generated from the deterministic `README Demo` project in `docs/demo/` via `./scripts/run_demo_assets.sh assets`.
+
+<p align="center">
+  <img src="docs/demo/hero-demo.gif" alt="Pixel Sheriff walkthrough covering labeling, dataset versioning, and model setup" width="100%" />
+</p>
+<p align="center">
+  <img src="docs/demo/screenshot-01-assets.png" alt="Assets workspace with folder browser and dataset entry point" width="49%" />
+  <img src="docs/demo/screenshot-02-labeling.png" alt="BBox labeling workspace with the selected demo asset" width="49%" />
+</p>
+<p align="center">
+  <img src="docs/demo/screenshot-03-dataset.png" alt="Dataset version page with split summary" width="49%" />
+  <img src="docs/demo/screenshot-04-models.png" alt="Models page showing the seeded demo detector" width="49%" />
+</p>
+<p align="center">
+  <img src="docs/demo/screenshot-05-builder.png" alt="Model builder configuration for the README Pet Detector" width="49%" />
+</p>
+
 ## What It Does
 
 Pixel Sheriff is image-first even when the source is a video file or live camera:
