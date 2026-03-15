@@ -1,4 +1,5 @@
 import type { PrelabelProposal, PrelabelSession } from "../../../lib/api";
+import { resolvePrelabelBBox } from "../../../lib/workspace/prelabelGeometry.js";
 import { derivePrelabelSessionStatus } from "../../../lib/workspace/prelabelStatus.js";
 
 interface AiPrelabelsPanelProps {
@@ -148,7 +149,7 @@ export function AiPrelabelsPanel({
             </button>
           </div>
 
-          {isLoading ? <p className="labels-empty">Loading AI proposals…</p> : null}
+          {isLoading ? <p className="labels-empty">Loading AI proposals...</p> : null}
           {errorMessage ? <p className="import-field-error">{errorMessage}</p> : null}
           {!isLoading && proposals.length === 0 ? (
             <p
@@ -170,7 +171,7 @@ export function AiPrelabelsPanel({
                       <span>{formatPercent(detection.confidence)}</span>
                     </span>
                     <span className="ai-prelabels-debug-meta">
-                      {typeof detection.asset_frame_index === "number" ? `Frame ${detection.asset_frame_index + 1}` : "Sampled frame"} • {describeDebugDetectionStatus(detection)}
+                      {typeof detection.asset_frame_index === "number" ? `Frame ${detection.asset_frame_index + 1}` : "Sampled frame"} | {describeDebugDetectionStatus(detection)}
                     </span>
                   </li>
                 ))}
@@ -182,6 +183,7 @@ export function AiPrelabelsPanel({
             <ul className="ai-prelabels-list">
               {proposals.map((proposal, index) => {
                 const isSelected = proposal.id === selectedProposalId;
+                const bbox = resolvePrelabelBBox(proposal);
                 return (
                   <li key={proposal.id}>
                     <button
@@ -197,7 +199,7 @@ export function AiPrelabelsPanel({
                         <span>{formatPercent(proposal.confidence)}</span>
                       </span>
                       <span className="ai-prelabels-item-meta">
-                        #{index + 1} • {proposal.bbox.map((value) => value.toFixed(0)).join(", ")}
+                        #{index + 1} | {bbox.map((value) => value.toFixed(0)).join(", ")}
                       </span>
                       <span className="ai-prelabels-item-meta">
                         Prompt: {proposal.prompt_text || proposal.label_text}

@@ -8,6 +8,7 @@ import {
   type PrelabelProposal,
   type PrelabelSession,
 } from "../api";
+import { resolvePrelabelBBox, resolvePrelabelCategoryId } from "../workspace/prelabelGeometry.js";
 import { toHookError, type HookError } from "./hookError";
 
 
@@ -156,11 +157,13 @@ export function usePrelabels({
 
   function editSelectedProposal() {
     if (!selectedProposal || !session) return;
+    const bbox = resolvePrelabelBBox(selectedProposal);
+    const categoryId = resolvePrelabelCategoryId(selectedProposal);
     const nextObject: GeometryObject = {
       id: selectedProposal.promoted_object_id ?? `prelabel-${selectedProposal.id}`,
       kind: "bbox",
-      category_id: selectedProposal.category_id,
-      bbox: selectedProposal.bbox,
+      category_id: categoryId,
+      bbox,
       provenance: {
         origin_kind: "ai_prelabel",
         session_id: selectedProposal.session_id,

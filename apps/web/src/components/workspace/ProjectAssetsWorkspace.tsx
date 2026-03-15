@@ -37,6 +37,7 @@ import {
   buildFolderReviewStatusByPath,
   deriveMessageTone,
 } from "../../lib/workspace/projectAssetsDerived";
+import { resolvePrelabelBBox, resolvePrelabelCategoryId } from "../../lib/workspace/prelabelGeometry.js";
 import { collectFolderPathsFromRelativePaths } from "../../lib/workspace/tree";
 import { ProjectSectionLayout } from "./project-shell/ProjectSectionLayout";
 import { useProjectShell } from "./project-shell/ProjectShellContext";
@@ -345,8 +346,8 @@ export default function ProjectAssetsWorkspace() {
     () =>
       prelabelState.proposals.map((proposal) => ({
         id: proposal.id,
-        category_id: proposal.category_id,
-        bbox: proposal.bbox,
+        category_id: resolvePrelabelCategoryId(proposal),
+        bbox: resolvePrelabelBBox(proposal),
         label_text: proposal.label_text,
         confidence: proposal.confidence,
       })),

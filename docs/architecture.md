@@ -231,8 +231,9 @@ Source behavior:
 Review behavior:
 
 - pending proposals do not enter normal annotations
-- accept merges proposals into the annotation payload without overwriting unrelated manual objects
-- edit loads a provenance-backed bbox into the normal annotation draft
+- once a proposal has `reviewed_bbox` or `reviewed_category_id`, that reviewed state is the canonical prelabel state for overlay rendering, edit, and accept; otherwise the original proposal bbox/category are used
+- accept merges the effective reviewed-or-original proposal state into the annotation payload without overwriting unrelated manual objects
+- edit loads a provenance-backed bbox from that same effective reviewed-or-original proposal state into the normal annotation draft
 - saved provenance-backed objects mark proposals as `accepted` or `edited`
 
 ### Suggestions

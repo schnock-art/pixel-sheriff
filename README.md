@@ -186,8 +186,9 @@ Implemented today:
 Review behavior:
 
 - pending proposals stay out of normal annotations
-- `Accept` merges them into the asset annotation payload
-- `Edit selected` loads a proposal into the normal bbox draft with provenance
+- reviewed proposal geometry/category, when present, are treated as the source of truth for display, edit, and accept; otherwise the original proposal bbox/category are used
+- `Accept` merges the effective reviewed-or-original proposal state into the asset annotation payload
+- `Edit selected` loads the effective reviewed-or-original proposal state into the normal bbox draft with provenance
 - saved provenance-backed objects mark proposals as `accepted` or `edited`
 
 Deployment predictions and AI prelabels are intentionally separate:

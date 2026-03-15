@@ -61,6 +61,7 @@ Gaps found before implementation:
 - [x] Add dedicated AI Prelabels review panel in labeling workspace
 - [x] Render pending proposals as read-only dashed overlay boxes with AI badge
 - [x] Support Accept selected / Reject selected / Accept frame / Reject frame / Accept session / Edit selected
+- [x] Prefer reviewed bbox/category state over original proposal state anywhere prelabels are rendered, edited, or accepted
 - [x] Show prelabel progress and pending counts in the sequence UI
 - [x] Add "next frame with pending AI" navigation
 
