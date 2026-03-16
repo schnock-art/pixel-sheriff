@@ -621,6 +621,7 @@ export default function ProjectAssetsWorkspace() {
   return (
     <>
       <ProjectSectionLayout
+        className="project-section-layout--labeling"
         title="Labeling"
         description={`Annotate assets and prepare clean scope-based datasets. Current scope: ${headerTitle}`}
         titleHelp={

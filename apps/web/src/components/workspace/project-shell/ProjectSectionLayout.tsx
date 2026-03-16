@@ -7,6 +7,7 @@ interface ProjectSectionLayoutProps {
   description?: string | null;
   titleHelp?: ReactNode;
   actions?: ReactNode;
+  className?: string;
   children: ReactNode;
 }
 
@@ -15,10 +16,11 @@ export function ProjectSectionLayout({
   description = null,
   titleHelp = null,
   actions = null,
+  className = "",
   children,
 }: ProjectSectionLayoutProps) {
   return (
-    <section className="project-section-layout">
+    <section className={`project-section-layout ${className}`.trim()}>
       <header className="project-section-header polished">
         <div>
           <div className="project-section-title-row">

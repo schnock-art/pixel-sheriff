@@ -56,7 +56,7 @@ export function SequenceToolbar({
       <div className="sequence-toolbar-meta">
         <span>{currentFrameLabel}</span>
         <span>{currentTimestampLabel}</span>
-        <span>{pendingFrameCount} frame{pendingFrameCount === 1 ? "" : "s"} with AI</span>
+        <span>{pendingFrameCount} AI frame{pendingFrameCount === 1 ? "" : "s"}</span>
         <span>{pendingProposalCount} pending box{pendingProposalCount === 1 ? "" : "es"}</span>
       </div>
     </div>

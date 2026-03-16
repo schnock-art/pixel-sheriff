@@ -2796,6 +2796,13 @@ button {
   padding-top: 12px;
   min-height: 0;
   flex: 1 1 auto;
+  align-content: start;
+  align-items: start;
+}
+
+.project-section-layout--labeling {
+  grid-template-rows: auto minmax(0, 1fr);
+  height: 100%;
 }
 
 .project-section-header.polished {
@@ -3110,10 +3117,12 @@ button {
 }
 
 .labeling-workspace-shell {
-  height: min(720px, calc(100dvh - 225px));
-  min-height: 500px;
+  height: 100%;
+  min-height: min(560px, calc(100dvh - 225px));
+  max-height: calc(100dvh - 225px);
   min-width: 0;
   overflow: hidden;
+  align-self: stretch;
 }
 
 .labeling-workspace-grid {
@@ -3257,7 +3266,7 @@ button {
 .labeling-canvas-column {
   display: grid;
   gap: 10px;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: auto minmax(0, 1fr) minmax(86px, auto);
   height: 100%;
   overflow: hidden;
 }
@@ -3346,8 +3355,10 @@ button {
     linear-gradient(90deg, rgba(61, 110, 179, 0.05), transparent 30%);
   padding: 10px;
   display: grid;
-  gap: 10px;
+  gap: 8px;
   min-width: 0;
+  align-content: start;
+  overflow: hidden;
 }
 
 .sequence-filmstrip-empty {
@@ -3364,29 +3375,29 @@ button {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  gap: 8px;
   flex-wrap: wrap;
 }
 
 .sequence-toolbar-meta {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px 10px;
+  gap: 4px 8px;
   color: #42607f;
-  font-size: 11px;
+  font-size: 10px;
 }
 
 .sequence-timeline {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(10px, 1fr));
-  gap: 4px;
+  gap: 3px;
   align-items: center;
 }
 
 .sequence-timeline-dot {
   position: relative;
   border: none;
-  min-height: 16px;
+  min-height: 12px;
   border-radius: 999px;
   background: #d2dceb;
   cursor: pointer;
@@ -3418,35 +3429,37 @@ button {
 
 .sequence-thumbnail-strip {
   display: flex;
-  gap: 8px;
+  gap: 6px;
   overflow-x: auto;
   padding-bottom: 2px;
+  align-items: stretch;
 }
 
 .sequence-thumbnail-item {
   position: relative;
-  min-width: 94px;
+  flex: 0 0 82px;
+  width: 82px;
   border: 1px solid #d0d9e7;
   border-radius: 12px;
   background: rgba(255, 255, 255, 0.9);
   color: #304865;
   display: grid;
-  gap: 6px;
-  padding: 8px;
+  gap: 4px;
+  padding: 6px;
   text-align: left;
   cursor: pointer;
 }
 
 .sequence-thumbnail-item img {
   width: 100%;
-  aspect-ratio: 16 / 10;
+  height: 48px;
   object-fit: cover;
   border-radius: 8px;
   background: #d9e2ef;
 }
 
 .sequence-thumbnail-item span {
-  font-size: 12px;
+  font-size: 10px;
   font-weight: 700;
   color: #56718f;
 }
@@ -3466,14 +3479,14 @@ button {
 
 .sequence-thumbnail-item strong {
   position: absolute;
-  top: 12px;
-  right: 12px;
-  min-width: 20px;
-  height: 20px;
+  top: 8px;
+  right: 8px;
+  min-width: 16px;
+  height: 16px;
   border-radius: 999px;
   background: rgba(24, 36, 53, 0.82);
   color: #ffffff;
-  font-size: 11px;
+  font-size: 9px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
