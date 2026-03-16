@@ -21,7 +21,7 @@ const {
 
 test("metricKeyForTask maps task to primary metric", () => {
   assert.equal(metricKeyForTask("classification"), "val_accuracy");
-  assert.equal(metricKeyForTask("detection"), "val_map");
+  assert.equal(metricKeyForTask("detection"), "val_map_50_95");
   assert.equal(metricKeyForTask("segmentation"), "val_iou");
 });
 
@@ -58,6 +58,9 @@ test("bounded/loss metric key helpers identify expected keys", () => {
   assert.equal(isBoundedMetricKey("val_accuracy"), true);
   assert.equal(isBoundedMetricKey("val_macro_f1"), true);
   assert.equal(isBoundedMetricKey("val_map"), true);
+  assert.equal(isBoundedMetricKey("val_precision"), true);
+  assert.equal(isBoundedMetricKey("val_recall"), true);
+  assert.equal(isBoundedMetricKey("val_matched_mean_iou"), true);
   assert.equal(isBoundedMetricKey("val_loss"), false);
   assert.equal(isLossMetricKey("val_loss"), true);
   assert.equal(isLossMetricKey("train_loss"), true);
@@ -146,12 +149,18 @@ test("metricValueByKey handles aliases and runtime metrics", () => {
     epoch: 2,
     val_accuracy: 0.8,
     val_map_50_95: 0.42,
+    val_precision: 0.78,
+    val_tp: 9,
     mAP50: 0.61,
     epoch_seconds: 12.5,
   };
   assert.equal(metricValueByKey(row, "val_accuracy"), 0.8);
   assert.equal(metricValueByKey({ mAP50: 0.61 }, "val_map"), 0.61);
   assert.equal(metricValueByKey(row, "val_map_50_95"), 0.42);
+  assert.equal(metricValueByKey(row, "val_precision"), 0.78);
+  assert.equal(metricValueByKey(row, "val_tp"), 9);
+  assert.equal(metricValueByKey({ precision: 0.55 }, "val_precision"), 0.55);
+  assert.equal(metricValueByKey({ duplicate_fp: 3 }, "val_duplicate_fp"), 3);
   assert.equal(metricValueByKey(row, "epoch_seconds"), 12.5);
 });
 

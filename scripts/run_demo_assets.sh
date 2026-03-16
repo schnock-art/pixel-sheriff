@@ -56,6 +56,7 @@ run_demo_assets() {
 
 seed_demo_state() {
   local metadata_path="$ROOT_DIR/artifacts/demo/metadata/seed-demo-project.json"
+  local experiment_metadata_path="$ROOT_DIR/artifacts/demo/metadata/experiment-demo.json"
 
   echo "Seeding deterministic demo project..."
   (
@@ -68,15 +69,59 @@ seed_demo_state() {
     exit 1
   fi
 
+  local project_id
+  local task_id
+  local model_id
+  local dataset_version_id
+  project_id="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["projectId"])' "$metadata_path")"
+  task_id="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["taskId"])' "$metadata_path")"
+  model_id="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["modelId"])' "$metadata_path")"
+  dataset_version_id="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["datasetVersionId"])' "$metadata_path")"
+
+  echo "Injecting deterministic experiment run data..."
+  (
+    cd "$ROOT_DIR"
+    "$DOCKER_BIN" compose --profile demo exec -T api-demo python -m sheriff_api.demo_experiment_seed "$project_id" "$task_id" "$model_id" "$dataset_version_id" > "$experiment_metadata_path"
+  )
+
+  if [[ ! -f "$experiment_metadata_path" ]]; then
+    echo "Demo experiment metadata was not created at $experiment_metadata_path" >&2
+    exit 1
+  fi
+
+  python3 - <<'PY' "$metadata_path" "$experiment_metadata_path"
+import json
+import sys
+import urllib.parse
+
+metadata_path, experiment_metadata_path = sys.argv[1], sys.argv[2]
+with open(metadata_path, encoding="utf-8") as handle:
+    metadata = json.load(handle)
+with open(experiment_metadata_path, encoding="utf-8") as handle:
+    experiment_metadata = json.load(handle)
+
+project_id = str(metadata["projectId"])
+experiment_id = str(experiment_metadata["experimentId"])
+task_id = str(metadata["taskId"])
+web_base_url = str(metadata["webBaseUrl"]).rstrip("/")
+
+metadata["experimentDemo"] = experiment_metadata
+urls = dict(metadata.get("urls") or {})
+urls["experiments"] = f"{web_base_url}/projects/{urllib.parse.quote(project_id, safe='')}/experiments?taskId={urllib.parse.quote(task_id, safe='')}"
+urls["experimentDetail"] = f"{web_base_url}/projects/{urllib.parse.quote(project_id, safe='')}/experiments/{urllib.parse.quote(experiment_id, safe='')}"
+urls["deploy"] = f"{web_base_url}/projects/{urllib.parse.quote(project_id, safe='')}/deploy?taskId={urllib.parse.quote(task_id, safe='')}"
+metadata["urls"] = urls
+
+with open(metadata_path, "w", encoding="utf-8") as handle:
+    json.dump(metadata, handle, indent=2)
+    handle.write("\n")
+PY
+
   if [[ "$MODE" != "prelabels" ]]; then
     return
   fi
 
   local prelabel_metadata_path="$ROOT_DIR/artifacts/demo/metadata/prelabel-demo.json"
-  local project_id
-  local task_id
-  project_id="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["projectId"])' "$metadata_path")"
-  task_id="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["taskId"])' "$metadata_path")"
 
   echo "Injecting deterministic AI prelabel review data..."
   (

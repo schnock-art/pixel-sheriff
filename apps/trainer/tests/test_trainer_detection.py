@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 import uuid
 
 import pytest
@@ -29,7 +30,7 @@ def test_detection_training_smoke_accepts_zero_based_labels(tmp_path: Path) -> N
     )
 
     captured_epochs: list[DetectionEpochMetrics] = []
-    checkpoints: list[tuple[str, int]] = []
+    checkpoints: list[tuple[str, int, str | None, float | None]] = []
     status, evaluation = run_detection_training(
         model_config={
             "architecture": {
@@ -51,14 +52,121 @@ def test_detection_training_smoke_accepts_zero_based_labels(tmp_path: Path) -> N
         num_classes=loaded.num_classes,
         should_cancel=lambda: False,
         on_epoch=lambda row: captured_epochs.append(row),
-        on_checkpoint=lambda kind, epoch, _metric_name, _value, _payload: checkpoints.append((kind, epoch)),
+        on_checkpoint=lambda kind, epoch, metric_name, value, _payload: checkpoints.append((kind, epoch, metric_name, value)),
         device=torch.device("cpu"),
         resume_state=None,
     )
     assert status == "completed"
     assert evaluation is not None
     assert len(captured_epochs) == 1
+    assert captured_epochs[0].precision is not None
+    assert captured_epochs[0].recall is not None
+    assert captured_epochs[0].tp is not None
+    assert captured_epochs[0].fp is not None
+    assert captured_epochs[0].fn is not None
+    assert captured_epochs[0].duplicate_fp is not None
     assert checkpoints
+    assert checkpoints[0][2] == "val_map_50_95"
+
+
+def test_detection_training_uses_map50_95_for_best_metric_checkpoint(monkeypatch: pytest.MonkeyPatch) -> None:
+    if not HAS_TORCH:
+        pytest.skip("torch/torchvision not available")
+
+    import pixel_sheriff_trainer.detection.train as detection_train
+    from pixel_sheriff_trainer.detection.evaluation.types import DetectionOverallMetrics
+
+    class FakeDetector(torch.nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.scale = torch.nn.Parameter(torch.tensor(1.0))
+
+        def forward(self, images, targets=None):  # type: ignore[override]
+            if self.training:
+                return {"total_loss": self.scale}
+            return [
+                {
+                    "boxes": torch.zeros((0, 4), dtype=torch.float32),
+                    "scores": torch.zeros((0,), dtype=torch.float32),
+                    "labels": torch.zeros((0,), dtype=torch.int64),
+                }
+                for _ in images
+            ]
+
+    evaluations = iter(
+        [
+            DetectionEvaluation(
+                mAP50=0.90,
+                mAP50_95=0.40,
+                overall=DetectionOverallMetrics(
+                    mAP50=0.90,
+                    mAP50_95=0.40,
+                    precision=0.8,
+                    recall=0.7,
+                    tp=7,
+                    fp=2,
+                    fn=3,
+                    duplicate_fp=1,
+                    matched_mean_iou=0.6,
+                ),
+            ),
+            DetectionEvaluation(
+                mAP50=0.80,
+                mAP50_95=0.50,
+                overall=DetectionOverallMetrics(
+                    mAP50=0.80,
+                    mAP50_95=0.50,
+                    precision=0.85,
+                    recall=0.75,
+                    tp=8,
+                    fp=1,
+                    fn=2,
+                    duplicate_fp=0,
+                    matched_mean_iou=0.7,
+                ),
+            ),
+        ]
+    )
+
+    monkeypatch.setattr(detection_train, "_build_retinanet", lambda _num_classes, *, pretrained=False: FakeDetector())
+    monkeypatch.setattr(detection_train, "evaluate_detection", lambda *_args, **_kwargs: next(evaluations))
+
+    sample_image = torch.zeros((3, 8, 8), dtype=torch.float32)
+    sample_target = {
+        "boxes": torch.tensor([[1.0, 1.0, 4.0, 4.0]], dtype=torch.float32),
+        "labels": torch.tensor([1], dtype=torch.int64),
+    }
+    train_loader = [([sample_image], [sample_target])]
+    val_loader = [([sample_image], [sample_target])]
+
+    checkpoints: list[tuple[str, int, str | None, float | None]] = []
+    status, evaluation = run_detection_training(
+        model_config={"architecture": {"family": "retinanet"}},
+        training_config={
+            "optimizer": {"lr": 0.0001, "weight_decay": 0.0},
+            "scheduler": {"type": "none"},
+            "logging": {"save_every_epochs": 1, "keep_best": True},
+            "evaluation": {"eval_interval_epochs": 1},
+            "epochs": 2,
+            "batch_size": 1,
+        },
+        train_loader=train_loader,
+        val_loader=val_loader,
+        num_classes=1,
+        should_cancel=lambda: False,
+        on_epoch=lambda _row: None,
+        on_checkpoint=lambda kind, epoch, metric_name, value, _payload: checkpoints.append((kind, epoch, metric_name, value)),
+        device=torch.device("cpu"),
+        resume_state=None,
+    )
+
+    best_metric_events = [row for row in checkpoints if row[0] == "best_metric"]
+    latest_events = [row for row in checkpoints if row[0] == "latest"]
+
+    assert status == "completed"
+    assert evaluation is not None
+    assert best_metric_events[-1] == ("best_metric", 2, "val_map_50_95", 0.5)
+    assert latest_events[-1] == ("latest", 2, "val_map_50_95", 0.5)
 
 
 def test_detection_training_uses_ssdlite_builder(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -195,7 +303,7 @@ def test_detection_training_falls_back_to_cpu_eval_when_cuda_nms_is_unavailable(
     fake_model = FakeDetector()
     eval_devices: list[str] = []
 
-    def _fake_eval(model, _val_loader, device, *, num_classes, iou_thresholds=None):
+    def _fake_eval(model, _val_loader, device, **_kwargs):
         eval_devices.append(str(device))
         if str(device) == "cuda":
             raise RuntimeError("CUDA error: no kernel image is available for execution on the device")
@@ -236,6 +344,89 @@ def test_detection_training_falls_back_to_cpu_eval_when_cuda_nms_is_unavailable(
     assert evaluation is not None
     assert eval_devices == ["cuda", "cpu"]
     assert fake_model.devices[:3] == ["cuda", "cpu", "cuda"]
+
+
+@pytest.mark.parametrize(
+    ("raw_label", "label_offset"),
+    [
+        (0, 0),
+        (1, 1),
+    ],
+)
+def test_evaluate_detection_normalizes_prediction_and_ground_truth_labels(
+    raw_label: int,
+    label_offset: int,
+) -> None:
+    if not HAS_TORCH:
+        pytest.skip("torch/torchvision not available")
+
+    from pixel_sheriff_trainer.detection.eval import evaluate_detection
+
+    class FakeModel(torch.nn.Module):
+        def eval(self):  # type: ignore[override]
+            return self
+
+        def forward(self, _images):  # type: ignore[override]
+            return [
+                {
+                    "boxes": torch.tensor([[10.0, 10.0, 30.0, 25.0]], dtype=torch.float32),
+                    "scores": torch.tensor([0.95], dtype=torch.float32),
+                    "labels": torch.tensor([raw_label], dtype=torch.int64),
+                }
+            ]
+
+    class FakeLoader(list):
+        def __init__(self, dataset, batches):
+            super().__init__(batches)
+            self.dataset = dataset
+
+    dataset = SimpleNamespace(
+        samples=[
+            SimpleNamespace(
+                image_id="img-1",
+                asset_id="asset-1",
+                relative_path="assets/img-1.jpg",
+                width=100,
+                height=80,
+            )
+        ],
+        annotations={
+            "img-1": [
+                {
+                    "id": "ann-1",
+                    "category_id": raw_label,
+                    "bbox": [10.0, 10.0, 20.0, 15.0],
+                    "area": 300.0,
+                }
+            ]
+        },
+        target_width=100,
+        target_height=80,
+    )
+    loader = FakeLoader(
+        dataset,
+        [
+            (
+                [torch.zeros((3, 100, 100), dtype=torch.float32)],
+                [{"boxes": torch.zeros((0, 4), dtype=torch.float32), "labels": torch.zeros((0,), dtype=torch.int64)}],
+            )
+        ],
+    )
+
+    evaluation = evaluate_detection(
+        FakeModel(),
+        loader,
+        torch.device("cpu"),
+        num_classes=1,
+        class_names=["Boat"],
+        class_order=["boat"],
+        label_offset=label_offset,
+    )
+
+    assert evaluation.mAP50 == pytest.approx(1.0)
+    assert evaluation.diagnostics is not None
+    assert evaluation.diagnostics.prediction_rows[0].class_index == 0
+    assert evaluation.diagnostics.prediction_rows[0].status == "matched_tp"
 
 
 def test_detection_training_cancel_stops_between_batches(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -31,6 +31,12 @@ from .shared import (
 router = APIRouter()
 
 
+def _default_experiment_name(*, model_name: str | None, run_index: int) -> str:
+    prefix = str(model_name or "").strip()
+    suffix = f"training_run_{max(1, run_index)}"
+    return f"{prefix} {suffix}".strip() if prefix else suffix
+
+
 @router.get("/projects/{project_id}/experiments", response_model=ProjectExperimentListResponse)
 async def list_project_experiments(
     project_id: str,
@@ -136,7 +142,12 @@ async def create_project_experiment(
         )
 
     existing = experiment_store.list_by_project(project_id, model_id=payload.model_id)
-    name = payload.name.strip() if isinstance(payload.name, str) and payload.name.strip() else f"training_run_{len(existing) + 1}"
+    model_name = model_record.get("name") if isinstance(model_record, dict) else None
+    name = (
+        payload.name.strip()
+        if isinstance(payload.name, str) and payload.name.strip()
+        else _default_experiment_name(model_name=str(model_name) if model_name is not None else None, run_index=len(existing) + 1)
+    )
     created = experiment_store.create(
         project_id=project_id,
         model_id=payload.model_id,

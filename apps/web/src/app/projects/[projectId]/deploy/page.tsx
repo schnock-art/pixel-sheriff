@@ -142,7 +142,7 @@ export default function DeployPage({ params }: DeployPageProps) {
   }
 
   return (
-    <main className="workspace-shell project-page-shell">
+    <main className="workspace-shell project-page-shell" data-testid="deploy-page">
       <section className="workspace-frame project-content-frame placeholder-page">
         <header className="project-section-header">
           <h2>Deploy</h2>
@@ -153,11 +153,12 @@ export default function DeployPage({ params }: DeployPageProps) {
 
         {!loading ? (
           <>
-            <section className="placeholder-card">
+            <section className="placeholder-card" data-testid="deploy-active-model-section">
               <h3>Active Model</h3>
               <label className="project-field">
                 <span>Deployment</span>
                 <select
+                  data-testid="active-deployment-select"
                   value={deployments.active_deployment_id ?? ""}
                   onChange={(event) => void handleSetActive(event.target.value || null)}
                 >
@@ -190,17 +191,18 @@ export default function DeployPage({ params }: DeployPageProps) {
                   className="ghost-button"
                   onClick={() => void handleWarmup(activeDeployment.deployment_id)}
                   disabled={warmingDeploymentId === activeDeployment.deployment_id}
+                  data-testid="deploy-warmup-button"
                 >
                   {warmingDeploymentId === activeDeployment.deployment_id ? "Warming..." : "Warm up model"}
                 </button>
               ) : null}
             </section>
 
-            <section className="placeholder-card">
+            <section className="placeholder-card" data-testid="deploy-from-experiments-section">
               <h3>Deploy from Experiments</h3>
               <ul className="label-manage-list">
                 {experiments.map((experiment) => (
-                  <li key={experiment.id} className="label-manage-item">
+                  <li key={experiment.id} className="label-manage-item" data-testid="deploy-from-experiment-row" data-experiment-id={experiment.id}>
                     <div>
                       <strong>{experiment.name}</strong>
                       <div>
@@ -221,6 +223,8 @@ export default function DeployPage({ params }: DeployPageProps) {
                       className="primary-button"
                       onClick={() => void handleDeploy(experiment.id)}
                       disabled={creatingExperimentId === experiment.id}
+                      data-testid="deploy-from-experiment-button"
+                      data-experiment-id={experiment.id}
                     >
                       {creatingExperimentId === experiment.id ? "Deploying..." : "Deploy"}
                     </button>
@@ -229,11 +233,16 @@ export default function DeployPage({ params }: DeployPageProps) {
               </ul>
             </section>
 
-            <section className="placeholder-card">
+            <section className="placeholder-card" data-testid="deploy-all-deployments-section">
               <h3>All Deployments</h3>
               <ul className="label-manage-list">
                 {deployments.items.map((item: DeploymentItem) => (
-                  <li key={item.deployment_id} className="label-manage-item">
+                  <li
+                    key={item.deployment_id}
+                    className="label-manage-item"
+                    data-testid="deployment-row"
+                    data-deployment-id={item.deployment_id}
+                  >
                     <div>
                       <strong>{item.name}</strong>
                       <div>

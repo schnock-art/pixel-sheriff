@@ -236,7 +236,7 @@ export default function ExperimentsPage({ params }: ExperimentsPageProps) {
     : `/projects/${encodeURIComponent(projectId)}/experiments/new`;
 
   return (
-    <main className="workspace-shell project-page-shell">
+    <main className="workspace-shell project-page-shell" data-testid="experiments-page">
       <section className="workspace-frame project-content-frame placeholder-page">
         <header className="project-section-header">
           <h2>Experiments</h2>
@@ -271,7 +271,7 @@ export default function ExperimentsPage({ params }: ExperimentsPageProps) {
         ) : null}
 
         {!isLoading ? (
-          <section className="experiment-analytics-section">
+          <section className="experiment-analytics-section" data-testid="experiment-analytics-section">
             <h3>Analytics</h3>
             <div className="experiment-analytics-summary">
               <article className="placeholder-card">
@@ -556,7 +556,7 @@ export default function ExperimentsPage({ params }: ExperimentsPageProps) {
 
         {!isLoading && visibleItems.length > 0 ? (
           <div className="models-table-wrap">
-            <table className="models-table experiments-table">
+            <table className="models-table experiments-table" data-testid="experiments-table">
               <thead>
                 <tr>
                   <th>Name</th>
@@ -577,7 +577,7 @@ export default function ExperimentsPage({ params }: ExperimentsPageProps) {
                       ? `${metricName}: ${metricValue.toFixed(4)}${experiment.best?.epoch ? ` (ep ${experiment.best.epoch})` : ""}`
                       : "-";
                   return (
-                    <tr key={experiment.experiment_id}>
+                    <tr key={experiment.experiment_id} data-testid="experiment-row" data-experiment-id={experiment.experiment_id}>
                       <td>
                         <Link
                           href={`/projects/${encodeURIComponent(projectId)}/experiments/${encodeURIComponent(experiment.experiment_id)}`}

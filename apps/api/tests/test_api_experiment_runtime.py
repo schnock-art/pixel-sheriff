@@ -261,6 +261,264 @@ async def test_experiment_evaluation_endpoint_returns_attempt_payload(client: As
 
 
 @pytest.mark.asyncio
+async def test_detection_experiment_evaluation_endpoint_returns_rich_payload(client: AsyncClient) -> None:
+    project_id, _task_id, dataset_version_id = await _create_detection_project_with_dataset_version(
+        client,
+        project_name="exp-detection-evaluation",
+    )
+    created_model = await client.post(
+        f"/api/v1/projects/{project_id}/models",
+        json={"dataset_version_id": dataset_version_id},
+    )
+    assert created_model.status_code == 200
+    created_experiment = await client.post(
+        f"/api/v1/projects/{project_id}/experiments",
+        json={"model_id": created_model.json()["id"], "name": "detection-evaluation-run"},
+    )
+    assert created_experiment.status_code == 200
+    experiment_id = created_experiment.json()["id"]
+
+    settings = get_settings()
+    experiment_dir = Path(settings.storage_root) / "experiments" / project_id / experiment_id
+    run_dir = experiment_dir / "runs" / "2"
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    evaluation_payload = {
+        "schema_version": "1",
+        "task": "detection",
+        "computed_at": "2026-03-16T00:00:00Z",
+        "split": "val",
+        "classes": {
+            "class_order": ["boat"],
+            "class_names": ["Boat"],
+            "id_to_index": {"boat": 0},
+        },
+        "thresholds": {
+            "iou": [0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95],
+            "diagnostics_iou_threshold": 0.5,
+            "score_threshold": None,
+            "max_detections_per_image": None,
+        },
+        "overall": {
+            "mAP50": 1.0,
+            "mAP50_95": 0.9,
+            "precision": 0.5,
+            "recall": 1.0,
+            "tp": 1,
+            "fp": 1,
+            "fn": 0,
+            "duplicate_fp": 1,
+            "matched_mean_iou": 1.0,
+            "ap_small": 1.0,
+            "ap_medium": None,
+            "ap_large": None,
+            "size_buckets": {
+                "small": {
+                    "ground_truth_count": 1,
+                    "prediction_count": 2,
+                    "ap50": 1.0,
+                    "map_50_95": 0.9,
+                    "precision": 0.5,
+                    "recall": 1.0,
+                }
+            },
+        },
+        "per_class": [
+            {
+                "class_index": 0,
+                "class_id": "boat",
+                "name": "Boat",
+                "precision": 0.5,
+                "recall": 1.0,
+                "f1": 0.6667,
+                "support": 1,
+                "ap50": 1.0,
+                "ap75": 1.0,
+                "map_50_95": 0.9,
+                "ap_by_iou": {"0.50": 1.0, "0.75": 1.0, "0.95": 0.0},
+                "tp": 1,
+                "fp": 1,
+                "fn": 0,
+                "duplicate_fp": 1,
+                "matched_mean_iou": 1.0,
+            }
+        ],
+        "pr_curves": [
+            {
+                "class_index": 0,
+                "class_id": "boat",
+                "name": "Boat",
+                "iou_threshold": 0.5,
+                "scores": [0.95, 0.85],
+                "precision": [1.0, 0.5],
+                "recall": [1.0, 1.0],
+                "precision_envelope": [1.0, 0.5],
+            }
+        ],
+        "diagnostics": {
+            "per_image": [
+                {
+                    "image_id": "asset-1",
+                    "asset_id": "asset-1",
+                    "relative_path": "assets/asset-1.jpg",
+                    "prediction_count": 2,
+                    "ground_truth_count": 1,
+                    "predictions": [
+                        {
+                            "prediction_id": "pred-1",
+                            "image_id": "asset-1",
+                            "asset_id": "asset-1",
+                            "relative_path": "assets/asset-1.jpg",
+                            "class_index": 0,
+                            "class_id": "boat",
+                            "name": "Boat",
+                            "bbox": [10.0, 10.0, 30.0, 25.0],
+                            "score": 0.95,
+                            "status": "matched_tp",
+                            "reason": "matched_tp",
+                            "rank": 1,
+                            "matched_ground_truth_id": "gt-1",
+                            "matched_iou": 1.0,
+                        },
+                        {
+                            "prediction_id": "pred-2",
+                            "image_id": "asset-1",
+                            "asset_id": "asset-1",
+                            "relative_path": "assets/asset-1.jpg",
+                            "class_index": 0,
+                            "class_id": "boat",
+                            "name": "Boat",
+                            "bbox": [10.0, 10.0, 30.0, 25.0],
+                            "score": 0.85,
+                            "status": "duplicate_fp",
+                            "reason": "duplicate_fp",
+                            "rank": 2,
+                            "matched_ground_truth_id": None,
+                            "matched_iou": None,
+                        },
+                    ],
+                    "matched_pairs": [
+                        {
+                            "image_id": "asset-1",
+                            "prediction_id": "pred-1",
+                            "ground_truth_id": "gt-1",
+                            "class_index": 0,
+                            "class_id": "boat",
+                            "name": "Boat",
+                            "score": 0.95,
+                            "iou": 1.0,
+                        }
+                    ],
+                    "unmatched_ground_truths": [],
+                }
+            ],
+            "unmatched_ground_truths": [],
+            "prediction_rows": [
+                {
+                    "prediction_id": "pred-1",
+                    "image_id": "asset-1",
+                    "asset_id": "asset-1",
+                    "relative_path": "assets/asset-1.jpg",
+                    "class_index": 0,
+                    "class_id": "boat",
+                    "name": "Boat",
+                    "bbox": [10.0, 10.0, 30.0, 25.0],
+                    "score": 0.95,
+                    "status": "matched_tp",
+                    "reason": "matched_tp",
+                    "rank": 1,
+                    "matched_ground_truth_id": "gt-1",
+                    "matched_iou": 1.0,
+                },
+                {
+                    "prediction_id": "pred-2",
+                    "image_id": "asset-1",
+                    "asset_id": "asset-1",
+                    "relative_path": "assets/asset-1.jpg",
+                    "class_index": 0,
+                    "class_id": "boat",
+                    "name": "Boat",
+                    "bbox": [10.0, 10.0, 30.0, 25.0],
+                    "score": 0.85,
+                    "status": "duplicate_fp",
+                    "reason": "duplicate_fp",
+                    "rank": 2,
+                    "matched_ground_truth_id": None,
+                    "matched_iou": None,
+                },
+            ],
+            "confidence_traces": [
+                {
+                    "class_index": 0,
+                    "class_id": "boat",
+                    "name": "Boat",
+                    "iou_threshold": 0.5,
+                    "rows": [
+                        {
+                            "prediction_id": "pred-1",
+                            "image_id": "asset-1",
+                            "score": 0.95,
+                            "status": "matched_tp",
+                            "reason": "matched_tp",
+                            "cumulative_tp": 1,
+                            "cumulative_fp": 0,
+                            "precision": 1.0,
+                            "recall": 1.0,
+                            "matched_ground_truth_id": "gt-1",
+                            "iou": 1.0,
+                        },
+                        {
+                            "prediction_id": "pred-2",
+                            "image_id": "asset-1",
+                            "score": 0.85,
+                            "status": "duplicate_fp",
+                            "reason": "duplicate_fp",
+                            "cumulative_tp": 1,
+                            "cumulative_fp": 1,
+                            "precision": 0.5,
+                            "recall": 1.0,
+                            "matched_ground_truth_id": None,
+                            "iou": None,
+                        },
+                    ],
+                }
+            ],
+        },
+        "samples": {
+            "misclassified": [],
+            "lowest_confidence_correct": [],
+            "highest_confidence_wrong": [],
+        },
+    }
+
+    for target in [run_dir / "evaluation.json", experiment_dir / "evaluation.json"]:
+        target.write_text(json.dumps(evaluation_payload, indent=2, sort_keys=True), encoding="utf-8")
+
+    status_path = experiment_dir / "status.json"
+    status_payload = json.loads(status_path.read_text(encoding="utf-8"))
+    status_payload.update(
+        {
+            "status": "completed",
+            "current_run_attempt": 2,
+            "last_completed_attempt": 2,
+            "active_job_id": None,
+            "error": None,
+        }
+    )
+    status_path.write_text(json.dumps(status_payload, indent=2, sort_keys=True), encoding="utf-8")
+
+    response = await client.get(f"/api/v1/projects/{project_id}/experiments/{experiment_id}/evaluation")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["attempt"] == 2
+    assert payload["task"] == "detection"
+    assert payload["overall"]["mAP50"] == 1.0
+    assert payload["per_class"][0]["precision"] == 0.5
+    assert payload["diagnostics"]["prediction_rows"][1]["status"] == "duplicate_fp"
+    assert payload["pr_curves"][0]["iou_threshold"] == 0.5
+
+
+@pytest.mark.asyncio
 async def test_experiment_evaluation_endpoint_returns_not_found_when_missing(client: AsyncClient) -> None:
     project_id, model_id = await _create_project_model(client, project_name="exp-evaluation-missing")
     created = await client.post(

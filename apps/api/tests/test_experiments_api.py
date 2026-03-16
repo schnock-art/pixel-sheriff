@@ -118,6 +118,21 @@ async def test_experiment_events_snapshot_for_no_attempt_and_terminal_state(clie
 
 
 @pytest.mark.asyncio
+async def test_create_experiment_defaults_name_with_model_prefix(client: AsyncClient) -> None:
+    project_id, model_id = await _create_project_model(client, project_name="exp-default-name")
+    models_response = await client.get(f"/api/v1/projects/{project_id}/models")
+    assert models_response.status_code == 200
+    model_name = models_response.json()[0]["name"]
+
+    created = await client.post(
+        f"/api/v1/projects/{project_id}/experiments",
+        json={"model_id": model_id},
+    )
+    assert created.status_code == 200
+    assert created.json()["name"] == f"{model_name} training_run_1"
+
+
+@pytest.mark.asyncio
 async def test_experiment_samples_falls_back_to_evaluation_when_predictions_missing(client: AsyncClient) -> None:
     project_id, model_id = await _create_project_model(client, project_name="exp-samples-eval-fallback")
     created = await client.post(

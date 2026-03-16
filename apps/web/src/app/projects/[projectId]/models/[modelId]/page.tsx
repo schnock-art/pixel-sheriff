@@ -708,7 +708,7 @@ export default function ModelDetailPage({ params }: ModelDetailPageProps) {
       ) : null}
       {showTrainChoiceModal ? (
         <div className="project-modal-backdrop" role="presentation">
-          <div className="project-modal" role="dialog" aria-modal="true" aria-label="Choose train action">
+          <div className="project-modal" role="dialog" aria-modal="true" aria-label="Choose train action" data-testid="train-flow-modal">
             <h3>{latestExperiment ? "Existing Experiment Found" : "Unsaved Model Changes"}</h3>
             {latestExperiment ? (
               <p className="import-selection-summary">
@@ -725,11 +725,23 @@ export default function ModelDetailPage({ params }: ModelDetailPageProps) {
                 Close
               </button>
               {latestExperiment ? (
-                <button type="button" className="ghost-button" disabled={!latestExperiment || isSaving} onClick={handleContinueExperiment}>
+                <button
+                  type="button"
+                  className="ghost-button"
+                  disabled={!latestExperiment || isSaving}
+                  onClick={handleContinueExperiment}
+                  data-testid="model-train-continue-button"
+                >
                   Continue
                 </button>
               ) : null}
-              <button type="button" className="ghost-button" disabled={isLaunchingTrain || isSaving} onClick={() => void handleNewRun()}>
+              <button
+                type="button"
+                className="ghost-button"
+                disabled={isLaunchingTrain || isSaving}
+                onClick={() => void handleNewRun()}
+                data-testid="model-train-new-run-button"
+              >
                 {latestExperiment ? (isLaunchingTrain ? "Creating..." : "New run") : "Run saved version"}
               </button>
               {isDirty ? (

@@ -1,17 +1,17 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any, Callable
 
 from pixel_sheriff_trainer.detection.dataset import build_detection_loaders
-from pixel_sheriff_trainer.detection.eval import DetectionEvaluation, evaluate_detection
+from pixel_sheriff_trainer.detection.eval import DetectionEvaluation
 from pixel_sheriff_trainer.detection.train import (
     DetectionEpochMetrics,
     _build_detection_model,
     run_detection_training,
 )
 from pixel_sheriff_trainer.export_onnx import OnnxExportResult, _resolve_best_checkpoint, _as_relative_uri
+from pixel_sheriff_trainer.io.detection_evaluation import write_detection_evaluation
 from pixel_sheriff_trainer.io.storage import ExperimentStorage
 from pixel_sheriff_trainer.pipeline import (
     EvaluationResult,
@@ -21,7 +21,6 @@ from pixel_sheriff_trainer.pipeline import (
     TrainingResult,
 )
 from pixel_sheriff_trainer.utils.torchvision_cache import configure_torchvision_cache
-from pixel_sheriff_trainer.utils.time import utc_now_iso
 
 
 class DetectionPipeline(TaskPipeline):
@@ -72,6 +71,13 @@ class DetectionPipeline(TaskPipeline):
                 "train_loss": float(epoch_metrics.train_loss),
                 "val_map": epoch_metrics.mAP50,
                 "val_map_50_95": epoch_metrics.mAP50_95,
+                "val_precision": epoch_metrics.precision,
+                "val_recall": epoch_metrics.recall,
+                "val_matched_mean_iou": epoch_metrics.matched_mean_iou,
+                "val_tp": epoch_metrics.tp,
+                "val_fp": epoch_metrics.fp,
+                "val_fn": epoch_metrics.fn,
+                "val_duplicate_fp": epoch_metrics.duplicate_fp,
                 "lr": float(epoch_metrics.lr),
                 "epoch_seconds": float(epoch_metrics.epoch_seconds),
                 "eta_seconds": epoch_metrics.eta_seconds,
@@ -85,6 +91,8 @@ class DetectionPipeline(TaskPipeline):
             train_loader=loaders.train,
             val_loader=loaders.val,
             num_classes=loaders.num_classes,
+            class_names=loaders.class_names,
+            class_order=loaders.class_order,
             should_cancel=should_cancel,
             on_epoch=_on_epoch,
             on_checkpoint=on_checkpoint,
@@ -113,7 +121,7 @@ class DetectionPipeline(TaskPipeline):
                 "mAP50": float(evaluation.mAP50),
                 "mAP50_95": float(evaluation.mAP50_95),
             },
-            per_class={},
+            per_class={"rows": evaluation.per_class},
             raw=evaluation,
         )
 
@@ -132,27 +140,19 @@ class DetectionPipeline(TaskPipeline):
         if eval_result.raw is None:
             return
         evaluation: DetectionEvaluation = eval_result.raw
-        payload = {
-            "schema_version": "1",
-            "task": "detection",
-            "computed_at": utc_now_iso(),
-            "split": "val",
-            "classes": {
-                "class_order": loaders.class_order,
-                "class_names": loaders.class_names,
-            },
-            "overall": {
-                "mAP50": float(evaluation.mAP50),
-                "mAP50_95": float(evaluation.mAP50_95),
-            },
-            "per_class": evaluation.per_class,
-        }
-        eval_path = storage.evaluation_path(project_id, experiment_id, attempt)
-        eval_path.parent.mkdir(parents=True, exist_ok=True)
-        eval_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
-        latest_eval_path = storage.evaluation_path(project_id, experiment_id, None)
-        latest_eval_path.parent.mkdir(parents=True, exist_ok=True)
-        latest_eval_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+        write_detection_evaluation(
+            storage,
+            project_id=project_id,
+            experiment_id=experiment_id,
+            attempt=attempt,
+            model_id=getattr(job, "model_id", None),
+            task_id=getattr(job, "task_id", None),
+            job_id=getattr(job, "job_id", None),
+            dataset_export=getattr(job, "dataset_export", None),
+            class_order=loaders.class_order,
+            class_names=loaders.class_names,
+            evaluation=evaluation,
+        )
 
     def export_onnx(
         self,

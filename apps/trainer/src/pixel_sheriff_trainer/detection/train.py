@@ -7,6 +7,7 @@ from typing import Any, Callable
 import torch
 import torch.optim as optim
 
+from pixel_sheriff_trainer.detection.dataset import _resolve_detection_label_offset
 from pixel_sheriff_trainer.detection.eval import DetectionEvaluation, evaluate_detection
 
 
@@ -16,6 +17,13 @@ class DetectionEpochMetrics:
     train_loss: float
     mAP50: float | None
     mAP50_95: float | None
+    precision: float | None
+    recall: float | None
+    matched_mean_iou: float | None
+    tp: int | None
+    fp: int | None
+    fn: int | None
+    duplicate_fp: int | None
     lr: float
     epoch_seconds: float
     eta_seconds: float | None
@@ -116,6 +124,8 @@ def run_detection_training(
     train_loader: Any,
     val_loader: Any,
     num_classes: int,
+    class_names: list[str] | None = None,
+    class_order: list[str] | None = None,
     should_cancel: Callable[[], bool],
     on_epoch: Callable[[DetectionEpochMetrics], None],
     on_checkpoint: Callable[[str, int, str | None, float | None, dict[str, Any]], None],
@@ -151,6 +161,10 @@ def run_detection_training(
 
     evaluation_cfg = training_config.get("evaluation") or {}
     eval_interval = max(1, int(evaluation_cfg.get("eval_interval_epochs", 1)))
+    diagnostics_iou_threshold = float(evaluation_cfg.get("diagnostics_iou_threshold", 0.50))
+    score_threshold = evaluation_cfg.get("score_threshold")
+    max_detections_per_image = evaluation_cfg.get("max_detections_per_image")
+    label_offset = _resolve_detection_label_offset(model_config)
 
     start_epoch = 1
     if isinstance(resume_state, dict):
@@ -167,7 +181,7 @@ def run_detection_training(
         if resumed_epoch >= 1:
             start_epoch = resumed_epoch + 1
 
-    best_map50: float | None = None
+    best_map50_95: float | None = None
     final_evaluation: DetectionEvaluation | None = None
     total_epoch_seconds = 0.0
 
@@ -205,14 +219,44 @@ def run_detection_training(
         evaluation: DetectionEvaluation | None = None
         if do_eval:
             try:
-                evaluation = evaluate_detection(model, val_loader, resolved_device, num_classes=num_classes)
+                evaluation = evaluate_detection(
+                    model,
+                    val_loader,
+                    resolved_device,
+                    num_classes=num_classes,
+                    class_names=class_names,
+                    class_order=class_order,
+                    diagnostics_iou_threshold=diagnostics_iou_threshold,
+                    score_threshold=float(score_threshold) if isinstance(score_threshold, (int, float)) else None,
+                    max_detections_per_image=(
+                        int(max_detections_per_image)
+                        if isinstance(max_detections_per_image, int)
+                        else None
+                    ),
+                    label_offset=label_offset,
+                )
             except Exception as exc:
                 if resolved_device.type != "cuda" or not _is_no_kernel_image_error(exc):
                     raise
                 cpu_device = torch.device("cpu")
                 model.to(cpu_device)
                 try:
-                    evaluation = evaluate_detection(model, val_loader, cpu_device, num_classes=num_classes)
+                    evaluation = evaluate_detection(
+                        model,
+                        val_loader,
+                        cpu_device,
+                        num_classes=num_classes,
+                        class_names=class_names,
+                        class_order=class_order,
+                        diagnostics_iou_threshold=diagnostics_iou_threshold,
+                        score_threshold=float(score_threshold) if isinstance(score_threshold, (int, float)) else None,
+                        max_detections_per_image=(
+                            int(max_detections_per_image)
+                            if isinstance(max_detections_per_image, int)
+                            else None
+                        ),
+                        label_offset=label_offset,
+                    )
                 finally:
                     model.to(resolved_device)
             if epoch == epochs:
@@ -224,12 +268,24 @@ def run_detection_training(
         remaining = max(0, epochs - epoch)
         eta_seconds = float(avg_epoch_seconds * remaining) if remaining > 0 else 0.0
         current_lr = float(optimizer.param_groups[0]["lr"])
+        overall = evaluation.overall if evaluation is not None else None
 
         on_epoch(DetectionEpochMetrics(
             epoch=epoch,
             train_loss=train_loss,
             mAP50=float(evaluation.mAP50) if evaluation is not None else None,
             mAP50_95=float(evaluation.mAP50_95) if evaluation is not None else None,
+            precision=float(overall.precision) if overall is not None else None,
+            recall=float(overall.recall) if overall is not None else None,
+            matched_mean_iou=(
+                float(overall.matched_mean_iou)
+                if overall is not None and isinstance(overall.matched_mean_iou, (int, float))
+                else None
+            ),
+            tp=int(overall.tp) if overall is not None else None,
+            fp=int(overall.fp) if overall is not None else None,
+            fn=int(overall.fn) if overall is not None else None,
+            duplicate_fp=int(overall.duplicate_fp) if overall is not None else None,
             lr=current_lr,
             epoch_seconds=epoch_seconds,
             eta_seconds=eta_seconds,
@@ -240,14 +296,27 @@ def run_detection_training(
             "train_loss": train_loss,
             "val_map": float(evaluation.mAP50) if evaluation is not None else None,
             "val_map_50_95": float(evaluation.mAP50_95) if evaluation is not None else None,
+            "val_precision": float(overall.precision) if overall is not None else None,
+            "val_recall": float(overall.recall) if overall is not None else None,
+            "val_matched_mean_iou": (
+                float(overall.matched_mean_iou)
+                if overall is not None and isinstance(overall.matched_mean_iou, (int, float))
+                else None
+            ),
+            "val_tp": int(overall.tp) if overall is not None else None,
+            "val_fp": int(overall.fp) if overall is not None else None,
+            "val_fn": int(overall.fn) if overall is not None else None,
+            "val_duplicate_fp": int(overall.duplicate_fp) if overall is not None else None,
             "lr": current_lr,
             "epoch_seconds": epoch_seconds,
+            "eta_seconds": eta_seconds,
+            "evaluated": evaluation is not None,
         }
 
         should_save_latest = epoch == epochs or (epoch % save_every == 0)
         if should_save_latest:
-            on_checkpoint("latest", epoch, "val_map" if evaluation else None,
-                          float(evaluation.mAP50) if evaluation else None, {
+            on_checkpoint("latest", epoch, "val_map_50_95" if evaluation else None,
+                          float(evaluation.mAP50_95) if evaluation else None, {
                               "epoch": epoch,
                               "model_state_dict": model.state_dict(),
                               "optimizer_state_dict": optimizer.state_dict(),
@@ -256,9 +325,9 @@ def run_detection_training(
                           })
 
         if keep_best and evaluation is not None:
-            if best_map50 is None or evaluation.mAP50 > best_map50:
-                best_map50 = evaluation.mAP50
-                on_checkpoint("best_metric", epoch, "val_map", best_map50, {
+            if best_map50_95 is None or evaluation.mAP50_95 > best_map50_95:
+                best_map50_95 = evaluation.mAP50_95
+                on_checkpoint("best_metric", epoch, "val_map_50_95", best_map50_95, {
                     "epoch": epoch,
                     "model_state_dict": model.state_dict(),
                     "metrics": metrics_payload,

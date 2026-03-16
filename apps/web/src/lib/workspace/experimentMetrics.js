@@ -1,5 +1,5 @@
 function metricKeyForTask(task) {
-  if (task === "detection") return "val_map";
+  if (task === "detection") return "val_map_50_95";
   if (task === "segmentation") return "val_iou";
   return "val_accuracy";
 }
@@ -11,6 +11,9 @@ const BOUNDED_METRIC_KEYS = new Set([
   "val_macro_recall",
   "val_map",
   "val_map_50_95",
+  "val_precision",
+  "val_recall",
+  "val_matched_mean_iou",
   "val_iou",
 ]);
 
@@ -201,6 +204,13 @@ function metricValueByKey(row, key) {
   if (key === "val_macro_recall") return _safeNumber(row.val_macro_recall);
   if (key === "val_map") return _safeNumber(row.val_map) ?? _safeNumber(row.mAP50);
   if (key === "val_map_50_95") return _safeNumber(row.val_map_50_95) ?? _safeNumber(row.mAP50_95);
+  if (key === "val_precision") return _safeNumber(row.val_precision) ?? _safeNumber(row.precision);
+  if (key === "val_recall") return _safeNumber(row.val_recall) ?? _safeNumber(row.recall);
+  if (key === "val_matched_mean_iou") return _safeNumber(row.val_matched_mean_iou) ?? _safeNumber(row.matched_mean_iou);
+  if (key === "val_tp") return _safeNumber(row.val_tp) ?? _safeNumber(row.tp);
+  if (key === "val_fp") return _safeNumber(row.val_fp) ?? _safeNumber(row.fp);
+  if (key === "val_fn") return _safeNumber(row.val_fn) ?? _safeNumber(row.fn);
+  if (key === "val_duplicate_fp") return _safeNumber(row.val_duplicate_fp) ?? _safeNumber(row.duplicate_fp);
   if (key === "val_iou") return _safeNumber(row.val_iou);
   if (key === "epoch_seconds") return _safeNumber(row.epoch_seconds);
   if (key === "eta_seconds") return _safeNumber(row.eta_seconds);

@@ -7,7 +7,7 @@ Local-first labeling, dataset, training, deployment, and AI-prelabel platform fo
 Generated from the deterministic `README Demo` project in `docs/demo/` via `./scripts/run_demo_assets.sh assets`.
 
 <p align="center">
-  <img src="docs/demo/hero-demo.gif" alt="Pixel Sheriff walkthrough covering labeling, dataset versioning, and model setup" width="100%" />
+  <img src="docs/demo/hero-demo.gif" alt="Pixel Sheriff walkthrough covering labeling, dataset versioning, experiments, deployment, and model-assisted labeling" width="100%" />
 </p>
 <p align="center">
   <img src="docs/demo/screenshot-01-assets.png" alt="Assets workspace with folder browser and dataset entry point" width="49%" />
@@ -18,7 +18,15 @@ Generated from the deterministic `README Demo` project in `docs/demo/` via `./sc
   <img src="docs/demo/screenshot-04-models.png" alt="Models page showing the seeded demo detector" width="49%" />
 </p>
 <p align="center">
-  <img src="docs/demo/screenshot-05-builder.png" alt="Model builder configuration for the README Pet Detector" width="49%" />
+  <img src="docs/demo/screenshot-05-builder.png" alt="Model builder configuration for the README Pet Detector before experiment launch" width="49%" />
+  <img src="docs/demo/screenshot-06-experiments.png" alt="Experiments analytics page showing the seeded README detector run" width="49%" />
+</p>
+<p align="center">
+  <img src="docs/demo/screenshot-07-experiment-run.png" alt="Experiment detail page with metrics, logs, and ONNX export for the seeded run" width="49%" />
+  <img src="docs/demo/screenshot-08-deploy.png" alt="Deploy page with the README experiment deployed as the active model" width="49%" />
+</p>
+<p align="center">
+  <img src="docs/demo/screenshot-09-mal.png" alt="Labeling workspace showing pending deployment-assisted MAL predictions for the hero asset" width="49%" />
 </p>
 
 ## What It Does

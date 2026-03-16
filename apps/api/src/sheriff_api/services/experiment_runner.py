@@ -14,7 +14,7 @@ def _utc_now_iso() -> str:
 
 def _metric_name_for_task(task: str) -> str:
     if task == "detection":
-        return "val_map"
+        return "val_map_50_95"
     if task == "segmentation":
         return "val_iou"
     return "val_accuracy"
@@ -127,6 +127,8 @@ class ExperimentRunnerManager:
                     "created_at": _utc_now_iso(),
                 }
                 metric_row[metric_name] = round(primary_metric, 6)
+                if task == "detection":
+                    metric_row["val_map"] = round(_clamp(primary_metric + 0.12, 0.01, 0.99), 6)
                 self._store.append_metric(project_id=project_id, experiment_id=experiment_id, metric_row=metric_row)
 
                 changed_checkpoint_rows: list[dict[str, Any]] = []
@@ -221,4 +223,3 @@ class ExperimentRunnerManager:
             self.publish(project_id, experiment_id, {"type": "done", "status": "failed", "message": str(exc)})
         finally:
             self._tasks.pop(key, None)
-

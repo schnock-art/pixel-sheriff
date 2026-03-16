@@ -71,6 +71,8 @@ function dashboardTabsForTask(task) {
     return [
       { key: "loss", label: "Loss" },
       { key: "map", label: "mAP" },
+      { key: "quality", label: "Quality" },
+      { key: "counts", label: "Counts" },
       { key: "runtime", label: "Runtime" },
     ];
   }
@@ -95,6 +97,21 @@ function dashboardSeriesForTask(task, tab) {
       return [
         { key: "val_map", label: "val mAP@50", color: "#2f6fca" },
         { key: "val_map_50_95", label: "val mAP@50:95", color: "#2f9d58" },
+      ];
+    }
+    if (tab === "quality") {
+      return [
+        { key: "val_precision", label: "val precision", color: "#2f6fca" },
+        { key: "val_recall", label: "val recall", color: "#2f9d58" },
+        { key: "val_matched_mean_iou", label: "val matched IoU", color: "#cc6f36" },
+      ];
+    }
+    if (tab === "counts") {
+      return [
+        { key: "val_tp", label: "val TP", color: "#2f9d58" },
+        { key: "val_fp", label: "val FP", color: "#c96262" },
+        { key: "val_fn", label: "val FN", color: "#5b6fd1" },
+        { key: "val_duplicate_fp", label: "duplicate FP", color: "#b8792f" },
       ];
     }
     if (tab === "runtime") {

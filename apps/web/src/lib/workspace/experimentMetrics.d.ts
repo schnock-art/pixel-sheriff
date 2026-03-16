@@ -11,6 +11,13 @@ export interface MetricPoint {
   val_macro_recall?: number;
   val_map?: number;
   val_map_50_95?: number;
+  val_precision?: number;
+  val_recall?: number;
+  val_matched_mean_iou?: number;
+  val_tp?: number;
+  val_fp?: number;
+  val_fn?: number;
+  val_duplicate_fp?: number;
   val_iou?: number;
   epoch_seconds?: number;
   eta_seconds?: number;
@@ -106,7 +113,7 @@ export interface ExperimentMetricHoverModel {
   } | null;
 }
 
-export function metricKeyForTask(task: ExperimentTask | string): "val_accuracy" | "val_map" | "val_iou";
+export function metricKeyForTask(task: ExperimentTask | string): "val_accuracy" | "val_map_50_95" | "val_iou";
 export function isLossMetricKey(key: string): boolean;
 export function isBoundedMetricKey(key: string): boolean;
 export function isBoundedSeries(rowsOrPoints: Array<Record<string, unknown>>, key?: string): boolean;

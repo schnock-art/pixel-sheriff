@@ -46,6 +46,11 @@ export default function NewExperimentPage({ params }: NewExperimentPageProps) {
   const [isLoadingModels, setIsLoadingModels] = useState(!modelIdFromQuery);
   const [isCreating, setIsCreating] = useState(Boolean(modelIdFromQuery));
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const selectedModel = useMemo(
+    () => models.find((model) => model.id === selectedModelId) ?? null,
+    [models, selectedModelId],
+  );
+  const defaultNamePlaceholder = selectedModel ? `${selectedModel.name} training_run_1` : "training_run_1";
 
   useEffect(() => {
     if (modelIdFromQuery) {
@@ -158,7 +163,7 @@ export default function NewExperimentPage({ params }: NewExperimentPageProps) {
                   type="text"
                   value={name}
                   onChange={(event) => setName(event.target.value)}
-                  placeholder="training_run_1"
+                  placeholder={defaultNamePlaceholder}
                 />
               </label>
               <label className="project-field">

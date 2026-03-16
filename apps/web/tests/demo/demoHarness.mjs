@@ -1,6 +1,6 @@
 import path from "node:path";
 
-import { copyFileEnsured, docsDemoDir, heroRawVideoPath, heroWebmPath } from "../../../../scripts/demo/common.mjs";
+import { copyFileEnsured, docsDemoDir, heroRawVideoPath, heroWebmPath, resolveDemoApiBaseUrl } from "../../../../scripts/demo/common.mjs";
 import { seedDemoProject } from "../../../../scripts/demo/seed-demo-project.mjs";
 
 export const DEMO_VIEWPORT = { width: 1440, height: 900 };
@@ -11,6 +11,62 @@ export function attrSelector(testId, attributeName, value) {
 
 export async function bootstrapDemo() {
   return seedDemoProject();
+}
+
+function apiUrl(apiBaseUrl, routePath) {
+  return `${apiBaseUrl}/api/v1${routePath}`;
+}
+
+async function readResponse(response) {
+  const text = await response.text();
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
+}
+
+export async function demoApiRequest(demo, routePath, init = {}) {
+  const apiBaseUrl = demo.apiBaseUrl ?? resolveDemoApiBaseUrl();
+  const response = await fetch(apiUrl(apiBaseUrl, routePath), init);
+  if (!response.ok) {
+    const body = await readResponse(response);
+    throw new Error(`Demo API request failed (${response.status}) ${routePath}: ${typeof body === "string" ? body : JSON.stringify(body)}`);
+  }
+  if (response.status === 204) return null;
+  return readResponse(response);
+}
+
+function requireExperimentDemo(demo) {
+  if (!demo.experimentDemo || typeof demo.experimentDemo !== "object") {
+    throw new Error("experimentDemo metadata is missing. Run the Docker demo asset pipeline so experiment seed data is injected.");
+  }
+  return demo.experimentDemo;
+}
+
+export function experimentUrlsForDemo(demo) {
+  const experimentDemo = requireExperimentDemo(demo);
+  const taskQuery = demo.taskId ? `?taskId=${encodeURIComponent(demo.taskId)}` : "";
+  return {
+    experiments:
+      demo.urls?.experiments ??
+      `${demo.webBaseUrl}/projects/${encodeURIComponent(demo.projectId)}/experiments${taskQuery}`,
+    experimentDetail:
+      demo.urls?.experimentDetail ??
+      `${demo.webBaseUrl}/projects/${encodeURIComponent(demo.projectId)}/experiments/${encodeURIComponent(experimentDemo.experimentId)}`,
+    deploy:
+      demo.urls?.deploy ??
+      `${demo.webBaseUrl}/projects/${encodeURIComponent(demo.projectId)}/deploy${taskQuery}`,
+  };
+}
+
+export function getHeroAsset(demo) {
+  const heroAsset = demo.assets.find((asset) => asset.relativePath === demo.hero.assetRelativePath);
+  if (!heroAsset) {
+    throw new Error(`Hero asset ${demo.hero.assetRelativePath} is missing from seeded demo metadata`);
+  }
+  return heroAsset;
 }
 
 export async function pause(page, milliseconds = 300) {
@@ -66,6 +122,25 @@ export async function waitForModelsReady(page) {
   await page.locator("[data-testid='models-table']").waitFor();
 }
 
+export async function waitForExperimentsReady(page) {
+  await page.locator("[data-testid='experiments-page']").waitFor();
+  await page.locator("[data-testid='experiments-table']").waitFor();
+  await page.locator("[data-testid='experiment-row']").first().waitFor();
+}
+
+export async function waitForExperimentDetailReady(page) {
+  await page.locator("[data-testid='experiment-detail-page']").waitFor();
+  await page.locator("[data-testid='experiment-card-runtime-logs']").waitFor();
+  await page.locator("[data-testid='experiment-card-onnx']").waitFor();
+  await page.locator("[data-testid='experiment-deploy-model-button']").waitFor();
+}
+
+export async function waitForDeployReady(page) {
+  await page.locator("[data-testid='deploy-page']").waitFor();
+  await page.locator("[data-testid='deploy-active-model-section']").waitFor();
+  await page.locator("[data-testid='deploy-all-deployments-section']").waitFor();
+}
+
 export async function waitForBuilderReady(page) {
   await page.locator("[data-testid='model-builder-grid']").waitFor();
   await page.locator("[data-testid='model-step-dataset']").waitFor();
@@ -114,6 +189,93 @@ export async function selectGeometryObject(page, asset) {
   await labelChip.waitFor();
   await labelChip.click({ force: true });
   await page.locator(`${attrSelector("label-chip", "data-category-id", asset.categoryId)}[data-selected="true"]`).waitFor();
+}
+
+export async function ensureDemoDeployment(page, demo) {
+  const urls = experimentUrlsForDemo(demo);
+  const listing = await demoApiRequest(demo, `/projects/${demo.projectId}/deployments`);
+  const available = Array.isArray(listing?.items) ? listing.items.find((item) => item?.status === "available") ?? null : null;
+  if (available) {
+    await page.goto(urls.deploy, { waitUntil: "domcontentloaded" });
+    await waitForDeployReady(page);
+    return available;
+  }
+
+  await page.goto(urls.experimentDetail, { waitUntil: "domcontentloaded" });
+  await waitForExperimentDetailReady(page);
+  await smoothClick(page, page.locator("[data-testid='experiment-deploy-model-button']"));
+  await page.waitForURL(/\/deploy(\?|$)/, { timeout: 15000 }).catch(async () => {
+    await page.goto(urls.deploy, { waitUntil: "domcontentloaded" });
+  });
+  await waitForDeployReady(page);
+  await page.locator("[data-testid='deployment-row']").first().waitFor({ timeout: 15000 });
+
+  const refreshed = await demoApiRequest(demo, `/projects/${demo.projectId}/deployments`);
+  const created = Array.isArray(refreshed?.items) ? refreshed.items.find((item) => item?.status === "available") ?? null : null;
+  if (!created) {
+    throw new Error("Expected a deployment to exist after clicking Deploy Model");
+  }
+  return created;
+}
+
+export async function stubDemoPredictForHeroAsset(page, demo) {
+  const experimentDemo = requireExperimentDemo(demo);
+  const heroAsset = getHeroAsset(demo);
+  const apiBaseUrl = demo.apiBaseUrl ?? resolveDemoApiBaseUrl();
+  const predictUrl = `${apiBaseUrl}/api/v1/projects/${demo.projectId}/predict`;
+  const deploymentName = `${experimentDemo.experimentName} run ${experimentDemo.attempt}`;
+
+  await page.route((url) => url.toString() === predictUrl, async (route) => {
+    if (route.request().method().toUpperCase() !== "POST") {
+      await route.continue();
+      return;
+    }
+
+    let payload = null;
+    try {
+      payload = route.request().postDataJSON();
+    } catch {
+      payload = null;
+    }
+
+    if (!payload || payload.asset_id !== heroAsset.id) {
+      await route.continue();
+      return;
+    }
+
+    const deploymentId =
+      typeof payload.deployment_id === "string" && payload.deployment_id.trim()
+        ? payload.deployment_id.trim()
+        : "demo-deployment";
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        asset_id: heroAsset.id,
+        deployment_id: deploymentId,
+        task: "bbox",
+        device_selected: "cpu",
+        deployment_name: deploymentName,
+        device_preference: "auto",
+        boxes: [
+          {
+            class_index: 0,
+            class_id: demo.categoryIdsByName.Cat,
+            class_name: "Cat",
+            score: 0.94,
+            bbox: [420, 240, 520, 830],
+          },
+          {
+            class_index: 1,
+            class_id: demo.categoryIdsByName.Dog,
+            class_name: "Dog",
+            score: 0.73,
+            bbox: [1100, 1020, 380, 540],
+          },
+        ],
+      }),
+    });
+  });
 }
 
 export async function saveViewportScreenshot(page, fileName) {

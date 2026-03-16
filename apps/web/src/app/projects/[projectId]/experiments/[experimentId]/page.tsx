@@ -84,6 +84,19 @@ interface ExperimentDetailPageProps {
   };
 }
 
+type DashboardChartTab = "loss" | "accuracy" | "prf" | "map" | "quality" | "counts" | "runtime";
+type PerClassSortKey =
+  | "f1_desc"
+  | "f1_asc"
+  | "precision_desc"
+  | "recall_desc"
+  | "support_desc"
+  | "ap50_desc"
+  | "ap75_desc"
+  | "map_50_95_desc"
+  | "fp_desc"
+  | "fn_desc";
+
 function parseApiErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof ApiError && error.responseBody) {
     try {
@@ -96,6 +109,32 @@ function parseApiErrorMessage(error: unknown, fallback: string): string {
   }
   if (error instanceof Error) return error.message;
   return fallback;
+}
+
+function asFiniteNumber(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return null;
+}
+
+function formatMetricValue(value: unknown, digits = 4): string {
+  const numeric = asFiniteNumber(value);
+  return numeric == null ? "-" : numeric.toFixed(digits);
+}
+
+function formatCountValue(value: unknown): string {
+  const numeric = asFiniteNumber(value);
+  return numeric == null ? "-" : String(Math.round(numeric));
+}
+
+function metricLabelForKey(key: string): string {
+  if (key === "val_map") return "val mAP@50";
+  if (key === "val_map_50_95") return "val mAP@50:95";
+  if (key === "val_iou") return "val IoU";
+  return key.replace("val_", "val ").replace(/_/g, " ");
 }
 
 export default function ExperimentDetailPage({ params }: ExperimentDetailPageProps) {
@@ -144,10 +183,11 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
   const [isLogsLoading, setIsLogsLoading] = useState(false);
   const [isLogsExpanded, setIsLogsExpanded] = useState(true);
   const [logsAutoRefresh, setLogsAutoRefresh] = useState(true);
-  const [dashboardChartTab, setDashboardChartTab] = useState<"loss" | "accuracy" | "prf" | "map" | "runtime">("loss");
+  const [dashboardChartTab, setDashboardChartTab] = useState<DashboardChartTab>("loss");
+  const [dashboardEnabledSeries, setDashboardEnabledSeries] = useState<Record<string, boolean>>({});
   const [dashboardLogScale, setDashboardLogScale] = useState(false);
   const [confusionNormalize, setConfusionNormalize] = useState<"none" | "by_true" | "by_pred">("none");
-  const [perClassSort, setPerClassSort] = useState<"f1_desc" | "f1_asc" | "precision_desc" | "recall_desc" | "support_desc">("f1_desc");
+  const [perClassSort, setPerClassSort] = useState<PerClassSortKey>("f1_desc");
   const [predictionMode, setPredictionMode] = useState<"misclassified" | "lowest_confidence_correct" | "highest_confidence_wrong">("misclassified");
   const [predictionLimit, setPredictionLimit] = useState(50);
   const [predictionTrueClass, setPredictionTrueClass] = useState<string>("all");
@@ -170,7 +210,7 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
   const onnxClassSummary = onnxClassNamesText(onnxInfo);
   const onnxValidationSummary = onnxValidationText(onnxInfo);
   const primaryMetricKey = metricKeyForTask(task);
-  const primaryMetricLabel = primaryMetricKey.replace("val_", "val ");
+  const primaryMetricLabel = metricLabelForKey(primaryMetricKey);
   const primaryColor = "#2f6fca";
   const lossColor = "#c96262";
 
@@ -719,19 +759,31 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
     if (perClassSort === "precision_desc") rows.sort((a, b) => b.precision - a.precision);
     if (perClassSort === "recall_desc") rows.sort((a, b) => b.recall - a.recall);
     if (perClassSort === "support_desc") rows.sort((a, b) => b.support - a.support);
+    if (perClassSort === "ap50_desc") rows.sort((a, b) => (asFiniteNumber(b.ap50) ?? -1) - (asFiniteNumber(a.ap50) ?? -1));
+    if (perClassSort === "ap75_desc") rows.sort((a, b) => (asFiniteNumber(b.ap75) ?? -1) - (asFiniteNumber(a.ap75) ?? -1));
+    if (perClassSort === "map_50_95_desc") rows.sort((a, b) => (asFiniteNumber(b.map_50_95) ?? -1) - (asFiniteNumber(a.map_50_95) ?? -1));
+    if (perClassSort === "fp_desc") rows.sort((a, b) => (asFiniteNumber(b.fp) ?? -1) - (asFiniteNumber(a.fp) ?? -1));
+    if (perClassSort === "fn_desc") rows.sort((a, b) => (asFiniteNumber(b.fn) ?? -1) - (asFiniteNumber(a.fn) ?? -1));
     return rows;
   }, [evaluation?.per_class, perClassSort]);
 
   const dashboardTabs = useMemo(() => dashboardTabsForTask(task), [task]);
 
-  const dashboardSeries = useMemo(() => {
-    return dashboardSeriesForTask(task, dashboardChartTab);
-  }, [dashboardChartTab, task]);
-
+  const dashboardAvailableSeries = useMemo(() => dashboardSeriesForTask(task, dashboardChartTab), [dashboardChartTab, task]);
+  const dashboardSeries = useMemo(
+    () => dashboardAvailableSeries.filter((series) => dashboardEnabledSeries[series.key] !== false),
+    [dashboardAvailableSeries, dashboardEnabledSeries],
+  );
   const dashboardSeriesKeys = useMemo(() => dashboardSeries.map((series) => series.key), [dashboardSeries]);
-  const dashboardBounded = dashboardChartTab === "accuracy" || dashboardChartTab === "prf" || dashboardChartTab === "map";
+  const dashboardBounded =
+    dashboardChartTab === "accuracy" ||
+    dashboardChartTab === "prf" ||
+    dashboardChartTab === "map" ||
+    dashboardChartTab === "quality";
+  const dashboardHasVisibleSeries = dashboardSeries.length > 0;
   const dashboardHasData = useMemo(
     () =>
+      dashboardSeriesKeys.length > 0 &&
       metrics.some((row) =>
         dashboardSeriesKeys.some((key) => {
           const value = metricValueByKey(row, key);
@@ -740,6 +792,14 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
       ),
     [dashboardSeriesKeys, metrics],
   );
+  const dashboardAxisLabel =
+    dashboardChartTab === "loss"
+      ? "Loss"
+      : dashboardChartTab === "runtime"
+        ? "Seconds"
+        : dashboardChartTab === "counts"
+          ? "Count"
+          : "Metric value";
   const dashboardValues = useMemo(
     () =>
       metrics.flatMap((row) =>
@@ -789,7 +849,15 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
   useEffect(() => {
     if (dashboardTabs.some((tab) => tab.key === dashboardChartTab)) return;
     const nextTab = dashboardTabs[0]?.key;
-    if (nextTab === "loss" || nextTab === "accuracy" || nextTab === "prf" || nextTab === "map" || nextTab === "runtime") {
+    if (
+      nextTab === "loss" ||
+      nextTab === "accuracy" ||
+      nextTab === "prf" ||
+      nextTab === "map" ||
+      nextTab === "quality" ||
+      nextTab === "counts" ||
+      nextTab === "runtime"
+    ) {
       setDashboardChartTab(nextTab);
     }
   }, [dashboardChartTab, dashboardTabs]);
@@ -866,18 +934,25 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
     };
   }, [cellDrawer, evaluation?.samples?.misclassified, experimentId, isClassificationTask, projectId]);
 
-  const detectionOverallMap50 =
-    evaluation?.overall && typeof evaluation.overall === "object" && typeof (evaluation.overall as Record<string, unknown>).mAP50 === "number"
-      ? ((evaluation.overall as Record<string, unknown>).mAP50 as number)
-      : null;
-  const detectionOverallMap50_95 =
-    evaluation?.overall && typeof evaluation.overall === "object" && typeof (evaluation.overall as Record<string, unknown>).mAP50_95 === "number"
-      ? ((evaluation.overall as Record<string, unknown>).mAP50_95 as number)
-      : null;
+  const detectionOverall = isDetectionTask ? (evaluation?.overall ?? null) : null;
+  const detectionOverallMap50 = asFiniteNumber(detectionOverall?.mAP50);
+  const detectionOverallMap50_95 = asFiniteNumber(detectionOverall?.mAP50_95);
+  const detectionSizeBucketRows = useMemo(() => {
+    if (!detectionOverall?.size_buckets || typeof detectionOverall.size_buckets !== "object") return [];
+    return Object.entries(detectionOverall.size_buckets).map(([name, value]) => ({
+      name,
+      groundTruthCount: asFiniteNumber(value?.ground_truth_count),
+      predictionCount: asFiniteNumber(value?.prediction_count),
+      ap50: asFiniteNumber(value?.ap50),
+      map50_95: asFiniteNumber(value?.map_50_95),
+      precision: asFiniteNumber(value?.precision),
+      recall: asFiniteNumber(value?.recall),
+    }));
+  }, [detectionOverall?.size_buckets]);
 
   return (
     <>
-      <main className="workspace-shell project-page-shell">
+      <main className="workspace-shell project-page-shell" data-testid="experiment-detail-page">
         <section className="workspace-frame project-content-frame">
           <header className="project-section-header">
             <div className="experiment-header-title">
@@ -1361,7 +1436,7 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
               </section>
 
               <section className="experiment-right-panel">
-                <div className="experiment-card">
+                <div className="experiment-card" data-testid="experiment-card-runtime-logs">
                   <h3>Runtime & Logs</h3>
                   <div className="experiment-runtime-grid">
                     <span>Device selected</span>
@@ -1458,7 +1533,7 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
                   </div>
                 </div>
 
-                <div className="experiment-card">
+                <div className="experiment-card" data-testid="experiment-card-onnx">
                   <h3>Exported Model (ONNX)</h3>
                   <div className="experiment-status-row">
                     <span className="status-pill">{onnxStatus}</span>
@@ -1500,6 +1575,7 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
                         className="primary-button"
                         onClick={() => void handleDeployModel()}
                         disabled={isDeploying}
+                        data-testid="experiment-deploy-model-button"
                       >
                         {isDeploying ? "Deploying..." : "Deploy Model"}
                       </button>
@@ -1710,7 +1786,7 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
           ) : null}
 
           {!isLoading ? (
-            <section className="experiment-dashboard-section">
+            <section className="experiment-dashboard-section" data-testid="experiment-dashboard-section">
               <header className="project-section-header">
                 <h3>Dashboard</h3>
                 {evaluation?.attempt ? <span className="status-pill">Evaluation Run #{evaluation.attempt}</span> : null}
@@ -1746,7 +1822,7 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
                               key={tab.key}
                               type="button"
                               className={`ghost-button ${dashboardChartTab === tab.key ? "active-toggle" : ""}`}
-                              onClick={() => setDashboardChartTab(tab.key as "loss" | "accuracy" | "prf" | "map" | "runtime")}
+                              onClick={() => setDashboardChartTab(tab.key as DashboardChartTab)}
                             >
                               {tab.label}
                             </button>
@@ -1766,16 +1842,43 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
                       Last epoch time: {formatDurationSeconds(latestEpochSeconds)} | ETA: {formatDurationSeconds(latestEtaSeconds)} (finishes ~
                       {latestEtaClock})
                     </p>
+                    {dashboardAvailableSeries.length > 0 ? (
+                      <div className="experiment-series-toggle-row">
+                        {dashboardAvailableSeries.map((series) => {
+                          const enabled = dashboardEnabledSeries[series.key] !== false;
+                          return (
+                            <label key={`dashboard-toggle-${series.key}`} className="model-builder-checkbox">
+                              <input
+                                type="checkbox"
+                                checked={enabled}
+                                onChange={(event) =>
+                                  setDashboardEnabledSeries((current) => ({
+                                    ...current,
+                                    [series.key]: event.target.checked,
+                                  }))
+                                }
+                              />
+                              <span>{series.label}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    ) : null}
                     <div className="experiment-chart-legend">
-                      {dashboardLinePoints.map((series) => (
-                        <span key={series.key} className="experiment-legend-item">
+                      {dashboardAvailableSeries.map((series) => (
+                        <span
+                          key={series.key}
+                          className={`experiment-legend-item${dashboardEnabledSeries[series.key] === false ? " is-muted" : ""}`}
+                        >
                           <span className="experiment-legend-swatch" style={{ background: series.color }} />
                           <span>{series.label}</span>
                         </span>
                       ))}
                     </div>
                     <div className="experiment-chart-wrap">
-                      {!dashboardHasData ? (
+                      {!dashboardHasVisibleSeries ? (
+                        <p className="labels-empty">Enable at least one metric to render this chart.</p>
+                      ) : !dashboardHasData ? (
                         <p className="labels-empty">Metrics for this tab are not available yet.</p>
                       ) : (
                         <svg viewBox={`0 0 ${chartWidth} ${chartHeight}`} role="img" aria-label="Dashboard metrics chart">
@@ -1828,7 +1931,7 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
                             transform={`rotate(-90 16 ${chartPadding + (chartInnerHeight / 2)})`}
                             textAnchor="middle"
                           >
-                            {dashboardChartTab === "loss" ? "Loss" : dashboardChartTab === "runtime" ? "Seconds" : "Metric value"}{dashboardLogScale ? " (log10)" : ""}
+                            {dashboardAxisLabel}{dashboardLogScale ? " (log10)" : ""}
                           </text>
                         </svg>
                       )}
@@ -1836,27 +1939,142 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
                   </div>
 
                   {isDetectionTask ? (
-                    <div className="experiment-card">
-                      <div className="experiment-analytics-header">
-                        <h4>Detection Summary</h4>
+                    <>
+                      <div className="experiment-card">
+                        <div className="experiment-analytics-header">
+                          <h4>Detection Summary</h4>
+                        </div>
+                        <div className="experiment-runtime-grid">
+                          <span>Task</span>
+                          <strong>{task}</strong>
+                          <span>Best checkpoint</span>
+                          <strong>{formatCheckpoint(checkpointIndex.best_metric)}</strong>
+                          <span>Latest checkpoint</span>
+                          <strong>{formatCheckpoint(checkpointIndex.latest)}</strong>
+                          <span>Validation split</span>
+                          <strong>{evaluation?.split ?? "val"}</strong>
+                          <span>Classes</span>
+                          <strong>{classNames.length > 0 ? classNames.join(", ") : "-"}</strong>
+                          <span>Validation mAP@50</span>
+                          <strong>{formatMetricValue(detectionOverallMap50)}</strong>
+                          <span>Validation mAP@50:95</span>
+                          <strong>{formatMetricValue(detectionOverallMap50_95)}</strong>
+                          <span>Validation precision</span>
+                          <strong>{formatMetricValue(detectionOverall?.precision)}</strong>
+                          <span>Validation recall</span>
+                          <strong>{formatMetricValue(detectionOverall?.recall)}</strong>
+                          <span>Matched mean IoU</span>
+                          <strong>{formatMetricValue(detectionOverall?.matched_mean_iou)}</strong>
+                          <span>True positives</span>
+                          <strong>{formatCountValue(detectionOverall?.tp)}</strong>
+                          <span>False positives</span>
+                          <strong>{formatCountValue(detectionOverall?.fp)}</strong>
+                          <span>False negatives</span>
+                          <strong>{formatCountValue(detectionOverall?.fn)}</strong>
+                          <span>Duplicate FP</span>
+                          <strong>{formatCountValue(detectionOverall?.duplicate_fp)}</strong>
+                          <span>AP small</span>
+                          <strong>{formatMetricValue(detectionOverall?.ap_small)}</strong>
+                          <span>AP medium</span>
+                          <strong>{formatMetricValue(detectionOverall?.ap_medium)}</strong>
+                          <span>AP large</span>
+                          <strong>{formatMetricValue(detectionOverall?.ap_large)}</strong>
+                        </div>
                       </div>
-                      <div className="experiment-runtime-grid">
-                        <span>Task</span>
-                        <strong>{task}</strong>
-                        <span>Best checkpoint</span>
-                        <strong>{formatCheckpoint(checkpointIndex.best_metric)}</strong>
-                        <span>Latest checkpoint</span>
-                        <strong>{formatCheckpoint(checkpointIndex.latest)}</strong>
-                        <span>Validation mAP@50</span>
-                        <strong>{typeof detectionOverallMap50 === "number" ? detectionOverallMap50.toFixed(4) : "-"}</strong>
-                        <span>Validation mAP@50:95</span>
-                        <strong>{typeof detectionOverallMap50_95 === "number" ? detectionOverallMap50_95.toFixed(4) : "-"}</strong>
-                        <span>Classes</span>
-                        <strong>{classNames.length > 0 ? classNames.join(", ") : "-"}</strong>
-                        <span>Validation split</span>
-                        <strong>{evaluation?.split ?? "val"}</strong>
+
+                      <div className="experiment-card">
+                        <div className="experiment-analytics-header">
+                          <h4>Per-class Metrics</h4>
+                          <label className="project-field">
+                            <span>Sort</span>
+                            <select value={perClassSort} onChange={(event) => setPerClassSort(event.target.value as PerClassSortKey)}>
+                              <option value="ap50_desc">AP50 desc</option>
+                              <option value="map_50_95_desc">mAP@50:95 desc</option>
+                              <option value="ap75_desc">AP75 desc</option>
+                              <option value="precision_desc">precision desc</option>
+                              <option value="recall_desc">recall desc</option>
+                              <option value="fp_desc">FP desc</option>
+                              <option value="fn_desc">FN desc</option>
+                              <option value="support_desc">support desc</option>
+                            </select>
+                          </label>
+                        </div>
+                        <div className="models-table-wrap">
+                          <table className="models-table">
+                            <thead>
+                              <tr>
+                                <th>Class</th>
+                                <th>AP50</th>
+                                <th>AP75</th>
+                                <th>mAP@50:95</th>
+                                <th>Precision</th>
+                                <th>Recall</th>
+                                <th>TP</th>
+                                <th>FP</th>
+                                <th>FN</th>
+                                <th>Dup FP</th>
+                                <th>Mean IoU</th>
+                                <th>Support</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {sortedPerClassRows.map((row) => (
+                                <tr key={`det-per-class-${row.class_index}`}>
+                                  <td>{row.name}</td>
+                                  <td>{formatMetricValue(row.ap50)}</td>
+                                  <td>{formatMetricValue(row.ap75)}</td>
+                                  <td>{formatMetricValue(row.map_50_95)}</td>
+                                  <td>{formatMetricValue(row.precision)}</td>
+                                  <td>{formatMetricValue(row.recall)}</td>
+                                  <td>{formatCountValue(row.tp)}</td>
+                                  <td>{formatCountValue(row.fp)}</td>
+                                  <td>{formatCountValue(row.fn)}</td>
+                                  <td>{formatCountValue(row.duplicate_fp)}</td>
+                                  <td>{formatMetricValue(row.matched_mean_iou)}</td>
+                                  <td>{formatCountValue(row.support)}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
                       </div>
-                    </div>
+
+                      {detectionSizeBucketRows.length > 0 ? (
+                        <div className="experiment-card">
+                          <div className="experiment-analytics-header">
+                            <h4>Size Buckets</h4>
+                          </div>
+                          <div className="models-table-wrap">
+                            <table className="models-table">
+                              <thead>
+                                <tr>
+                                  <th>Bucket</th>
+                                  <th>GT</th>
+                                  <th>Predictions</th>
+                                  <th>AP50</th>
+                                  <th>mAP@50:95</th>
+                                  <th>Precision</th>
+                                  <th>Recall</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {detectionSizeBucketRows.map((row) => (
+                                  <tr key={`size-bucket-${row.name}`}>
+                                    <td>{row.name}</td>
+                                    <td>{formatCountValue(row.groundTruthCount)}</td>
+                                    <td>{formatCountValue(row.predictionCount)}</td>
+                                    <td>{formatMetricValue(row.ap50)}</td>
+                                    <td>{formatMetricValue(row.map50_95)}</td>
+                                    <td>{formatMetricValue(row.precision)}</td>
+                                    <td>{formatMetricValue(row.recall)}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      ) : null}
+                    </>
                   ) : null}
 
                   {isClassificationTask && evaluation ? (
@@ -1917,11 +2135,7 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
                         <span>Sort</span>
                         <select
                           value={perClassSort}
-                          onChange={(event) =>
-                            setPerClassSort(
-                              event.target.value as "f1_desc" | "f1_asc" | "precision_desc" | "recall_desc" | "support_desc",
-                            )
-                          }
+                          onChange={(event) => setPerClassSort(event.target.value as PerClassSortKey)}
                         >
                           <option value="f1_desc">f1 desc</option>
                           <option value="f1_asc">f1 asc</option>
@@ -2043,7 +2257,7 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
           ) : null}
 
           {!isLoading ? (
-            <footer className="model-builder-footer experiment-actions-row">
+            <footer className="model-builder-footer experiment-actions-row" data-testid="experiment-actions-footer">
               <button
                 type="button"
                 className="ghost-button"
@@ -2062,6 +2276,7 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
                   className="primary-button"
                   disabled={!isEditable || isStarting || isDeleting || !validation.isValid || !draftConfig}
                   onClick={handleStartClick}
+                  data-testid="experiment-start-button"
                 >
                   {isStarting ? "Starting..." : "Start Training"}
                 </button>

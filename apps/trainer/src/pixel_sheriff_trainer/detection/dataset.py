@@ -17,6 +17,7 @@ from pixel_sheriff_trainer.augmentation import apply_detection_augmentation, res
 @dataclass
 class DetectionSample:
     path: Path
+    relative_path: str
     asset_id: str
     image_id: str
     width: int
@@ -198,6 +199,7 @@ def build_detection_loaders(
             continue
         samples.append(DetectionSample(
             path=img_path,
+            relative_path=rel_path,
             asset_id=str(img_info.get("asset_id", img_id)),
             image_id=img_id,
             width=int(img_info.get("width", 224)),

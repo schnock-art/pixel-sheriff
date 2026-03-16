@@ -187,6 +187,13 @@ class ExperimentMetricPoint(BaseModel):
     val_macro_recall: float | None = None
     val_map: float | None = None
     val_map_50_95: float | None = None
+    val_precision: float | None = None
+    val_recall: float | None = None
+    val_matched_mean_iou: float | None = None
+    val_tp: int | None = None
+    val_fp: int | None = None
+    val_fn: int | None = None
+    val_duplicate_fp: int | None = None
     val_iou: float | None = None
     epoch_seconds: float | None = None
     eta_seconds: float | None = None

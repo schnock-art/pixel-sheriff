@@ -51,10 +51,16 @@ test("filterPredictionRows applies mode/class filters and ordering", () => {
 
 test("dashboardTabsForTask and dashboardSeriesForTask expose detection metrics", () => {
   const tabs = dashboardTabsForTask("detection");
-  assert.deepEqual(tabs.map((tab) => tab.key), ["loss", "map", "runtime"]);
+  assert.deepEqual(tabs.map((tab) => tab.key), ["loss", "map", "quality", "counts", "runtime"]);
 
   const mapSeries = dashboardSeriesForTask("detection", "map");
   assert.deepEqual(mapSeries.map((series) => series.key), ["val_map", "val_map_50_95"]);
+
+  const qualitySeries = dashboardSeriesForTask("detection", "quality");
+  assert.deepEqual(qualitySeries.map((series) => series.key), ["val_precision", "val_recall", "val_matched_mean_iou"]);
+
+  const countsSeries = dashboardSeriesForTask("detection", "counts");
+  assert.deepEqual(countsSeries.map((series) => series.key), ["val_tp", "val_fp", "val_fn", "val_duplicate_fp"]);
 
   const runtimeSeries = dashboardSeriesForTask("detection", "runtime");
   assert.deepEqual(runtimeSeries.map((series) => series.key), ["epoch_seconds", "eta_seconds"]);

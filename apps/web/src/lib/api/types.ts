@@ -440,6 +440,13 @@ export interface ExperimentMetricPoint {
   val_macro_recall?: number;
   val_map?: number;
   val_map_50_95?: number;
+  val_precision?: number;
+  val_recall?: number;
+  val_matched_mean_iou?: number;
+  val_tp?: number;
+  val_fp?: number;
+  val_fn?: number;
+  val_duplicate_fp?: number;
   val_iou?: number;
   epoch_seconds?: number;
   eta_seconds?: number;
@@ -537,6 +544,27 @@ export interface ExperimentEvaluationOverall {
   macro_recall?: number;
   mAP50?: number;
   mAP50_95?: number;
+  precision?: number;
+  recall?: number;
+  tp?: number;
+  fp?: number;
+  fn?: number;
+  duplicate_fp?: number;
+  matched_mean_iou?: number | null;
+  ap_small?: number | null;
+  ap_medium?: number | null;
+  ap_large?: number | null;
+  size_buckets?: Record<
+    string,
+    {
+      ground_truth_count?: number;
+      prediction_count?: number;
+      ap50?: number | null;
+      map_50_95?: number | null;
+      precision?: number;
+      recall?: number;
+    }
+  >;
 }
 
 export interface ExperimentEvaluationPerClassRow {
@@ -547,6 +575,15 @@ export interface ExperimentEvaluationPerClassRow {
   recall: number;
   f1: number;
   support: number;
+  ap50?: number | null;
+  ap75?: number | null;
+  map_50_95?: number | null;
+  ap_by_iou?: Record<string, number | null>;
+  tp?: number;
+  fp?: number;
+  fn?: number;
+  duplicate_fp?: number;
+  matched_mean_iou?: number | null;
 }
 
 export interface ExperimentEvaluationSampleRow {

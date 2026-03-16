@@ -28,6 +28,10 @@ export const screenshotPaths = [
   path.join(docsDemoDir, "screenshot-03-dataset.png"),
   path.join(docsDemoDir, "screenshot-04-models.png"),
   path.join(docsDemoDir, "screenshot-05-builder.png"),
+  path.join(docsDemoDir, "screenshot-06-experiments.png"),
+  path.join(docsDemoDir, "screenshot-07-experiment-run.png"),
+  path.join(docsDemoDir, "screenshot-08-deploy.png"),
+  path.join(docsDemoDir, "screenshot-09-mal.png"),
 ];
 
 export function resolveDemoApiBaseUrl() {
