@@ -7,7 +7,13 @@ from httpx import AsyncClient
 import pytest
 
 from sheriff_api.config import get_settings
-from test_api import _create_classification_project_model, _create_project_model, _seed_experiment_run_artifacts, assert_api_error
+
+from .api_test_helpers import (
+    _create_classification_project_model,
+    _create_project_model,
+    _seed_experiment_run_artifacts,
+    assert_api_error,
+)
 
 
 def _parse_sse_events(raw_text: str) -> list[dict]:

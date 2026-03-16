@@ -27,6 +27,17 @@ import {
   setSourceDataset,
   setSquareInputSize,
 } from "../../../../../lib/workspace/modelConfigEditor";
+import {
+  asRecord,
+  deriveModelDetailState,
+  EMBEDDING_DIM_OPTIONS,
+  EMBEDDING_NORMALIZE_OPTIONS,
+  mapDatasetVersionRecords,
+  NORMALIZATION_OPTIONS,
+  parseApiErrorMessage,
+  RESIZE_POLICY_OPTIONS,
+  tasksMatch,
+} from "../../../../../lib/workspace/modelDetail";
 
 interface ModelDetailPageProps {
   params: {
@@ -36,104 +47,6 @@ interface ModelDetailPageProps {
 }
 
 type ModelConfig = Record<string, unknown>;
-
-interface DatasetVersionRecord {
-  id: string;
-  name: string;
-  task: string;
-  label_mode?: "single_label" | "multi_label" | null;
-  num_classes: number;
-  class_order: string[];
-  class_names: Record<string, string>;
-}
-
-interface FamilyInputSizeRule {
-  shape?: string;
-  mode?: string;
-  min_square_size?: number;
-  step?: number;
-  recommended_square_size?: number;
-  required_square_size?: number;
-}
-
-const INPUT_SIZE_PRESETS = [224, 320, 384, 512, 640] as const;
-const RESIZE_POLICY_OPTIONS = ["letterbox", "stretch", "longest_side_pad"] as const;
-const NORMALIZATION_OPTIONS = ["imagenet", "none", "custom"] as const;
-const EMBEDDING_DIM_OPTIONS = [128, 256, 512] as const;
-const EMBEDDING_NORMALIZE_OPTIONS = ["none", "l2"] as const;
-
-function asRecord(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
-}
-
-function parseApiErrorMessage(error: unknown, fallback: string): string {
-  if (error instanceof ApiError) {
-    if (error.responseBody) {
-      try {
-        const parsed = JSON.parse(error.responseBody) as { error?: { message?: unknown } };
-        const message = parsed.error?.message;
-        if (typeof message === "string" && message.trim()) return message;
-      } catch {
-        return error.responseBody;
-      }
-    }
-    return error.message;
-  }
-  return error instanceof Error ? error.message : fallback;
-}
-
-function normalizeModelTask(task: string | null | undefined): string | null {
-  if (typeof task !== "string") return null;
-  const normalized = task.trim().toLowerCase();
-  if (!normalized) return null;
-  if (normalized === "bbox" || normalized === "detection") return "detection";
-  if (normalized === "classification_single" || normalized === "classification") return "classification";
-  if (normalized === "segmentation") return "segmentation";
-  return normalized;
-}
-
-function tasksMatch(left: string | null | undefined, right: string | null | undefined): boolean {
-  const normalizedLeft = normalizeModelTask(left);
-  const normalizedRight = normalizeModelTask(right);
-  return normalizedLeft !== null && normalizedLeft === normalizedRight;
-}
-
-function getFamilyInputSizeRule(family: { input_size?: FamilyInputSizeRule } | null | undefined): FamilyInputSizeRule | null {
-  if (!family?.input_size || typeof family.input_size !== "object") return null;
-  return family.input_size;
-}
-
-function isAllowedSquareSize(rule: FamilyInputSizeRule | null, size: number): boolean {
-  if (!Number.isFinite(size) || size < 1) return false;
-  if (!rule || rule.shape !== "square") return true;
-  if (rule.mode === "fixed") {
-    return size === rule.required_square_size;
-  }
-  if (rule.mode === "range") {
-    const minimum = typeof rule.min_square_size === "number" ? rule.min_square_size : 1;
-    const step = typeof rule.step === "number" && rule.step > 0 ? rule.step : 1;
-    return size >= minimum && (size - minimum) % step === 0;
-  }
-  return true;
-}
-
-function formatFamilyInputSizeHint(rule: FamilyInputSizeRule | null): string | null {
-  if (!rule || rule.shape !== "square") return null;
-  if (rule.mode === "fixed" && typeof rule.required_square_size === "number") {
-    return `Required for this family: ${rule.required_square_size} x ${rule.required_square_size}.`;
-  }
-  if (rule.mode === "range") {
-    const minimum = typeof rule.min_square_size === "number" ? rule.min_square_size : 1;
-    const step = typeof rule.step === "number" && rule.step > 0 ? rule.step : 1;
-    const recommended = typeof rule.recommended_square_size === "number" ? rule.recommended_square_size : null;
-    const recommendedText = recommended ? ` Recommended: ${recommended} x ${recommended}.` : "";
-    if (step === 1) {
-      return `Allowed for this family: any square >= ${minimum}.${recommendedText}`;
-    }
-    return `Allowed for this family: square sizes >= ${minimum} in steps of ${step}.${recommendedText}`;
-  }
-  return null;
-}
 
 export default function ModelDetailPage({ params }: ModelDetailPageProps) {
   const router = useRouter();
@@ -154,7 +67,15 @@ export default function ModelDetailPage({ params }: ModelDetailPageProps) {
   const [isLaunchingTrain, setIsLaunchingTrain] = useState(false);
   const [showTrainChoiceModal, setShowTrainChoiceModal] = useState(false);
   const [latestExperiment, setLatestExperiment] = useState<ProjectExperimentSummary | null>(null);
-  const [allDatasetVersions, setAllDatasetVersions] = useState<DatasetVersionRecord[]>([]);
+  const [allDatasetVersions, setAllDatasetVersions] = useState<Array<{
+    id: string;
+    name: string;
+    task: string;
+    label_mode?: "single_label" | "multi_label" | null;
+    num_classes: number;
+    class_order: string[];
+    class_names: Record<string, string>;
+  }>>([]);
 
   const validation = useMemo(() => validateModelConfigDraft(draftConfig ?? {}), [draftConfig]);
   const isValid = validation.isValid;
@@ -207,24 +128,7 @@ export default function ModelDetailPage({ params }: ModelDetailPageProps) {
       try {
         const listed = await listDatasetVersions(projectId);
         if (!isMounted) return;
-        const versions: DatasetVersionRecord[] = listed.items
-          .map((envelope) => {
-            const v = envelope.version as Record<string, unknown>;
-            return {
-              id: typeof v.dataset_version_id === "string" ? v.dataset_version_id : "",
-              name: typeof v.name === "string" ? v.name : "",
-              task: typeof v.task === "string" ? v.task : "",
-              label_mode:
-                typeof v.label_mode === "string" && (v.label_mode === "single_label" || v.label_mode === "multi_label")
-                  ? (v.label_mode as "single_label" | "multi_label")
-                  : null,
-              num_classes: typeof v.num_classes === "number" ? v.num_classes : 0,
-              class_order: Array.isArray(v.class_order) ? (v.class_order as string[]) : [],
-              class_names: v.class_names && typeof v.class_names === "object" ? (v.class_names as Record<string, string>) : {},
-            };
-          })
-          .filter((v) => v.id !== "");
-        setAllDatasetVersions(versions);
+        setAllDatasetVersions(mapDatasetVersionRecords(listed.items ?? []));
       } catch {
         // non-fatal — selectors will just be empty
       }
@@ -237,75 +141,43 @@ export default function ModelDetailPage({ params }: ModelDetailPageProps) {
     };
   }, [projectId]);
 
-  const input = asRecord(draftConfig?.input);
-  const inputSize = Array.isArray(input.input_size) ? input.input_size : [];
-  const inputSizeWidth = typeof inputSize[0] === "number" ? Math.floor(inputSize[0]) : 0;
-  const inputSizeHeight = typeof inputSize[1] === "number" ? Math.floor(inputSize[1]) : 0;
-  const isSquareInputSize = inputSizeWidth > 0 && inputSizeWidth === inputSizeHeight;
-  const inputSizePresetValue =
-    isSquareInputSize && INPUT_SIZE_PRESETS.includes(inputSizeWidth as (typeof INPUT_SIZE_PRESETS)[number])
-      ? String(inputSizeWidth)
-      : "custom";
-  const customInputSizeValue = inputSizeWidth > 0 ? String(inputSizeWidth) : "";
-
-  const normalization = asRecord(input.normalization);
-  const normalizationType = typeof normalization.type === "string" ? normalization.type : "imagenet";
-  const resizePolicy = typeof input.resize_policy === "string" ? input.resize_policy : "letterbox";
-
-  const architecture = asRecord(draftConfig?.architecture);
-  const backbone = asRecord(architecture.backbone);
-  const backboneName = typeof backbone.name === "string" ? backbone.name : "resnet18";
-  const pretrained = Boolean(backbone.pretrained);
-
-  // Step 1 derived values
-  const currentFamilyName = typeof architecture.family === "string" ? architecture.family : null;
-  const currentManifestId =
-    typeof asRecord(draftConfig?.source_dataset).manifest_id === "string"
-      ? (asRecord(draftConfig?.source_dataset).manifest_id as string)
-      : null;
-  const currentVersionFromManifest = allDatasetVersions.find((v) => v.id === currentManifestId) ?? null;
-  const currentFamilyFromMeta = familiesMetadata.families.find((f) => f.name === currentFamilyName) ?? null;
-  const currentTask =
-    currentVersionFromManifest?.task
-    ?? allDatasetVersions.find((v) => tasksMatch(v.task, currentFamilyFromMeta?.task))?.task
-    ?? currentFamilyFromMeta?.task
-    ?? null;
-
-  const uniqueTasks = Array.from(new Set(allDatasetVersions.map((v) => v.task))).filter(Boolean);
-  const familiesForTask = currentTask
-    ? familiesMetadata.families.filter((f) => tasksMatch(f.task, currentTask))
-    : familiesMetadata.families;
-  const versionsForTask = currentTask
-    ? allDatasetVersions.filter((v) => tasksMatch(v.task, currentTask))
-    : allDatasetVersions;
-  const allowedBackbones = currentFamilyFromMeta?.allowed_backbones ?? [];
-  const currentFamilyInputSizeRule = getFamilyInputSizeRule(currentFamilyFromMeta);
-  const allowedPresetSizes = INPUT_SIZE_PRESETS.filter((value) => isAllowedSquareSize(currentFamilyInputSizeRule, value));
-  const customInputAllowed = currentFamilyInputSizeRule?.mode !== "fixed";
-  const inputSizeHelpText = formatFamilyInputSizeHint(currentFamilyInputSizeRule);
-  const inputSizeIssue =
-    validation.errors.find((issue) => issue.path === "$.input.input_size" && issue.keyword === "familyInputSize")
-    ?? null;
-
-  const outputs = asRecord(draftConfig?.outputs);
-  const auxOutputs = Array.isArray(outputs.aux) ? outputs.aux : [];
-  const embeddingAux = auxOutputs.find((item) => {
-    const row = asRecord(item);
-    return row.type === "embedding" && row.name === "embedding";
-  });
-  const embeddingAuxRecord = asRecord(embeddingAux);
-  const embeddingProjection = asRecord(embeddingAuxRecord.projection);
-  const embeddingEnabled = Boolean(embeddingAux);
-  const embeddingOutDim = typeof embeddingProjection.out_dim === "number" ? Math.floor(embeddingProjection.out_dim) : 256;
-  const embeddingNormalize = embeddingProjection.normalize === "none" ? "none" : "l2";
-
-  const exportSpec = asRecord(draftConfig?.export);
-  const onnx = asRecord(exportSpec.onnx);
-  const dynamicShapes = asRecord(onnx.dynamic_shapes);
-  const onnxEnabled = Boolean(onnx.enabled);
-  const onnxOpset = typeof onnx.opset === "number" ? Math.floor(onnx.opset) : 17;
-  const dynamicBatch = Boolean(dynamicShapes.batch);
-  const dynamicHeightWidth = Boolean(dynamicShapes.height_width);
+  const {
+    currentFamilyInputSizeRule,
+    currentFamilyName,
+    currentManifestId,
+    currentTask,
+    currentVersionFromManifest,
+    allowedBackbones,
+    allowedPresetSizes,
+    backboneName,
+    customInputAllowed,
+    customInputSizeValue,
+    dynamicBatch,
+    dynamicHeightWidth,
+    embeddingEnabled,
+    embeddingNormalize,
+    embeddingOutDim,
+    familiesForTask,
+    inputSizeHelpText,
+    inputSizeIssue,
+    inputSizePresetValue,
+    normalizationType,
+    onnxEnabled,
+    onnxOpset,
+    pretrained,
+    resizePolicy,
+    uniqueTasks,
+    versionsForTask,
+  } = useMemo(
+    () =>
+      deriveModelDetailState({
+        draftConfig,
+        allDatasetVersions,
+        familiesMetadata,
+        validationErrors: validation.errors,
+      }),
+    [allDatasetVersions, draftConfig, validation.errors],
+  );
 
   function patchDraft(mutator: (next: ModelConfig) => void) {
     setDraftConfig((current) => {

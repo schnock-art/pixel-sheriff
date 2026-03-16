@@ -14,7 +14,7 @@ Use it to record progress as items move from assessment into implementation and 
 ## Snapshot
 
 - Date started: `2026-03-15`
-- Current phase: `ProjectAssetsWorkspace orchestration split landed; broader cleanup items remain`
+- Current phase: `Complete`
 - Source assessment: this repo review
 
 ## Findings
@@ -46,11 +46,11 @@ Use it to record progress as items move from assessment into implementation and 
 
 - [x] Identify high-risk large modules and oversized tests
 - [x] Split `ProjectAssetsWorkspace` orchestration responsibilities
-- [ ] Extract non-UI logic from experiment detail page
-- [ ] Extract non-UI logic from model detail page
-- [ ] Break up API prelabels service into focused modules
-- [ ] Break up startup migrations into versioned modules
-- [ ] Split monolithic API and trainer test files by domain
+- [x] Extract non-UI logic from experiment detail page
+- [x] Extract non-UI logic from model detail page
+- [x] Break up API prelabels service into focused modules
+- [x] Break up startup migrations into versioned modules
+- [x] Split monolithic API and trainer test files by domain
 
 ## Failing Test Follow-up
 
@@ -64,12 +64,25 @@ Use it to record progress as items move from assessment into implementation and 
 
 ## Validation and Closeout
 
-- [~] Run full test matrix with the new commands
+- [x] Run full test matrix with the new commands
   - Web and worker remained green from the earlier baseline pass; this follow-up reran `api-test` (`149 passed`), `api-test-ml` (`13 passed`), targeted trainer regressions (`7 passed`), and the full trainer suite in the trainer base container (`50 passed`).
-  - This refactor reran the web unit suite with `node --test --test-isolation=none tests/*.test.js` (`159 passed`) plus `node ./node_modules/typescript/bin/tsc --noEmit` (`passed`). The default `npm test` / `next build` commands still hit sandbox `spawn EPERM` in this environment.
-- [ ] Generate and review baseline coverage reports
+  - This model-detail refactor reran the web unit suite with `node --test tests/*.test.js` (`38 passed`) plus `node ./node_modules/typescript/bin/tsc --noEmit` (`passed`). The default `npm test` / `next build` commands still hit sandbox `spawn EPERM` in this environment.
+  - This prelabels-service refactor reran `PYTHONPATH=apps/api/src python3 -m pytest apps/api/tests/test_prelabels_api.py apps/api/tests/test_prelabel_matching.py -q` (`13 passed`) plus `PYTHONPATH=apps/api/src python3 -m pytest apps/api/tests/test_sequences_api.py apps/api/tests/test_video_frames_service.py -q` (`9 passed`).
+  - This startup-migrations refactor reran `PYTHONPATH=apps/api/src python3 -m pytest apps/api/tests/test_migrations_sequences.py apps/api/tests/test_migrations_startup.py -q` (`3 passed`).
+  - This test-file split refactor reran representative API slices across every new module with `PYTHONPATH=apps/api/src python3 -m pytest ... -q` (`18 passed`) and the full split trainer suite with `PYTHONPATH=apps/trainer/src:apps/ml/src python3 -m pytest apps/trainer/tests/test_trainer_models.py apps/trainer/tests/test_trainer_data.py apps/trainer/tests/test_trainer_detection.py apps/trainer/tests/test_trainer_runner.py apps/trainer/tests/test_trainer_checkpoints.py apps/trainer/tests/test_trainer_export_onnx.py -q` (`32 passed`, `2 skipped`).
+  - API test harness now patches router-level `FileResponse` imports to an eager test-only response shim so sandbox in-process runs no longer hang on `anyio.to_thread.run_sync(os.stat, ...)`; targeted download-path regressions passed (`9 passed`) and the full split API suite passed with `PYTHONPATH=apps/api/src python3 -m pytest apps/api/tests/test_api_core.py apps/api/tests/test_api_models.py apps/api/tests/test_api_suggestions.py apps/api/tests/test_api_deployments.py apps/api/tests/test_api_experiment_runtime.py apps/api/tests/test_api_dataset_versions.py -q` (`92 passed`).
+- [x] Generate and review baseline coverage reports
+  - Used local coverage runs with a temporary `/tmp` `pytest-cov` toolchain because Docker daemon access was blocked in the sandbox and the host Python did not have coverage extras installed.
+  - API coverage: `PYTHONPATH=/tmp/pixel_sheriff_pytest_cov_compat2 python3 -m pytest --cov=sheriff_api --cov-report=term-missing --cov-report=html:coverage/html --cov-report=xml:coverage/coverage.xml -q --ignore=tests/ml tests` (`153 passed`, `69%` total). This run also exposed and validated the stale `test_experiments_api.py` helper import fix after the test-file split.
+  - Trainer coverage: `PYTHONPATH=/tmp/pixel_sheriff_pytest_cov_compat2 python3 -m pytest --cov=pixel_sheriff_trainer --cov-report=term-missing --cov-report=html:coverage/html --cov-report=xml:coverage/coverage.xml -q tests` (`48 passed`, `2 skipped`, `71%` total).
+  - Worker coverage: `PYTHONPATH=/tmp/pixel_sheriff_pytest_cov_compat2 python3 -m pytest --cov=sheriff_worker --cov-report=term-missing --cov-report=html:coverage/html --cov-report=xml:coverage/coverage.xml -q tests` (`2 passed`, `53%` total).
+  - Web coverage: `bash ./scripts/run_web_coverage.sh` after restoring `apps/web` dependencies with `npm ci` (`38 passed`, `89.77%` statements, `66.87%` branches).
+  - Review summary: strongest remaining gaps are API ML adapter/scaffolding modules and heavyweight migration backfills, trainer segmentation/detection pipeline paths plus inference app flows, and the worker runtime loop / job wrappers.
 - [x] Refresh changelog and docs notes for the completed cleanup
-- [ ] Mark tracker complete with final summary
+- [x] Mark tracker complete with final summary
+  - Cleanup goals are complete: docs now live under `docs/`, repo-level test and coverage entrypoints are documented, high-risk refactors were split, and stale test harness edges uncovered by the split and coverage runs were fixed.
+  - Final baseline health in this environment: API tests pass locally with the test-only eager `FileResponse` shim, trainer and worker suites pass, and web unit tests plus coverage pass after restoring local Node dependencies.
+  - Remaining caveats are environmental rather than tracker blockers: Docker-based API coverage was replaced with a local fallback because daemon access is sandboxed, and the default web `npm test` / `next build` flows still hit sandbox `spawn EPERM`.
 
 ## Tracking Rules
 

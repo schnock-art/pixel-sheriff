@@ -42,6 +42,23 @@ All notable changes to this project will be documented in this file.
   - realigned stale API tests to task-scoped category/annotation contracts and dataset-version export endpoints
   - default API test and coverage commands now exclude `apps/api/tests/ml`, with `make test-api-ml` using an ML-enabled API test container
   - trainer inference cache TTL tests now use an injected clock, checkpoint compaction preserves `latest` for resume safety, and trainer dev extras now include `pytest-asyncio`
+- Experiment detail page refactor cleanup:
+  - moved page-local config/formatting helpers into `apps/web/src/lib/workspace/experimentDetail.js`
+  - moved primary metric-chart state/hover derivation into reusable `experimentMetrics` helpers with focused web tests
+- Model detail page refactor cleanup:
+  - moved page-local task/family/input/export derivation helpers into `apps/web/src/lib/workspace/modelDetail.js`
+  - moved dataset-version envelope parsing into reusable workspace helpers with focused web tests
+- API prelabels service refactor cleanup:
+  - split `sheriff_api.services.prelabels` into focused matching, source, job, review, and shared helper modules behind the existing facade
+  - added focused API-adjacent regression coverage for alias disambiguation and bbox clamping in `apps/api/tests/test_prelabel_matching.py`
+- Startup migrations refactor cleanup:
+  - split `sheriff_api.services.migrations` into versioned migration modules plus shared helpers behind the existing startup facade
+  - added startup runner regression coverage in `apps/api/tests/test_migrations_startup.py`
+- API and trainer test-file refactor cleanup:
+  - split monolithic `apps/api/tests/test_api.py` into domain-focused API modules with shared helper support
+  - split monolithic `apps/trainer/tests/test_trainer.py` into focused trainer modules with shared helper support
+  - API tests now use a test-only eager `FileResponse` shim so in-process download/file-stream endpoint coverage remains runnable in this sandbox
+  - fixed the stale `apps/api/tests/test_experiments_api.py` helper import uncovered by the baseline coverage pass
 - Frontend workflow shell refresh:
   - project pages now share a reusable ribbon with global project/task selectors and live stats chips
   - labeling workspace now uses asset browser + canvas + annotation panel + bottom filmstrip layout

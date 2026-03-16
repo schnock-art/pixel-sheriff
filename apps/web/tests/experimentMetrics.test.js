@@ -2,9 +2,12 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 
 const {
+  buildExperimentMetricChartModel,
+  buildExperimentMetricHoverModel,
   buildTicks,
   buildLinePoints,
   computeSeriesDomain,
+  findNearestMetricEpoch,
   formatTick,
   indexCheckpointsByKind,
   isBoundedMetricKey,
@@ -13,6 +16,7 @@ const {
   mergeMetricPoints,
   metricDomain,
   metricKeyForTask,
+  metricValueByKey,
 } = require("../src/lib/workspace/experimentMetrics.js");
 
 test("metricKeyForTask maps task to primary metric", () => {
@@ -135,6 +139,90 @@ test("buildLinePoints respects explicit domain and supports log plotting", () =>
   assert.ok(linear.includes(","));
   assert.ok(log.includes(","));
   assert.notEqual(linear, log);
+});
+
+test("metricValueByKey handles aliases and runtime metrics", () => {
+  const row = {
+    epoch: 2,
+    val_accuracy: 0.8,
+    val_map_50_95: 0.42,
+    mAP50: 0.61,
+    epoch_seconds: 12.5,
+  };
+  assert.equal(metricValueByKey(row, "val_accuracy"), 0.8);
+  assert.equal(metricValueByKey({ mAP50: 0.61 }, "val_map"), 0.61);
+  assert.equal(metricValueByKey(row, "val_map_50_95"), 0.42);
+  assert.equal(metricValueByKey(row, "epoch_seconds"), 12.5);
+});
+
+test("findNearestMetricEpoch picks the closest valid epoch", () => {
+  const metrics = [{ epoch: 1 }, { epoch: 4 }, { epoch: "9" }, { epoch: 0 }];
+  assert.equal(findNearestMetricEpoch(metrics, 3.2), 4);
+  assert.equal(findNearestMetricEpoch(metrics, 8.6), 9);
+  assert.equal(findNearestMetricEpoch([], 2), null);
+});
+
+test("buildExperimentMetricChartModel builds dual-axis detail chart state", () => {
+  const chart = buildExperimentMetricChartModel(
+    [
+      { epoch: 1, val_accuracy: 0.55, val_loss: 1.2 },
+      { epoch: 2, val_accuracy: 0.7, val_loss: 0.9 },
+      { epoch: 3, val_accuracy: 0.82, val_loss: 0.65 },
+    ],
+    {
+      primaryMetricKey: "val_accuracy",
+      primaryMetricLabel: "val accuracy",
+      showPrimary: true,
+      showValLoss: true,
+      chartWidth: 300,
+      chartHeight: 120,
+      chartPadding: 10,
+    },
+  );
+
+  assert.equal(chart.chartMaxEpoch, 3);
+  assert.equal(chart.primaryMetricIsBounded, true);
+  assert.equal(chart.useSecondaryAxis, true);
+  assert.equal(chart.rightAxisTicks.length, 5);
+  assert.ok(chart.primaryLinePoints.includes(","));
+  assert.ok(chart.valLossLinePoints.includes(","));
+});
+
+test("buildExperimentMetricHoverModel computes marker positions and tooltip bounds", () => {
+  const metrics = [
+    { epoch: 1, val_accuracy: 0.55, val_loss: 1.2 },
+    { epoch: 2, val_accuracy: 0.7, val_loss: 0.9 },
+    { epoch: 3, val_accuracy: 0.82, val_loss: 0.65 },
+  ];
+  const chart = buildExperimentMetricChartModel(metrics, {
+    primaryMetricKey: "val_accuracy",
+    primaryMetricLabel: "val accuracy",
+    showPrimary: true,
+    showValLoss: true,
+    chartWidth: 500,
+    chartHeight: 120,
+    chartPadding: 10,
+  });
+  const hover = buildExperimentMetricHoverModel(metrics, {
+    hoveredEpoch: 2,
+    seriesLegend: chart.seriesLegend,
+    chartWidth: chart.chartWidth,
+    chartHeight: chart.chartHeight,
+    chartPadding: chart.chartPadding,
+    chartInnerWidth: chart.chartInnerWidth,
+    chartInnerHeight: chart.chartInnerHeight,
+    chartMaxEpoch: chart.chartMaxEpoch,
+    leftAxisDomain: chart.leftAxisDomain,
+    lossDomain: chart.rightAxisDomain,
+    useSecondaryAxis: chart.useSecondaryAxis,
+  });
+
+  assert.equal(hover.hoveredEpochValue, 2);
+  assert.equal(hover.hoveredPlotRows.length, 2);
+  assert.ok(Number.isFinite(hover.hoveredX));
+  assert.ok(hover.hoverTooltip);
+  assert.ok(hover.hoverTooltip.x >= 0);
+  assert.ok(hover.hoverTooltip.y >= 0);
 });
 
 test("indexCheckpointsByKind indexes known checkpoint kinds", () => {

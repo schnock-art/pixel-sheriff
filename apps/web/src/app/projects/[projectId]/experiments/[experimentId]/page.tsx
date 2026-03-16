@@ -35,12 +35,15 @@ import {
 import {
   buildLinePoints,
   buildTicks,
+  buildExperimentMetricChartModel,
+  buildExperimentMetricHoverModel,
   computeSeriesDomain,
+  findNearestMetricEpoch,
   formatTick,
   indexCheckpointsByKind,
-  isBoundedMetricKey,
   mergeMetricPoints,
   metricKeyForTask,
+  metricValueByKey,
 } from "../../../../../lib/workspace/experimentMetrics";
 import {
   dashboardSeriesForTask,
@@ -49,6 +52,17 @@ import {
   normalizeConfusion,
 } from "../../../../../lib/workspace/experimentDashboard";
 import { buildDatasetVersionOptions } from "../../../../../lib/workspace/experimentDatasetSelection";
+import {
+  asRecord,
+  asYesNo,
+  cloneConfig,
+  configValidation,
+  formatCheckpoint,
+  formatDateTime,
+  formatDurationSeconds,
+  formatEtaClock,
+  patchNumber,
+} from "../../../../../lib/workspace/experimentDetail";
 import { onnxClassNamesText, onnxInputShapeText, onnxStatusLabel, onnxValidationText } from "../../../../../lib/workspace/experimentOnnx";
 import { mergeLogChunk, runtimeBadgeLabel } from "../../../../../lib/workspace/experimentRuntime";
 import { deploymentTaskForExperiment } from "../../../../../lib/workspace/deployHelpers.js";
@@ -70,14 +84,6 @@ interface ExperimentDetailPageProps {
   };
 }
 
-function asRecord(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
-}
-
-function cloneConfig(value: Record<string, unknown>): Record<string, unknown> {
-  return JSON.parse(JSON.stringify(value)) as Record<string, unknown>;
-}
-
 function parseApiErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof ApiError && error.responseBody) {
     try {
@@ -90,90 +96,6 @@ function parseApiErrorMessage(error: unknown, fallback: string): string {
   }
   if (error instanceof Error) return error.message;
   return fallback;
-}
-
-function configValidation(config: Record<string, unknown>): { isValid: boolean; issues: string[] } {
-  const issues: string[] = [];
-  const optimizer = asRecord(config.optimizer);
-  const lr = Number(optimizer.lr);
-  const epochs = Number(config.epochs);
-  const batchSize = Number(config.batch_size);
-  if (!Number.isFinite(lr) || lr <= 0) issues.push("Learning rate must be > 0");
-  if (!Number.isFinite(epochs) || epochs < 1) issues.push("Epochs must be >= 1");
-  if (!Number.isFinite(batchSize) || batchSize < 1) issues.push("Batch size must be >= 1");
-  return { isValid: issues.length === 0, issues };
-}
-
-function formatDateTime(value: string | null | undefined): string {
-  if (!value) return "-";
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return "-";
-  return parsed.toLocaleString();
-}
-
-function formatDurationSeconds(value: number | null | undefined): string {
-  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return "-";
-  const total = Math.round(value);
-  const hours = Math.floor(total / 3600);
-  const minutes = Math.floor((total % 3600) / 60);
-  const seconds = total % 60;
-  if (hours > 0) return `${hours}h ${minutes}m ${seconds}s`;
-  if (minutes > 0) return `${minutes}m ${seconds}s`;
-  return `${seconds}s`;
-}
-
-function formatEtaClock(value: number | null | undefined): string {
-  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return "-";
-  const finishAt = new Date(Date.now() + (value * 1000));
-  return finishAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-}
-
-function formatCheckpoint(checkpoint: Pick<ExperimentCheckpoint, "epoch" | "metric_name" | "value"> | null): string {
-  if (!checkpoint || checkpoint.epoch == null) return "Not available yet";
-  const metricName = checkpoint.metric_name ?? "metric";
-  const value = typeof checkpoint.value === "number" ? checkpoint.value.toFixed(4) : "-";
-  return `epoch ${checkpoint.epoch} | ${metricName}: ${value}`;
-}
-
-function patchNumber(value: string): number | null {
-  if (value.trim() === "") return null;
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed)) return null;
-  return parsed;
-}
-
-function asYesNo(value: boolean | null | undefined): string {
-  if (value === true) return "yes";
-  if (value === false) return "no";
-  return "-";
-}
-
-function asEpoch(value: unknown): number | null {
-  const parsed = typeof value === "number" ? value : Number.parseInt(String(value), 10);
-  if (!Number.isFinite(parsed) || parsed < 1) return null;
-  return parsed;
-}
-
-function asMetricValue(value: unknown): number | null {
-  if (typeof value !== "number" || !Number.isFinite(value)) return null;
-  return value;
-}
-
-function metricValueByKey(row: ExperimentMetricPoint, key: string): number | null {
-  const extra = row as unknown as Record<string, unknown>;
-  if (key === "train_loss") return asMetricValue(row.train_loss);
-  if (key === "train_accuracy") return asMetricValue(row.train_accuracy);
-  if (key === "val_loss") return asMetricValue(row.val_loss);
-  if (key === "val_accuracy") return asMetricValue(row.val_accuracy);
-  if (key === "val_macro_f1") return asMetricValue(row.val_macro_f1);
-  if (key === "val_macro_precision") return asMetricValue(row.val_macro_precision);
-  if (key === "val_macro_recall") return asMetricValue(row.val_macro_recall);
-  if (key === "val_map") return asMetricValue(row.val_map) ?? asMetricValue(extra.mAP50);
-  if (key === "val_map_50_95") return asMetricValue(row.val_map_50_95) ?? asMetricValue(extra.mAP50_95);
-  if (key === "val_iou") return asMetricValue(row.val_iou);
-  if (key === "epoch_seconds") return asMetricValue(row.epoch_seconds);
-  if (key === "eta_seconds") return asMetricValue(row.eta_seconds);
-  return null;
 }
 
 export default function ExperimentDetailPage({ params }: ExperimentDetailPageProps) {
@@ -265,186 +187,68 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
     return null;
   }, [lastRunMessage, savedRecord?.error]);
 
-  const chartKeys = useMemo(() => {
-    const keys: string[] = [];
-    if (showPrimary) keys.push(primaryMetricKey);
-    if (showValLoss) keys.push("val_loss");
-    return keys;
-  }, [primaryMetricKey, showPrimary, showValLoss]);
+  const {
+    chartWidth,
+    chartHeight,
+    chartPadding,
+    chartInnerWidth,
+    chartInnerHeight,
+    chartMaxEpoch,
+    primaryMetricIsBounded,
+    useSecondaryAxis,
+    leftAxisDomain,
+    rightAxisDomain,
+    leftAxisTicks,
+    rightAxisTicks,
+    xTickValues,
+    seriesLegend,
+    primaryLinePoints,
+    valLossLinePoints,
+  } = useMemo(
+    () =>
+      buildExperimentMetricChartModel(metrics, {
+        primaryMetricKey,
+        primaryMetricLabel,
+        showPrimary,
+        showValLoss,
+        chartWidth: 760,
+        chartHeight: 280,
+        chartPadding: 44,
+        primaryColor,
+        lossColor,
+      }),
+    [lossColor, metrics, primaryColor, primaryMetricKey, primaryMetricLabel, showPrimary, showValLoss],
+  );
 
-  const chartWidth = 760;
-  const chartHeight = 280;
-  const chartPadding = 44;
-  const chartInnerWidth = chartWidth - (chartPadding * 2);
-  const chartInnerHeight = chartHeight - (chartPadding * 2);
-  const chartMaxEpoch = useMemo(() => {
-    const epochs = metrics
-      .map((row) => (typeof row.epoch === "number" ? row.epoch : Number.parseInt(String(row.epoch), 10)))
-      .filter((epoch) => Number.isFinite(epoch) && epoch >= 1);
-    if (epochs.length === 0) return 1;
-    return Math.max(...epochs);
-  }, [metrics]);
-  const primaryMetricIsBounded = useMemo(() => isBoundedMetricKey(primaryMetricKey), [primaryMetricKey]);
-  const useSecondaryAxis = showPrimary && showValLoss && primaryMetricIsBounded;
-  const primarySeriesValues = useMemo(
-    () => metrics.map((row) => metricValueByKey(row, primaryMetricKey)).filter((value): value is number => value != null),
-    [metrics, primaryMetricKey],
-  );
-  const lossSeriesValues = useMemo(
-    () => metrics.map((row) => metricValueByKey(row, "val_loss")).filter((value): value is number => value != null),
-    [metrics],
-  );
-  const combinedSeriesValues = useMemo(() => [...primarySeriesValues, ...lossSeriesValues], [lossSeriesValues, primarySeriesValues]);
-  const primaryDomain = useMemo(
+  const { hoveredEpochValue, hoveredX, hoveredPlotRows, hoverTooltip } = useMemo(
     () =>
-      computeSeriesDomain(primarySeriesValues, {
-        useLog: false,
-        clamp01: primaryMetricIsBounded,
+      buildExperimentMetricHoverModel(metrics, {
+        hoveredEpoch,
+        seriesLegend,
+        chartWidth,
+        chartHeight,
+        chartPadding,
+        chartInnerWidth,
+        chartInnerHeight,
+        chartMaxEpoch,
+        leftAxisDomain,
+        lossDomain: rightAxisDomain ?? leftAxisDomain,
+        useSecondaryAxis,
       }),
-    [primaryMetricIsBounded, primarySeriesValues],
-  );
-  const lossDomain = useMemo(
-    () =>
-      computeSeriesDomain(lossSeriesValues, {
-        useLog: false,
-        clamp01: false,
-      }),
-    [lossSeriesValues],
-  );
-  const combinedDomain = useMemo(
-    () =>
-      computeSeriesDomain(combinedSeriesValues, {
-        useLog: false,
-        clamp01: false,
-      }),
-    [combinedSeriesValues],
-  );
-  const leftAxisDomain = useMemo(() => {
-    if (useSecondaryAxis) return primaryDomain;
-    if (showPrimary && !showValLoss) return primaryDomain;
-    if (!showPrimary && showValLoss) return lossDomain;
-    return combinedDomain;
-  }, [combinedDomain, lossDomain, primaryDomain, showPrimary, showValLoss, useSecondaryAxis]);
-  const rightAxisDomain = useMemo(() => (useSecondaryAxis ? lossDomain : null), [lossDomain, useSecondaryAxis]);
-  const leftAxisTicks = useMemo(
-    () => buildTicks(leftAxisDomain, { count: 5, clamp01: primaryMetricIsBounded && (useSecondaryAxis || (showPrimary && !showValLoss)) }),
-    [leftAxisDomain, primaryMetricIsBounded, showPrimary, showValLoss, useSecondaryAxis],
-  );
-  const rightAxisTicks = useMemo(
-    () => (rightAxisDomain ? buildTicks(rightAxisDomain, { count: 5 }) : []),
-    [rightAxisDomain],
-  );
-  const xTickValues = useMemo(() => {
-    const ticks = buildTicks({ min: 1, max: chartMaxEpoch }, { count: 5 }).map((tick) => Math.max(1, Math.round(tick)));
-    return Array.from(new Set(ticks));
-  }, [chartMaxEpoch]);
-
-  const seriesLegend = useMemo(
-    () => [
-      {
-        key: primaryMetricKey,
-        label: primaryMetricLabel,
-        color: primaryColor,
-        enabled: showPrimary,
-        axis: "left" as const,
-      },
-      {
-        key: "val_loss",
-        label: "val loss",
-        color: lossColor,
-        enabled: showValLoss,
-        axis: useSecondaryAxis ? ("right" as const) : ("left" as const),
-      },
+    [
+      chartHeight,
+      chartInnerHeight,
+      chartInnerWidth,
+      chartMaxEpoch,
+      chartPadding,
+      chartWidth,
+      hoveredEpoch,
+      leftAxisDomain,
+      metrics,
+      rightAxisDomain,
+      seriesLegend,
+      useSecondaryAxis,
     ],
-    [primaryMetricKey, primaryMetricLabel, showPrimary, showValLoss, useSecondaryAxis],
-  );
-
-  const hoveredMetric = useMemo(() => {
-    if (hoveredEpoch == null) return null;
-    let nearest: ExperimentMetricPoint | null = null;
-    let bestDistance = Number.POSITIVE_INFINITY;
-    for (const row of metrics) {
-      const epoch = asEpoch(row.epoch);
-      if (epoch == null) continue;
-      const distance = Math.abs(epoch - hoveredEpoch);
-      if (distance < bestDistance) {
-        bestDistance = distance;
-        nearest = row;
-      }
-    }
-    return nearest;
-  }, [hoveredEpoch, metrics]);
-
-  const hoveredEpochValue = hoveredMetric ? asEpoch(hoveredMetric.epoch) : null;
-  const hoveredX =
-    hoveredEpochValue == null
-      ? null
-      : chartPadding + (((hoveredEpochValue - 1) / Math.max(1, chartMaxEpoch - 1)) * chartInnerWidth);
-  const hoveredSeriesValues = useMemo(() => {
-    if (!hoveredMetric) return [];
-    return seriesLegend
-      .filter((series) => series.enabled)
-      .map((series) => ({
-        key: series.key,
-        label: series.label,
-        color: series.color,
-        value: metricValueByKey(hoveredMetric, series.key),
-      }))
-      .filter((row) => row.value != null) as Array<{ key: string; label: string; color: string; value: number }>;
-  }, [hoveredMetric, seriesLegend]);
-
-  const hoveredPlotRows = useMemo(() => {
-    return hoveredSeriesValues.map((row) => {
-      const domain = useSecondaryAxis && row.key === "val_loss" ? lossDomain : leftAxisDomain;
-      const range = Math.max(1e-9, domain.max - domain.min);
-      const y = chartPadding + (((domain.max - row.value) / range) * chartInnerHeight);
-      return { ...row, y };
-    });
-  }, [chartInnerHeight, chartPadding, hoveredSeriesValues, leftAxisDomain, lossDomain, useSecondaryAxis]);
-
-  const hoverTooltip = useMemo(() => {
-    if (hoveredX == null || hoveredEpochValue == null || hoveredPlotRows.length === 0) return null;
-    const tooltipWidth = 196;
-    const tooltipLineHeight = 15;
-    const tooltipHeight = 28 + (hoveredPlotRows.length * tooltipLineHeight);
-    let x = hoveredX + 10;
-    if (x + tooltipWidth > chartWidth - 6) {
-      x = hoveredX - tooltipWidth - 10;
-    }
-    let y = chartPadding + 10;
-    if (y + tooltipHeight > chartHeight - 8) {
-      y = chartHeight - tooltipHeight - 8;
-    }
-    return { x, y, width: tooltipWidth, height: tooltipHeight };
-  }, [chartHeight, chartPadding, chartWidth, hoveredEpochValue, hoveredPlotRows.length, hoveredX]);
-
-  const primaryLinePoints = useMemo(
-    () =>
-      showPrimary
-        ? buildLinePoints(metrics, primaryMetricKey, {
-            width: chartWidth,
-            height: chartHeight,
-            padding: chartPadding,
-            seriesKeys: chartKeys,
-            domain: leftAxisDomain,
-            useLog: false,
-          })
-        : "",
-    [chartHeight, chartKeys, chartPadding, chartWidth, leftAxisDomain, metrics, primaryMetricKey, showPrimary],
-  );
-  const valLossLinePoints = useMemo(
-    () =>
-      showValLoss
-        ? buildLinePoints(metrics, "val_loss", {
-            width: chartWidth,
-            height: chartHeight,
-            padding: chartPadding,
-            seriesKeys: chartKeys,
-            domain: useSecondaryAxis ? lossDomain : leftAxisDomain,
-            useLog: false,
-          })
-        : "",
-    [chartHeight, chartKeys, chartPadding, chartWidth, leftAxisDomain, lossDomain, metrics, showValLoss, useSecondaryAxis],
   );
 
   function handleChartMouseMove(event: React.MouseEvent<SVGSVGElement>) {
@@ -455,19 +259,7 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
     const svgX = (relativeX / rect.width) * chartWidth;
     const clampedX = Math.max(chartPadding, Math.min(chartPadding + chartInnerWidth, svgX));
     const approximateEpoch = 1 + (((clampedX - chartPadding) / Math.max(1, chartInnerWidth)) * Math.max(1, chartMaxEpoch - 1));
-
-    let nearestEpoch: number | null = null;
-    let bestDistance = Number.POSITIVE_INFINITY;
-    for (const row of metrics) {
-      const epoch = asEpoch(row.epoch);
-      if (epoch == null) continue;
-      const distance = Math.abs(epoch - approximateEpoch);
-      if (distance < bestDistance) {
-        bestDistance = distance;
-        nearestEpoch = epoch;
-      }
-    }
-    setHoveredEpoch(nearestEpoch);
+    setHoveredEpoch(findNearestMetricEpoch(metrics, approximateEpoch));
   }
 
   const modelId = savedRecord?.model_id ?? "";

@@ -1,10 +1,13 @@
 import os
+from pathlib import Path
 import sqlite3
 import tempfile
 import types
 
 from httpx import ASGITransport, AsyncClient
+import pytest
 import pytest_asyncio
+from starlette.responses import Response
 
 _TEST_RUN_ID = str(os.getpid())
 os.environ.setdefault("DATABASE_URL", f"sqlite+aiosqlite:////{tempfile.gettempdir().lstrip('/')}/pixel_sheriff_test_{_TEST_RUN_ID}.db")
@@ -115,6 +118,38 @@ if os.environ["DATABASE_URL"].startswith("sqlite+aiosqlite:"):
 from sheriff_api.db.models import Base
 from sheriff_api.db.session import engine
 from sheriff_api.main import app
+import sheriff_api.routers.assets as assets_router
+import sheriff_api.routers.datasets as datasets_router
+import sheriff_api.routers.experiments.onnx as experiments_onnx_router
+import sheriff_api.routers.models as models_router
+
+
+class _EagerFileResponse(Response):
+    def __init__(
+        self,
+        path: str,
+        *,
+        status_code: int = 200,
+        headers: dict[str, str] | None = None,
+        media_type: str | None = None,
+        filename: str | None = None,
+        background=None,
+        content_disposition_type: str = "attachment",
+        **_kwargs,
+    ) -> None:
+        response_headers = dict(headers or {})
+        if filename is not None:
+            response_headers.setdefault(
+                "content-disposition",
+                f'{content_disposition_type}; filename="{filename}"',
+            )
+        super().__init__(
+            content=Path(path).read_bytes(),
+            status_code=status_code,
+            headers=response_headers,
+            media_type=media_type,
+            background=background,
+        )
 
 
 @pytest_asyncio.fixture(autouse=True)
@@ -128,6 +163,13 @@ async def reset_db() -> None:
         await conn.run_sync(Base.metadata.create_all)
     yield
     await engine.dispose()
+
+
+@pytest.fixture(autouse=True)
+def eager_file_response(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Avoid the sandbox-specific FileResponse thread handoff hang while preserving bytes and headers.
+    for module in (assets_router, datasets_router, models_router, experiments_onnx_router):
+        monkeypatch.setattr(module, "FileResponse", _EagerFileResponse)
 
 
 @pytest_asyncio.fixture
