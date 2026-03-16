@@ -74,11 +74,14 @@ export function DatasetDraftPanel({
   onDiscardDraft: () => void;
   onDuplicateAndEdit: () => void;
 }) {
-  return (
-    <section data-testid="dataset-draft-panel">
-      {mode === "browse" ? (
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
-          <strong>Browsing saved dataset version: {selectedVersionName}</strong>
+  if (mode === "browse") {
+    return (
+      <section className="dataset-draft-panel" data-testid="dataset-draft-panel">
+        <div className="dataset-draft-banner">
+          <div>
+            <strong>Browsing saved version</strong>
+            <p>{selectedVersionName}</p>
+          </div>
           <button
             type="button"
             className="ghost-button"
@@ -89,28 +92,39 @@ export function DatasetDraftPanel({
             Duplicate &amp; Edit
           </button>
         </div>
-      ) : (
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
-          <strong>Draft preview - not saved</strong>
-          <div style={{ display: "flex", gap: 8 }}>
-            <button
-              type="button"
-              className="primary-button"
-              disabled={isCreating}
-              onClick={onCreate}
-              data-testid="dataset-create-version-button"
-            >
-              {isCreating ? "Creating..." : "Create Version"}
-            </button>
-            <button type="button" className="ghost-button" onClick={onDiscardDraft}>
-              Discard Draft
-            </button>
-          </div>
+        <div className="dataset-draft-empty">
+          <h3>Create Version</h3>
+          <p>Duplicate this version when you want to tweak filters, split ratios, or class-balancing rules.</p>
         </div>
-      )}
+      </section>
+    );
+  }
+
+  return (
+    <section className="dataset-draft-panel" data-testid="dataset-draft-panel">
+      <div className="dataset-draft-banner">
+        <div>
+          <strong>Draft preview</strong>
+          <p>Unsaved changes stay local until you create a new version.</p>
+        </div>
+        <div className="dataset-draft-banner-actions">
+          <button
+            type="button"
+            className="primary-button"
+            disabled={isCreating}
+            onClick={onCreate}
+            data-testid="dataset-create-version-button"
+          >
+            {isCreating ? "Creating..." : "Create Version"}
+          </button>
+          <button type="button" className="ghost-button" onClick={onDiscardDraft}>
+            Discard Draft
+          </button>
+        </div>
+      </div>
 
       <h3>Create Version</h3>
-      <div style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(2, minmax(0, 1fr))" }}>
+      <div className="dataset-draft-form-grid">
         <label className="project-field">
           <span>Name</span>
           <input data-testid="dataset-draft-name" value={draftName} onChange={(event) => onDraftNameChange(event.target.value)} />
@@ -138,7 +152,7 @@ export function DatasetDraftPanel({
         </label>
       </div>
 
-      <div style={{ display: "grid", gap: 8, marginTop: 8, gridTemplateColumns: "repeat(2, minmax(0, 1fr))" }}>
+      <div className="dataset-draft-filter-grid">
         <StatusMultiSelectDropdown
           label="Include statuses"
           selected={includeStatuses}
@@ -171,11 +185,11 @@ export function DatasetDraftPanel({
         />
       </div>
 
-      <p style={{ marginTop: 6, marginBottom: 0, fontSize: 12, color: "var(--muted, #6f7b8a)" }}>
+      <p className="dataset-draft-note">
         Exclude statuses: {excludeStatuses.length === 0 ? "none" : excludeStatuses.join(", ")}
       </p>
 
-      <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+      <div className="dataset-draft-toggle-row">
         <label className="model-builder-checkbox">
           <input type="checkbox" checked={includeLabeledOnly} onChange={(event) => onIncludeLabeledOnlyChange(event.target.checked)} />
           <span>Labeled only</span>
@@ -191,7 +205,7 @@ export function DatasetDraftPanel({
           <span>Stratify by primary label</span>
         </label>
       </div>
-      <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+      <div className="dataset-draft-actions">
         <button
           type="button"
           className="ghost-button"

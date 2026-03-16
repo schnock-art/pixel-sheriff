@@ -108,7 +108,13 @@ export default function ModelsPage({ params }: ModelsPageProps) {
   return (
     <ProjectSectionLayout
       title="Models"
-      description="Create architecture drafts tied to dataset versions, review model readiness, and move into experiments with a clearer training pipeline."
+      description="Create architecture drafts, review readiness, and move into experiments."
+      titleHelp={
+        <>
+          <p>Models are lightweight architecture drafts tied to dataset versions.</p>
+          <p>Use this page to compare readiness at a glance, then open a model to edit or launch training.</p>
+        </>
+      }
       actions={
         <Link className="primary-button" href={createHref} data-testid="new-model-button">
           + New Model

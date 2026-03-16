@@ -99,6 +99,7 @@ export default function ProjectAssetsWorkspace() {
   const [geometryCategoryId, setGeometryCategoryId] = useState<string | null>(null);
   const [hoveredGeometryObjectId, setHoveredGeometryObjectId] = useState<string | null>(null);
   const [sequencePauseSignal, setSequencePauseSignal] = useState(0);
+  const [rightRailTab, setRightRailTab] = useState<"labels" | "prelabels">("labels");
   const reloadPrelabelsRef = useRef<null | (() => Promise<void>)>(null);
   const projectAnnotationMode = useMemo(() => taskKindToAnnotationMode(selectedTask?.kind), [selectedTask?.kind]);
 
@@ -621,7 +622,13 @@ export default function ProjectAssetsWorkspace() {
     <>
       <ProjectSectionLayout
         title="Labeling"
-        description={`Manage imported assets, annotate images, and move cleanly into dataset creation. Current scope: ${headerTitle}`}
+        description={`Annotate assets and prepare clean scope-based datasets. Current scope: ${headerTitle}`}
+        titleHelp={
+          <>
+            <p>This workspace is optimized around three columns: asset scope, canvas review, and the active right-rail toolset.</p>
+            <p>Use folder scope for batch prediction passes, then move accepted work forward into dataset creation.</p>
+          </>
+        }
         actions={
           <button
             type="button"
@@ -756,78 +763,104 @@ export default function ProjectAssetsWorkspace() {
           </div>
 
           <div className="label-sidebar-column">
-            <LabelPanel
-              labels={activeLabelRows}
-              allLabels={allLabelRows}
-              selectedLabelIds={effectiveSelectedLabelIds}
-              onToggleLabel={handleToggleLabelForCurrentMode}
-              onClearLabels={clearSelectedLabels}
-              onSubmit={handleSubmit}
-              isSaving={isSaving}
-              onCreateLabel={handleCreateLabel}
-              isCreatingLabel={isCreatingLabel}
-              editMode={editMode}
-              onToggleEditMode={() => setEditMode((value) => !value)}
-              pendingCount={pendingCount}
-              onSaveLabelChanges={handleSaveLabelChanges}
-              isSavingLabelChanges={isSavingLabelChanges}
-              onDeleteLabel={handleDeleteLabel}
-              deletingLabelId={deletingLabelId}
-              labelsLocked={isTaskLabelsLocked}
-              canSubmit={canSubmit}
-              multiLabelEnabled={multiLabelEnabled}
-              onToggleMultiLabel={() => setMessage("Classification label mode is controlled by the selected task.")}
-              annotationMode={annotationMode}
-              projectMode={projectAnnotationMode}
-              onChangeAnnotationMode={handleChangeAnnotationMode}
-              selectedObjectId={selectedObjectId}
-              geometryObjectCount={currentObjects.length}
-              geometryObjects={geometryObjectRows}
-              hoveredObjectId={hoveredGeometryObjectId}
-              onHoverObject={setHoveredGeometryObjectId}
-              onSelectObject={handleSelectGeometryObject}
-              onDeleteSelectedObject={deleteSelectedGeometryObject}
-              availableDeployments={suggestionState.availableDeployments}
-              selectedDeploymentId={suggestionState.selectedDeploymentId}
-              selectedDeploymentName={suggestionState.selectedDeployment?.name ?? null}
-              selectedDeploymentDevicePreference={suggestionState.selectedDeployment?.device_preference ?? null}
-              lastInferenceDeviceSelected={suggestionState.lastInferenceDeviceSelected}
-              pendingReview={suggestionState.pendingReview}
-              selectedReviewItemId={suggestionState.selectedReviewItemId}
-              suggestionScoreThreshold={suggestionState.suggestionScoreThreshold}
-              onChangeSuggestionScoreThreshold={suggestionState.setSuggestionScoreThreshold}
-              isSuggesting={suggestionState.isSuggesting}
-              isBatchSuggesting={suggestionState.isBatchSuggesting}
-              hasPendingReview={suggestionState.hasPendingReview}
-              hasCompatibleDeployment={suggestionState.availableDeployments.length > 0}
-              selectedFolderPath={treeState.selectedTreeFolderPath}
-              selectedFolderAssetCount={treeState.selectedFolderAssetCount}
-              batchPredictionSummary={suggestionState.batchPredictionSummary}
-              currentAssetReviewStatus={suggestionState.currentAssetReviewStatus}
-              onChangeSelectedDeploymentId={suggestionState.setSelectedDeploymentId}
-              onSuggest={suggestionState.handleSuggest}
-              onSuggestFolder={suggestionState.handleSuggestFolder}
-              onSelectReviewItem={suggestionState.setSelectedReviewItemId}
-              onDeleteSelectedPredictionReviewItem={suggestionState.deleteSelectedPendingBBoxReviewItem}
-              onAcceptReview={suggestionState.acceptReview}
-              onRejectReview={suggestionState.rejectReview}
-              annotationEditingDisabled={suggestionState.hasPendingReview}
-            />
-            <AiPrelabelsPanel
-              session={prelabelState.session}
-              proposals={prelabelState.proposals}
-              selectedProposalId={prelabelState.selectedProposalId}
-              onSelectProposal={prelabelState.setSelectedProposalId}
-              onAcceptSelected={prelabelState.acceptSelectedProposal}
-              onRejectSelected={prelabelState.rejectSelectedProposal}
-              onAcceptCurrentFrame={prelabelState.acceptCurrentFrame}
-              onRejectCurrentFrame={prelabelState.rejectCurrentFrame}
-              onAcceptFullSession={prelabelState.acceptFullSession}
-              onEditSelected={prelabelState.editSelectedProposal}
-              isLoading={prelabelState.isLoading}
-              isApplying={prelabelState.isApplying}
-              errorMessage={prelabelState.error?.message ?? null}
-            />
+            <div className="workspace-side-tabs" role="tablist" aria-label="Right rail">
+              <button
+                type="button"
+                className={rightRailTab === "labels" ? "workspace-side-tab active" : "workspace-side-tab"}
+                onClick={() => setRightRailTab("labels")}
+                role="tab"
+                aria-selected={rightRailTab === "labels"}
+              >
+                Labels
+              </button>
+              <button
+                type="button"
+                className={rightRailTab === "prelabels" ? "workspace-side-tab active" : "workspace-side-tab"}
+                onClick={() => setRightRailTab("prelabels")}
+                role="tab"
+                aria-selected={rightRailTab === "prelabels"}
+              >
+                AI Prelabels
+                {prelabelState.proposals.length > 0 ? <span className="workspace-side-tab-count">{prelabelState.proposals.length}</span> : null}
+              </button>
+            </div>
+            <div className="workspace-side-panel">
+              {rightRailTab === "labels" ? (
+                <LabelPanel
+                  labels={activeLabelRows}
+                  allLabels={allLabelRows}
+                  selectedLabelIds={effectiveSelectedLabelIds}
+                  onToggleLabel={handleToggleLabelForCurrentMode}
+                  onClearLabels={clearSelectedLabels}
+                  onSubmit={handleSubmit}
+                  isSaving={isSaving}
+                  onCreateLabel={handleCreateLabel}
+                  isCreatingLabel={isCreatingLabel}
+                  editMode={editMode}
+                  onToggleEditMode={() => setEditMode((value) => !value)}
+                  pendingCount={pendingCount}
+                  onSaveLabelChanges={handleSaveLabelChanges}
+                  isSavingLabelChanges={isSavingLabelChanges}
+                  onDeleteLabel={handleDeleteLabel}
+                  deletingLabelId={deletingLabelId}
+                  labelsLocked={isTaskLabelsLocked}
+                  canSubmit={canSubmit}
+                  multiLabelEnabled={multiLabelEnabled}
+                  onToggleMultiLabel={() => setMessage("Classification label mode is controlled by the selected task.")}
+                  annotationMode={annotationMode}
+                  projectMode={projectAnnotationMode}
+                  onChangeAnnotationMode={handleChangeAnnotationMode}
+                  selectedObjectId={selectedObjectId}
+                  geometryObjectCount={currentObjects.length}
+                  geometryObjects={geometryObjectRows}
+                  hoveredObjectId={hoveredGeometryObjectId}
+                  onHoverObject={setHoveredGeometryObjectId}
+                  onSelectObject={handleSelectGeometryObject}
+                  onDeleteSelectedObject={deleteSelectedGeometryObject}
+                  availableDeployments={suggestionState.availableDeployments}
+                  selectedDeploymentId={suggestionState.selectedDeploymentId}
+                  selectedDeploymentName={suggestionState.selectedDeployment?.name ?? null}
+                  selectedDeploymentDevicePreference={suggestionState.selectedDeployment?.device_preference ?? null}
+                  lastInferenceDeviceSelected={suggestionState.lastInferenceDeviceSelected}
+                  pendingReview={suggestionState.pendingReview}
+                  selectedReviewItemId={suggestionState.selectedReviewItemId}
+                  suggestionScoreThreshold={suggestionState.suggestionScoreThreshold}
+                  onChangeSuggestionScoreThreshold={suggestionState.setSuggestionScoreThreshold}
+                  isSuggesting={suggestionState.isSuggesting}
+                  isBatchSuggesting={suggestionState.isBatchSuggesting}
+                  hasPendingReview={suggestionState.hasPendingReview}
+                  hasCompatibleDeployment={suggestionState.availableDeployments.length > 0}
+                  selectedFolderPath={treeState.selectedTreeFolderPath}
+                  selectedFolderAssetCount={treeState.selectedFolderAssetCount}
+                  batchPredictionSummary={suggestionState.batchPredictionSummary}
+                  currentAssetReviewStatus={suggestionState.currentAssetReviewStatus}
+                  onChangeSelectedDeploymentId={suggestionState.setSelectedDeploymentId}
+                  onSuggest={suggestionState.handleSuggest}
+                  onSuggestFolder={suggestionState.handleSuggestFolder}
+                  onSelectReviewItem={suggestionState.setSelectedReviewItemId}
+                  onDeleteSelectedPredictionReviewItem={suggestionState.deleteSelectedPendingBBoxReviewItem}
+                  onAcceptReview={suggestionState.acceptReview}
+                  onRejectReview={suggestionState.rejectReview}
+                  annotationEditingDisabled={suggestionState.hasPendingReview}
+                />
+              ) : (
+                <AiPrelabelsPanel
+                  session={prelabelState.session}
+                  proposals={prelabelState.proposals}
+                  selectedProposalId={prelabelState.selectedProposalId}
+                  onSelectProposal={prelabelState.setSelectedProposalId}
+                  onAcceptSelected={prelabelState.acceptSelectedProposal}
+                  onRejectSelected={prelabelState.rejectSelectedProposal}
+                  onAcceptCurrentFrame={prelabelState.acceptCurrentFrame}
+                  onRejectCurrentFrame={prelabelState.rejectCurrentFrame}
+                  onAcceptFullSession={prelabelState.acceptFullSession}
+                  onEditSelected={prelabelState.editSelectedProposal}
+                  isLoading={prelabelState.isLoading}
+                  isApplying={prelabelState.isApplying}
+                  errorMessage={prelabelState.error?.message ?? null}
+                />
+              )}
+            </div>
           </div>
           </div>
         </div>

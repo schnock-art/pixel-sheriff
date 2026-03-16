@@ -1,6 +1,7 @@
 import type { PrelabelProposal, PrelabelSession } from "../../../lib/api";
 import { resolvePrelabelBBox } from "../../../lib/workspace/prelabelGeometry.js";
 import { derivePrelabelSessionStatus } from "../../../lib/workspace/prelabelStatus.js";
+import { HelpPopover } from "../HelpPopover";
 
 interface AiPrelabelsPanelProps {
   session: PrelabelSession | null;
@@ -59,7 +60,13 @@ export function AiPrelabelsPanel({
     <section className="ai-prelabels-panel" aria-label="AI prelabels panel" data-testid="ai-prelabels-panel">
       <div className="ai-prelabels-head">
         <div>
-          <h4>AI Prelabels</h4>
+          <div className="ai-prelabels-heading-row">
+            <h4>AI Prelabels</h4>
+            <HelpPopover label="AI prelabels help" title="AI Prelabels">
+              <p>Prelabels are sequence proposals kept separate from saved annotations until you accept or edit them.</p>
+              <p>Use frame or session actions for fast review when the proposals look clean.</p>
+            </HelpPopover>
+          </div>
           {session && sessionStatusView ? (
             <div className="ai-prelabels-status-row">
               <span

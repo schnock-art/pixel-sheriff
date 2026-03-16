@@ -43,7 +43,13 @@ export default function DatasetPage({ params }: DatasetPageProps) {
   return (
     <ProjectSectionLayout
       title="Dataset"
-      description="Turn labeled assets into versioned datasets, inspect splits, export packages, and move cleanly into model creation."
+      description="Turn reviewed assets into versioned datasets and move them cleanly into model creation."
+      titleHelp={
+        <>
+          <p>Saved versions stay on the left, the active edit surface stays in the center, and split/class summary stays on the right.</p>
+          <p>Duplicate an existing version to branch filters or split settings without overwriting prior work.</p>
+        </>
+      }
       actions={
         <>
           <button

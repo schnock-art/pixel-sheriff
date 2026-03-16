@@ -23,9 +23,11 @@ export function DatasetVersionsPanel({
   onExport: () => void;
 }) {
   return (
-    <section className="placeholder-card" data-testid="dataset-versions-panel">
-      <h3>Versions</h3>
-      <div style={{ display: "grid", gap: 8 }}>
+    <section className="placeholder-card dataset-side-panel dataset-versions-panel" data-testid="dataset-versions-panel">
+      <div className="dataset-panel-head">
+        <h3>Versions</h3>
+      </div>
+      <div className="dataset-version-list">
         {isLoadingVersions ? <p>Loading versions...</p> : null}
         {!isLoadingVersions && versions.length === 0 ? <p>No dataset versions yet.</p> : null}
         {versions.map((item) => {
@@ -40,9 +42,8 @@ export function DatasetVersionsPanel({
             <button
               key={id}
               type="button"
-              className={isSelected ? "ghost-button active-toggle" : "ghost-button"}
+              className={isSelected ? "dataset-version-item active" : "dataset-version-item"}
               onClick={() => onSelectVersion(id)}
-              style={{ justifyContent: "space-between", display: "flex", alignItems: "center" }}
               data-testid="dataset-version-item"
               data-dataset-version-id={id}
             >
@@ -56,7 +57,7 @@ export function DatasetVersionsPanel({
         })}
       </div>
       {selectedDatasetVersionId ? (
-        <div style={{ marginTop: 12, display: "grid", gap: 8 }}>
+        <div className="dataset-side-actions">
           <button
             type="button"
             className="ghost-button"

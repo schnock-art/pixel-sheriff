@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 
 import type { AnnotationStatus } from "../../../lib/api";
 import { type TreeEntry } from "../../../lib/workspace/tree";
+import { HelpPopover } from "../HelpPopover";
 import { ImportMenu } from "./ImportMenu";
 import { SequenceStatusBadge } from "./SequenceStatusBadge";
 
@@ -86,6 +87,7 @@ export function AssetBrowser({
   onChangeFilterCategoryId,
 }: AssetBrowserProps) {
   const [searchText, setSearchText] = useState("");
+  const [showDangerzone, setShowDangerzone] = useState(false);
   const filteredEntries = useMemo(() => {
     const query = searchText.trim().toLowerCase();
     if (!query) return visibleTreeEntries;
@@ -96,14 +98,20 @@ export function AssetBrowser({
     <aside className="asset-browser" data-testid="asset-browser">
       <section className="placeholder-card asset-browser-panel" data-testid="asset-browser-panel">
         <div className="asset-browser-head">
-          <div>
-            <h3>Assets</h3>
-            <p>Browse folders, import images, and manage the current labeling scope.</p>
+          <div className="asset-browser-title-row">
+            <div>
+              <h3>Assets</h3>
+              <p>Browse, filter, and set the current folder scope.</p>
+            </div>
+            <HelpPopover label="Assets help" title="Assets">
+              <p>Use folder scope to batch predictions or review a subset of the project.</p>
+              <p>Delete actions stay tucked away until you need them.</p>
+            </HelpPopover>
           </div>
           <div className="asset-browser-head-actions">
             <ImportMenu onImportImages={onImportImages} onImportVideo={onImportVideo} onImportWebcam={onOpenWebcam} />
-            <button type="button" className="ghost-button" disabled title="Folder creation is not wired yet">
-              New Folder
+            <button type="button" className="ghost-button" onClick={() => setShowDangerzone((value) => !value)}>
+              {showDangerzone ? "Hide Delete Tools" : "Delete Tools"}
             </button>
           </div>
         </div>
@@ -244,58 +252,60 @@ export function AssetBrowser({
           ))}
         </ul>
 
-        <div className="asset-browser-dangerzone">
-          <div className="asset-browser-dangerzone-head">
-            <h4>Danger Zone</h4>
-            <button
-              type="button"
-              className={bulkDeleteMode ? "ghost-button active-toggle" : "ghost-button"}
-              onClick={onToggleBulkDeleteMode}
-              disabled={!selectedProjectId || isDeletingAssets}
-            >
-              {bulkDeleteMode ? "Exit Multi-delete" : "Multi-delete"}
-            </button>
-          </div>
-          {bulkDeleteMode ? (
-            <div className="asset-browser-dangerzone-actions">
-              <button type="button" className="ghost-button" onClick={onSelectAllDeleteScope} disabled={isDeletingAssets}>
-                Select Scope
-              </button>
-              <button type="button" className="ghost-button" onClick={onClearDeleteSelection} disabled={isDeletingAssets}>
-                Clear
+        {showDangerzone ? (
+          <div className="asset-browser-dangerzone">
+            <div className="asset-browser-dangerzone-head">
+              <h4>Delete Tools</h4>
+              <button
+                type="button"
+                className={bulkDeleteMode ? "ghost-button active-toggle" : "ghost-button"}
+                onClick={onToggleBulkDeleteMode}
+                disabled={!selectedProjectId || isDeletingAssets}
+              >
+                {bulkDeleteMode ? "Exit Multi-delete" : "Multi-delete"}
               </button>
             </div>
-          ) : null}
-          <div className="asset-browser-dangerzone-actions">
-            <button type="button" className="ghost-button danger-button" onClick={onDeleteCurrentAsset} disabled={isDeletingAssets}>
-              Remove Image
-            </button>
-            <button
-              type="button"
-              className="ghost-button danger-button"
-              onClick={onDeleteSelectedAssets}
-              disabled={isDeletingAssets || selectedDeleteAssetIdsLength === 0}
-            >
-              Delete Selected ({selectedDeleteAssetIdsLength})
-            </button>
-            <button
-              type="button"
-              className="ghost-button danger-button"
-              onClick={onDeleteSelectedFolder}
-              disabled={isDeletingAssets || !selectedTreeFolderPath}
-            >
-              Delete Folder
-            </button>
-            <button
-              type="button"
-              className="ghost-button danger-button"
-              onClick={onDeleteCurrentProject}
-              disabled={isDeletingAssets || !selectedProjectId}
-            >
-              Delete Project
-            </button>
+            {bulkDeleteMode ? (
+              <div className="asset-browser-dangerzone-actions">
+                <button type="button" className="ghost-button" onClick={onSelectAllDeleteScope} disabled={isDeletingAssets}>
+                  Select Scope
+                </button>
+                <button type="button" className="ghost-button" onClick={onClearDeleteSelection} disabled={isDeletingAssets}>
+                  Clear
+                </button>
+              </div>
+            ) : null}
+            <div className="asset-browser-dangerzone-actions">
+              <button type="button" className="ghost-button danger-button" onClick={onDeleteCurrentAsset} disabled={isDeletingAssets}>
+                Remove Image
+              </button>
+              <button
+                type="button"
+                className="ghost-button danger-button"
+                onClick={onDeleteSelectedAssets}
+                disabled={isDeletingAssets || selectedDeleteAssetIdsLength === 0}
+              >
+                Delete Selected ({selectedDeleteAssetIdsLength})
+              </button>
+              <button
+                type="button"
+                className="ghost-button danger-button"
+                onClick={onDeleteSelectedFolder}
+                disabled={isDeletingAssets || !selectedTreeFolderPath}
+              >
+                Delete Folder
+              </button>
+              <button
+                type="button"
+                className="ghost-button danger-button"
+                onClick={onDeleteCurrentProject}
+                disabled={isDeletingAssets || !selectedProjectId}
+              >
+                Delete Project
+              </button>
+            </div>
           </div>
-        </div>
+        ) : null}
       </section>
     </aside>
   );

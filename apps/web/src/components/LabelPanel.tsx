@@ -2,6 +2,7 @@
 
 import { type CSSProperties, type FormEvent, useEffect, useState } from "react";
 import { getClassColor } from "../lib/workspace/classColors";
+import { HelpPopover } from "./workspace/HelpPopover";
 
 export type AnnotationMode = "labels" | "bbox" | "segmentation";
 
@@ -292,9 +293,13 @@ export function LabelPanel({
         ) : null}
       </div>
       {labelsLocked ? (
-        <p className="label-lock-notice">
-          Labels are locked for this task because dataset versions already exist. Create a new task to evolve classes safely.
-        </p>
+        <div className="label-lock-notice">
+          <span>Labels are locked for this task.</span>
+          <HelpPopover label="Why labels are locked" title="Locked labels">
+            <p>Dataset versions already exist for this task, so class edits are disabled to keep versions reproducible.</p>
+            <p>Create a new task if you need to evolve the class list safely.</p>
+          </HelpPopover>
+        </div>
       ) : null}
       {annotationMode === "labels" ? (
         <button
@@ -310,8 +315,14 @@ export function LabelPanel({
       {annotationMode !== "labels" ? (
         <>
           <div className="label-section-head">
-            <h4>Objects</h4>
-            <span>{modeLabelText()}</span>
+            <div className="label-section-head-main">
+              <h4>Objects</h4>
+              <span>{modeLabelText()}</span>
+            </div>
+            <HelpPopover label="Objects help" title="Objects">
+              <p>Select an object on the canvas to retag or delete it.</p>
+              <p>Draw first, then assign a class if you are starting a new object.</p>
+            </HelpPopover>
           </div>
           <p className="labels-empty">
             {geometryObjectCount} object{geometryObjectCount === 1 ? "" : "s"} on this image.
@@ -420,10 +431,16 @@ export function LabelPanel({
       ) : (
         <>
           <div className="label-section-head">
-            <h4>Classes</h4>
-            {annotationMode === "labels" ? null : (
-              <span>{selectedObjectId ? "Click to assign selected object." : "Click to set default for new objects."}</span>
-            )}
+            <div className="label-section-head-main">
+              <h4>Classes</h4>
+              {annotationMode === "labels" ? null : <span>{selectedObjectId ? "Assign selected object" : "Set default for new objects"}</span>}
+            </div>
+            {annotationMode !== "labels" ? (
+              <HelpPopover label="Class assignment help" title="Classes">
+                <p>Select an object first to retag it.</p>
+                <p>If no object is selected, the class becomes the default for the next box or polygon you draw.</p>
+              </HelpPopover>
+            ) : null}
           </div>
           {annotationMode === "labels" ? (
             <p className="label-selection-summary">
@@ -466,7 +483,16 @@ export function LabelPanel({
 
       {annotationMode === "labels" || annotationMode === "bbox" ? (
         <section className="placeholder-card">
-          <h4>Suggestions</h4>
+          <div className="label-section-head inline-card-head">
+            <div className="label-section-head-main">
+              <h4>Suggestions</h4>
+              <span>Deployment-assisted review</span>
+            </div>
+            <HelpPopover label="Suggestions help" title="Suggestions">
+              <p>Suggestions are review-first helpers. Accept or reject them before normal editing resumes.</p>
+              <p>Select a folder in Assets to run a batch prediction pass across the current scope.</p>
+            </HelpPopover>
+          </div>
           {hasCompatibleDeployment ? (
             <>
               <label className="project-field">
@@ -637,8 +663,17 @@ export function LabelPanel({
       </div>
 
       <section className="placeholder-card annotation-shortcuts">
-        <h4>Shortcut Readiness</h4>
-        <p className="labels-empty">E = select | W = draw box | Del = delete | 1-9 = assign class | A / D = previous / next image</p>
+        <div className="label-section-head inline-card-head">
+          <div className="label-section-head-main">
+            <h4>Shortcuts</h4>
+            <span>Keyboard-ready</span>
+          </div>
+          <HelpPopover label="Shortcut help" title="Shortcuts">
+            <p>E = select, W = draw box, Del = delete.</p>
+            <p>Use 1-9 to assign classes and A / D to move between images.</p>
+          </HelpPopover>
+        </div>
+        <p className="labels-empty">Use keyboard shortcuts while reviewing or annotating.</p>
       </section>
     </aside>
   );
