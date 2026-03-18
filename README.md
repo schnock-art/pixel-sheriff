@@ -1,6 +1,6 @@
 # pixel-sheriff
 
-Local-first labeling, dataset, training, deployment, and AI-prelabel platform for images plus frame-based video and webcam workflows.
+Local-first computer vision workflow for labeling assets, building datasets, training models, deploying them, and reviewing AI-assisted predictions in one place.
 
 ## Product Demo
 
@@ -29,27 +29,43 @@ Generated from the deterministic `README Demo` project in `docs/demo/` via `./sc
   <img src="docs/demo/screenshot-09-mal.png" alt="Labeling workspace showing pending deployment-assisted MAL predictions for the hero asset" width="49%" />
 </p>
 
-## What It Does
+## What Pixel Sheriff Does
 
-Pixel Sheriff is image-first even when the source is a video file or live camera:
+Pixel Sheriff is built for computer vision projects that need more than just annotation. It lets you move from raw assets to dataset versions, experiments, deployments, and model-assisted review inside one project-scoped workflow.
 
-- images are normal assets
+It is image-first even when the source starts as a video file or live webcam stream:
+
+- image files are stored as normal assets
 - video imports extract frames into a sequence folder
 - webcam capture uploads frames into a live sequence folder
 - all labeling happens in the same asset workspace
-- datasets and exports remain frame-based
+- datasets, exports, and downstream workflows remain frame-based
+
+## What It Is For
+
+Pixel Sheriff is a fit for teams who want to:
+
+- label and review computer vision data locally
+- treat images, video frames, and webcam captures as part of one workflow
+- create immutable dataset versions for repeatable training
+- run experiments and keep model history tied to the project
+- deploy a trained model and use its predictions as review-first suggestions during labeling
+
+## Supported Tasks
 
 Current task modes:
+
 - `classification`
 - `bbox`
 - `segmentation`
 
-Current AI-assisted workflow:
-- review-first deployment predictions for the active asset, plus folder-scoped batch prediction review in `classification` and `bbox` tasks
-- sequence-first AI prelabels for bbox tasks
+Current AI-assisted workflows:
+
+- review-first deployment predictions for the active asset, plus folder-scoped batch prediction review in `classification` and `bbox`
+- sequence-first AI prelabels for `bbox` tasks
 - pending prelabels stored separately from normal annotations until accepted or edited
 
-## Current Product Model
+## End-to-End Flow
 
 ```text
 image files
@@ -72,7 +88,7 @@ video file / webcam stream
 - project-scoped shell with task selector and task-aware routes
 - folder tree plus searchable asset browser
 - image import, video import, and webcam capture
-- sequence navigation for video/webcam frames
+- sequence navigation for video and webcam frames
 - classification, bbox, and polygon annotation tools
 - staged edit workflow plus direct submit
 - immutable dataset versions with saved split membership
@@ -81,34 +97,21 @@ video file / webcam stream
 - review-first deployment predictions with preview, accept, and reject in labeling
 - bbox prelabel sessions for video and webcam review flows
 
-## Runtime Topology
+## Typical Workflow
 
-Default services:
-
-- `apps/web`: Next.js frontend
-- `apps/api`: FastAPI backend
-- `apps/worker`: Redis-backed media and prelabel worker
-- `apps/trainer`: training plus inference service
-- `db`: PostgreSQL
-- `redis`: queues
-
-High-level flow:
-
-```text
-browser
--> web
--> api
-   -> postgres
-   -> redis -> worker
-   -> trainer
-```
-
-Important behavior:
-
-- `make up` starts the full stack
-- `make up-web-api` is a lighter loop and does not start the worker or trainer
-- video extraction requires the worker
-- training, deployment inference, and Florence prelabels require the trainer
+1. Create or select a project.
+2. Select or create a task from the ribbon.
+3. Use `Import` for images, `Video File` for extraction, or `Webcam Stream` for live capture.
+4. Label assets in the main workspace.
+5. For sequence-backed assets, use the timeline, thumbnails, and frame controls.
+6. For `bbox` tasks, optionally enable AI prelabels during video import or webcam capture.
+7. Review pending AI prelabels and promote accepted or edited proposals into annotations.
+8. Create a dataset version.
+9. Create or edit a model.
+10. Launch and monitor experiments.
+11. Deploy a completed experiment and use deployment predictions in labeling.
+12. Review the prediction, then `Accept` to stage it into the draft or `Reject` to keep the prior draft unchanged.
+13. Use `Submit` to persist accepted draft changes.
 
 ## Quickstart
 
@@ -142,21 +145,34 @@ make up
 - API docs: `http://localhost:8010/docs`
 - API base: `http://localhost:8010/api/v1`
 
-## Typical Workflow
+## Runtime Topology
 
-1. Create or select a project.
-2. Select or create a task from the ribbon.
-3. Use `Import` for images, `Video File` for extraction, or `Webcam Stream` for live capture.
-4. Label assets in the main workspace.
-5. For sequence-backed assets, use the timeline, thumbnails, and frame controls.
-6. For bbox tasks, optionally enable AI prelabels during video import or webcam capture.
-7. Review pending AI prelabels in the dedicated workspace panel and promote accepted or edited proposals into annotations.
-8. Create a dataset version.
-9. Create or edit a model.
-10. Launch and monitor experiments.
-11. Deploy a completed experiment and use deployment predictions in labeling.
-12. Review the prediction, then `Accept` to stage it into the draft or `Reject` to keep the prior draft unchanged.
-13. Use `Submit` to persist accepted draft changes.
+Default services:
+
+- `apps/web`: Next.js frontend
+- `apps/api`: FastAPI backend
+- `apps/worker`: Redis-backed media and prelabel worker
+- `apps/trainer`: training plus inference service
+- `db`: PostgreSQL
+- `redis`: queues
+
+High-level flow:
+
+```text
+browser
+-> web
+-> api
+   -> postgres
+   -> redis -> worker
+   -> trainer
+```
+
+Important behavior:
+
+- `make up` starts the full stack
+- `make up-web-api` is a lighter loop and does not start the worker or trainer
+- video extraction requires the worker
+- training, deployment inference, and Florence prelabels require the trainer
 
 ## Deployment Predictions
 
@@ -174,20 +190,18 @@ Current review behavior:
 - while a pending bbox review exists, the normal draft remains locked but the predicted boxes themselves can be selected, moved, resized, and deleted before accept
 - `Reject prediction` clears the pending review and leaves the existing draft unchanged
 - `Accept selected` or `Accept prediction` copies the reviewed result into the normal draft
-- folder review accept/reject auto-advances to the next pending image when one exists
+- folder review accept or reject auto-advances to the next pending image when one exists
 - accepted predictions are not saved until the normal `Submit` action runs
 
 Task-specific behavior:
 
-- classification:
-  - the UI shows a ranked prediction list
-  - you can choose a non-top-1 row before accepting
-  - accepting stages exactly one class selection and stores shared `prediction_review` metadata in the annotation payload
-- bbox:
-  - the UI shows predicted boxes as a separate preview overlay on top of the image
-  - pending predicted boxes can be edited or deleted before accept
-  - accepting replaces the asset's current draft object set with the reviewed prediction
-  - accepted boxes keep `deployment_prediction` provenance including model name, confidence, and review decision
+- classification: the UI shows a ranked prediction list
+- classification: you can choose a non-top-1 row before accepting
+- classification: accepting stages exactly one class selection and stores shared `prediction_review` metadata in the annotation payload
+- bbox: the UI shows predicted boxes as a separate preview overlay on top of the image
+- bbox: pending predicted boxes can be edited or deleted before accept
+- bbox: accepting replaces the asset's current draft object set with the reviewed prediction
+- bbox: accepted boxes keep `deployment_prediction` provenance including model name, confidence, and review decision
 
 Current limitations:
 
@@ -198,22 +212,16 @@ Current limitations:
 
 Implemented today:
 
-- bbox-only
-- sources:
-  - `active_deployment`
-  - `florence2`
-- video:
-  - session created from `prelabel_config`
-  - jobs auto-start after frame extraction
-- webcam:
-  - live session created at capture start
-  - sampled frames enqueue while capture is running
-  - modal finish closes input for the live session
+- `bbox` only
+- sources: `active_deployment`, `florence2`
+- video: a session is created from `prelabel_config` and jobs auto-start after frame extraction
+- webcam: a live session is created at capture start and sampled frames enqueue while capture is running
+- webcam: modal finish closes input for the live session
 
 Review behavior:
 
 - pending proposals stay out of normal annotations
-- reviewed proposal geometry/category, when present, are treated as the source of truth for display, edit, and accept; otherwise the original proposal bbox/category are used
+- reviewed proposal geometry and category, when present, become the source of truth for display, edit, and accept
 - `Accept` merges the effective reviewed-or-original proposal state into the asset annotation payload
 - `Edit selected` loads the effective reviewed-or-original proposal state into the normal bbox draft with provenance
 - saved provenance-backed objects mark proposals as `accepted` or `edited`
@@ -221,11 +229,11 @@ Review behavior:
 Deployment predictions and AI prelabels are intentionally separate:
 
 - deployment predictions are review-first helpers in the main labeling panel for the current asset or the current folder queue
-- AI prelabels are session-driven bbox proposals for video and webcam review
+- AI prelabels are session-driven `bbox` proposals for video and webcam review
 
 ## Storage Model
 
-Database state:
+Database state includes:
 
 - projects
 - tasks
@@ -238,11 +246,11 @@ Database state:
 - prelabel proposals
 - suggestions
 
-File-backed storage under `./data`:
+File-backed storage under `./data` includes:
 
 - uploaded assets
 - imported videos
-- dataset/version records
+- dataset and version records
 - export zips
 - model records
 - experiment artifacts
@@ -316,7 +324,7 @@ Current docs:
 
 Other folders:
 
-- `docs/demo/` contains generated README/demo media
+- `docs/demo/` contains generated README and demo media
 - `docs/plans/` contains dated design notes, active trackers, and plan snapshots
 - `docs/archive/` contains historical notes moved out of the former `docu/` directory
 
@@ -349,6 +357,6 @@ Shared contracts:
 
 ## Notes
 
-- Sequence frames export as normal images with lineage metadata.
-- Current documentation now lives under `docs/`; use `docs/archive/` only for historical context.
-- See `docs/README.md` for test and coverage environment caveats before relying on local runners.
+- sequence frames export as normal images with lineage metadata
+- current documentation now lives under `docs/`; use `docs/archive/` only for historical context
+- see `docs/README.md` for test and coverage environment caveats before relying on local runners
