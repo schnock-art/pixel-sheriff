@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
-import { getPrelabelSourceStatus, type PrelabelConfig, type PrelabelSourceStatus } from "../../../lib/api";
-
+import { getPrelabelSourceStatus, type DeploymentItem, type PrelabelConfig, type PrelabelSourceStatus } from "../../../lib/api";
+import { DeploymentSelectField } from "./DeploymentSelectField";
 
 interface PrelabelSettingsSectionProps {
   enabled: boolean;
@@ -9,19 +9,20 @@ interface PrelabelSettingsSectionProps {
   taskId: string | null;
   value: PrelabelConfig | null;
   defaultPrompts: string[];
+  deploymentOptions: DeploymentItem[];
+  activeDeploymentId: string | null;
+  deploymentsLoading?: boolean;
   onChange: (value: PrelabelConfig | null) => void;
   samplingLabel: string;
   samplingHint: string;
 }
 
-
 function normalizePromptInput(rawValue: string): string[] {
   return rawValue
     .split(",")
-    .map((value) => value.trim())
+    .map((entry) => entry.trim())
     .filter(Boolean);
 }
-
 
 export function PrelabelSettingsSection({
   enabled,
@@ -29,21 +30,28 @@ export function PrelabelSettingsSection({
   taskId,
   value,
   defaultPrompts,
+  deploymentOptions,
+  activeDeploymentId,
+  deploymentsLoading = false,
   onChange,
   samplingLabel,
   samplingHint,
 }: PrelabelSettingsSectionProps) {
-  if (!enabled) return null;
-
   const resolvedValue =
     value ??
     ({
       source_type: "florence2",
+      deployment_id: null,
       prompts: defaultPrompts,
       frame_sampling: { mode: "every_n_frames", value: 15 },
       confidence_threshold: 0.25,
       max_detections_per_frame: 20,
     } satisfies PrelabelConfig);
+  const defaultDeploymentId = useMemo(
+    () => (deploymentOptions.find((item) => item.deployment_id === activeDeploymentId) ?? deploymentOptions[0] ?? null)?.deployment_id ?? null,
+    [activeDeploymentId, deploymentOptions],
+  );
+
   const [confidenceInput, setConfidenceInput] = useState(String(resolvedValue.confidence_threshold));
   const [isEditingConfidence, setIsEditingConfidence] = useState(false);
   const [sourceStatus, setSourceStatus] = useState<PrelabelSourceStatus | null>(null);
@@ -56,7 +64,18 @@ export function PrelabelSettingsSection({
   }, [isEditingConfidence, resolvedValue.confidence_threshold]);
 
   useEffect(() => {
+    if (!enabled || !value || resolvedValue.source_type !== "active_deployment") return;
+    const nextDeploymentId =
+      resolvedValue.deployment_id && deploymentOptions.some((item) => item.deployment_id === resolvedValue.deployment_id)
+        ? resolvedValue.deployment_id
+        : defaultDeploymentId;
+    if ((resolvedValue.deployment_id ?? null) === (nextDeploymentId ?? null)) return;
+    onChange({ ...resolvedValue, deployment_id: nextDeploymentId });
+  }, [defaultDeploymentId, deploymentOptions, enabled, onChange, resolvedValue, value]);
+
+  useEffect(() => {
     let isMounted = true;
+
     async function loadSourceStatus() {
       if (!enabled || !value || !projectId || !taskId) {
         if (!isMounted) return;
@@ -65,6 +84,7 @@ export function PrelabelSettingsSection({
         setIsCheckingSourceStatus(false);
         return;
       }
+
       try {
         if (isMounted) {
           setIsCheckingSourceStatus(true);
@@ -81,11 +101,12 @@ export function PrelabelSettingsSection({
         if (isMounted) setIsCheckingSourceStatus(false);
       }
     }
+
     void loadSourceStatus();
     return () => {
       isMounted = false;
     };
-  }, [enabled, projectId, taskId, value?.source_type]);
+  }, [enabled, projectId, taskId, value]);
 
   function update(patch: Partial<PrelabelConfig>) {
     onChange({ ...resolvedValue, ...patch });
@@ -109,16 +130,18 @@ export function PrelabelSettingsSection({
     setConfidenceInput(String(nextValue));
   }
 
+  if (!enabled) return null;
+
   const sourceStatusTone = sourceStatusError ? "error" : sourceStatus ? "ready" : "idle";
   const sourceStatusLabel = sourceStatusError
     ? "Unavailable"
     : isCheckingSourceStatus
-      ? "Checking…"
+      ? "Checking..."
       : sourceStatus?.device_selected
         ? `Ready on ${sourceStatus.device_selected.toUpperCase()}`
         : "Idle";
   const sourceStatusMeta = sourceStatus
-    ? `${sourceStatus.source_label}${sourceStatus.device_preference ? ` • pref ${sourceStatus.device_preference}` : ""}`
+    ? `${sourceStatus.source_label}${sourceStatus.device_preference ? ` | pref ${sourceStatus.device_preference}` : ""}`
     : null;
 
   return (
@@ -135,22 +158,32 @@ export function PrelabelSettingsSection({
               return;
             }
             if (nextValue === "active_deployment") {
-              onChange({ ...resolvedValue, source_type: "active_deployment", prompts: [] });
+              onChange({
+                ...resolvedValue,
+                source_type: "active_deployment",
+                deployment_id: defaultDeploymentId,
+                prompts: [],
+              });
               return;
             }
-            onChange({ ...resolvedValue, source_type: "florence2", prompts: resolvedValue.prompts.length > 0 ? resolvedValue.prompts : defaultPrompts });
+            onChange({
+              ...resolvedValue,
+              source_type: "florence2",
+              deployment_id: null,
+              prompts: resolvedValue.prompts.length > 0 ? resolvedValue.prompts : defaultPrompts,
+            });
           }}
         >
           <option value="none">None</option>
           <option value="florence2">Florence-2 prompt assist</option>
-          <option value="active_deployment">Active project deployment</option>
+          <option value="active_deployment">Project deployment</option>
         </select>
       </label>
       {value ? (
         <div className="prelabel-source-status-row">
           <span className={`prelabel-source-status-badge is-${sourceStatusTone}`}>{sourceStatusLabel}</span>
           <span className="prelabel-source-status-text">
-            {sourceStatusMeta ?? (value.source_type === "florence2" ? "Florence-2" : "Active project deployment")}
+            {sourceStatusMeta ?? (value.source_type === "florence2" ? "Florence-2" : "Project deployment")}
           </span>
         </div>
       ) : null}
@@ -168,7 +201,19 @@ export function PrelabelSettingsSection({
               <span className="import-field-hint">Comma-separated prompts. Defaults to task classes.</span>
             </label>
           ) : (
-            <p className="labels-empty">Uses the active compatible bbox deployment for this task.</p>
+            <>
+              <DeploymentSelectField
+                label="Project deployment"
+                deployments={deploymentOptions}
+                activeDeploymentId={activeDeploymentId}
+                value={resolvedValue.deployment_id ?? defaultDeploymentId}
+                loading={deploymentsLoading}
+                emptyMessage="No compatible bbox deployments are available for this task yet."
+                helpText="This deployment will generate first-pass boxes during import or capture."
+                onChange={(deploymentId) => update({ deployment_id: deploymentId })}
+              />
+              <p className="labels-empty">Uses the selected compatible bbox deployment for this task.</p>
+            </>
           )}
           <div className="import-inline-grid">
             <label className="project-field">

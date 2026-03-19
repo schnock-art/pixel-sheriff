@@ -15,3 +15,4 @@ export * from "./api/experiments";
 export * from "./api/deployments";
 export * from "./api/sequences";
 export * from "./api/prelabels";
+export * from "./api/previewInference";

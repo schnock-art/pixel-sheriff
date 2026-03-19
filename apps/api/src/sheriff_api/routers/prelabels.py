@@ -107,8 +107,8 @@ async def create_session(
         )
     except ValueError as exc:
         code = str(exc)
-        if code in {"active_deployment_not_found", "active_deployment_incompatible"}:
-            raise api_error(status.HTTP_409_CONFLICT, code=code, message="Active deployment is unavailable for this task") from exc
+        if code in {"active_deployment_not_found", "active_deployment_incompatible", "deployment_not_found", "deployment_incompatible", "deployment_archived"}:
+            raise api_error(status.HTTP_409_CONFLICT, code=code, message="Compatible deployment is unavailable for this task") from exc
         if code == "task_kind_unsupported":
             raise api_error(status.HTTP_409_CONFLICT, code=code, message="Prelabels are supported only for bbox tasks") from exc
         raise
@@ -140,8 +140,8 @@ async def get_prelabel_source_status(
         )
     except ValueError as exc:
         code = str(exc)
-        if code in {"active_deployment_not_found", "active_deployment_incompatible"}:
-            raise api_error(status.HTTP_409_CONFLICT, code=code, message="Active deployment is unavailable for this task") from exc
+        if code in {"active_deployment_not_found", "active_deployment_incompatible", "deployment_not_found", "deployment_incompatible", "deployment_archived"}:
+            raise api_error(status.HTTP_409_CONFLICT, code=code, message="Compatible deployment is unavailable for this task") from exc
         if code == "task_kind_unsupported":
             raise api_error(status.HTTP_409_CONFLICT, code=code, message="Prelabels are supported only for bbox tasks") from exc
         raise

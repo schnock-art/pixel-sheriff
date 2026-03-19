@@ -20,6 +20,7 @@ class PrelabelFrameSampling(BaseModel):
 
 class PrelabelConfigCreate(BaseModel):
     source_type: PrelabelSourceType = "florence2"
+    deployment_id: str | None = None
     prompts: list[str] = Field(default_factory=list)
     frame_sampling: PrelabelFrameSampling = Field(default_factory=PrelabelFrameSampling)
     confidence_threshold: float = Field(default=0.25, ge=0.0, le=1.0)

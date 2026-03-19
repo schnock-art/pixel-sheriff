@@ -20,7 +20,8 @@ Task kinds:
 
 AI-assisted paths:
 
-- review-first active deployment predictions for current-asset and folder-queue `classification` and `bbox` review
+- review-first compatible deployment predictions for current-asset and folder-queue `classification` and `bbox` review
+- modal-only preview inference for `classification` and `bbox` import/capture tuning
 - sequence-first AI prelabels for bbox video and webcam workflows
 
 ## Runtime Topology
@@ -178,6 +179,13 @@ Browser uploads image bytes to the API, which persists local storage files and a
 
 ### Video Import
 
+Browser:
+
+- local file selection creates a large seekable preview in the shared import workspace modal
+- the modal keeps the preview visible while AI source, deployment, prompt, and threshold settings change
+- while the preview video is playing, overlay refresh now runs on a throttled `500ms` cadence instead of only on pause/seek
+- modal overlays are advisory-only and come from preview inference, not saved proposals
+
 API:
 
 - creates folder and `asset_sequences` row
@@ -200,8 +208,11 @@ If `prelabel_config` is present:
 Browser:
 
 - gets camera access with `getUserMedia`
-- previews the selected devices
+- renders one focused selected camera at a time in a large letterboxed preview stage
+- keeps additional selected cameras as compact tabs/status rows while recording continues for all active cameras
 - captures JPEG frames from a live video element
+- live preview refresh is frame-aware when `requestVideoFrameCallback` is available, with fallback timer scheduling otherwise
+- can request read-only preview overlays for the focused camera while tuning deployed model or threshold settings
 
 API:
 
@@ -214,6 +225,21 @@ If `prelabel_config` is present:
 - sampled frames are enqueued for prelabel work while capture is active
 - modal finish triggers `close-input`
 
+### Modal Preview Inference
+
+Browser and API:
+
+- video import and webcam capture share a two-column workspace modal with a large preview stage and a scrolling controls pane
+- the browser posts the current preview frame to `POST /api/v1/projects/{project_id}/tasks/{task_id}/preview-inference`
+- the frontend preview scheduler keeps a single inference request in flight, coalesces stale work into one trailing refresh, and uses immediate refresh for seek/pause/model-threshold changes
+- steady-state preview cadence is `300ms` for live webcam capture, `500ms` for webcam preview-only, and `500ms` while import-video preview is actively playing
+- advisory preview capture reuses a per-source canvas, downscales frames to a `960px` max dimension, and encodes JPEG at lower quality to reduce end-to-end latency
+- bbox preview accepts `prelabel_config` and can use either Florence-2 or a selected compatible deployment
+- classification preview accepts an optional `deployment_id` and otherwise defaults to the active compatible deployment
+- responses return normalized overlay payloads plus `source_label`, `device_selected`, `preview_width`, and `preview_height`
+- `device_selected` reports the trainer inference provider only; preview capture, upload, API handling, and preprocessing are still CPU-resident steps in the current architecture
+- these overlays are advisory only: they do not create proposals, annotations, or prelabel session state
+
 ### AI Prelabels
 
 Supported sources:
@@ -223,10 +249,12 @@ Supported sources:
 
 Source behavior:
 
-- active deployment is resolved at session creation time
+- `active_deployment` can pin an explicit compatible `deployment_id`; otherwise the project active deployment is resolved at session creation time
+- resolved deployment identity is stored on the session as `source_ref`, with the display name persisted as `source_label`
 - Florence runs in `apps/trainer`
 - API owns adapter selection and session orchestration
 - worker owns background `prelabel_asset` execution
+- modal preview inference reuses the same source resolution rules, but does not create or mutate `PrelabelSession` rows
 
 Review behavior:
 
@@ -411,6 +439,7 @@ Trainer:
 - deployment-backed inference endpoints
 - Florence warmup and detect endpoints
 - shared augmentation resolution and execution for classification, detection, and segmentation
+- non-Darwin builds install `onnxruntime-gpu`, and deployed inference uses CUDA whenever `CUDAExecutionProvider` is available inside the trainer container
 
 Key trainer inference endpoints:
 

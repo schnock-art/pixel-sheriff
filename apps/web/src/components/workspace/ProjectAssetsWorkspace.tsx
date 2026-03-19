@@ -900,6 +900,7 @@ export default function ProjectAssetsWorkspace() {
         open={isVideoImportModalOpen}
         projectId={selectedProjectId}
         taskId={selectedTaskId}
+        taskKind={selectedTask?.kind ?? null}
         defaultName={videoImportDefaultName}
         isImporting={isVideoImporting}
         errorMessage={videoImportError}
@@ -912,6 +913,7 @@ export default function ProjectAssetsWorkspace() {
         open={isWebcamModalOpen}
         projectId={selectedProjectId}
         taskId={selectedTaskId}
+        taskKind={selectedTask?.kind ?? null}
         defaultName={webcamDefaultName}
         folderOptions={folders.map((folder) => folder.path)}
         enablePrelabels={selectedTask?.kind === "bbox"}

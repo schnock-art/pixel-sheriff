@@ -16,21 +16,27 @@ FLORENCE_WARMUP_RETRY_DELAY_SECONDS = 0.5
 FLORENCE_WARMUP_MAX_ATTEMPTS = 2
 
 
-async def resolve_active_deployment(project_id: str, task_id: str) -> dict[str, Any]:
+async def resolve_active_deployment(
+    project_id: str,
+    task_id: str,
+    *,
+    deployment_id: str | None = None,
+    task_kind: str = "bbox",
+) -> dict[str, Any]:
     listing = deployment_store.list(project_id)
-    deployment_id = str(listing.get("active_deployment_id") or "").strip()
-    if not deployment_id:
+    resolved_deployment_id = str(deployment_id or listing.get("active_deployment_id") or "").strip()
+    if not resolved_deployment_id:
         raise ValueError("active_deployment_not_found")
-    deployment = deployment_store.get(project_id, deployment_id)
+    deployment = deployment_store.get(project_id, resolved_deployment_id)
     if not isinstance(deployment, dict):
-        raise ValueError("active_deployment_not_found")
+        raise ValueError("deployment_not_found" if deployment_id else "active_deployment_not_found")
     if str(deployment.get("status") or "").strip().lower() == "archived":
-        raise ValueError("active_deployment_not_found")
-    if str(deployment.get("task") or "").strip().lower() != "bbox":
-        raise ValueError("active_deployment_incompatible")
+        raise ValueError("deployment_archived" if deployment_id else "active_deployment_not_found")
+    if str(deployment.get("task") or "").strip().lower() != task_kind:
+        raise ValueError("deployment_incompatible" if deployment_id else "active_deployment_incompatible")
     deployment_task_id = str(deployment.get("task_id") or "").strip()
     if deployment_task_id and deployment_task_id != task_id:
-        raise ValueError("active_deployment_incompatible")
+        raise ValueError("deployment_incompatible" if deployment_id else "active_deployment_incompatible")
     return deployment
 
 
@@ -46,7 +52,12 @@ async def resolve_prelabel_source_config(
 
     prompts = normalize_prompts(config.prompts)
     if config.source_type == "active_deployment":
-        deployment = await resolve_active_deployment(project_id, task.id)
+        deployment = await resolve_active_deployment(
+            project_id,
+            task.id,
+            deployment_id=config.deployment_id,
+            task_kind="bbox",
+        )
         return {
             "source_ref": str(deployment.get("deployment_id")),
             "source_label": str(deployment.get("name") or "").strip() or "Project model",

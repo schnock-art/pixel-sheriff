@@ -4,7 +4,9 @@ import json
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Depends
+import httpx
+
+from fastapi import APIRouter, Depends, File, Form, UploadFile, status
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,7 +15,9 @@ from sheriff_api.config import get_settings
 from sheriff_api.db.models import Annotation, Category, Project, Task, TaskKind, TaskLabelMode
 from sheriff_api.db.session import get_db
 from sheriff_api.errors import api_error
+from sheriff_api.schemas.preview_inference import PreviewInferenceResponse
 from sheriff_api.schemas.tasks import TaskCreate, TaskRead
+from sheriff_api.services.preview_inference import run_preview_inference
 
 router = APIRouter(tags=["tasks"])
 settings = get_settings()
@@ -176,6 +180,49 @@ async def get_task(project_id: str, task_id: str, db: AsyncSession = Depends(get
             details={"project_id": project_id, "task_id": task_id},
         )
     return _task_read(task, default_task_id=project.default_task_id)
+
+
+@router.post("/projects/{project_id}/tasks/{task_id}/preview-inference", response_model=PreviewInferenceResponse)
+async def preview_inference(
+    project_id: str,
+    task_id: str,
+    file: UploadFile = File(...),
+    task_kind: str = Form(...),
+    prelabel_config: str | None = Form(default=None),
+    deployment_id: str | None = Form(default=None),
+    top_k: int = Form(default=5),
+    db: AsyncSession = Depends(get_db),
+) -> PreviewInferenceResponse:
+    await _require_project(db, project_id)
+    task = await db.get(Task, task_id)
+    if task is None or task.project_id != project_id:
+        raise api_error(
+            status_code=404,
+            code="task_not_found",
+            message="Task not found in project",
+            details={"project_id": project_id, "task_id": task_id},
+        )
+
+    try:
+        content = await file.read()
+        return await run_preview_inference(
+            db=db,
+            project_id=project_id,
+            task=task,
+            task_kind=task_kind,
+            content=content,
+            filename=file.filename,
+            content_type=file.content_type,
+            prelabel_config_json=prelabel_config,
+            deployment_id=deployment_id,
+            top_k=top_k,
+        )
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 503:
+            raise api_error(status.HTTP_503_SERVICE_UNAVAILABLE, code="inference_unavailable", message="Inference service unavailable") from exc
+        raise api_error(status.HTTP_502_BAD_GATEWAY, code="inference_failed", message="Inference request failed") from exc
+    except httpx.HTTPError as exc:
+        raise api_error(status.HTTP_503_SERVICE_UNAVAILABLE, code="inference_unavailable", message=str(exc) or "Inference unavailable") from exc
 
 
 @router.delete("/projects/{project_id}/tasks/{task_id}")

@@ -27,6 +27,11 @@ All notable changes to this project will be documented in this file.
   - frame-backed assets now surface pending AI counts in timeline and sequence responses
   - video and webcam modals now share bbox-only prelabel settings
   - webcam capture preview remains visible during recording and the modal surfaces clearer recording state
+- Import/capture modal preview inference:
+  - API now exposes `POST /api/v1/projects/{project_id}/tasks/{task_id}/preview-inference` for modal-only frame previews
+  - video import and webcam capture now use a shared large-preview workspace shell with read-only bbox/classification overlays
+  - bbox modal preview can use Florence-2 or a selected compatible deployment, while classification preview can target a selected compatible deployment
+  - preview-latency helper coverage now includes focused scheduler and media-capture regressions in `apps/web/tests/previewScheduler.test.js` and `apps/web/tests/mediaPreview.test.js`
 - Documentation refresh for the current repository behavior:
   - refreshed `README.md`, `docs/architecture.md`, `docu/Architecture.md`, `docu/TECHNICAL_REFERENCE.md`, `docu/Roadplan.md`, and `docu/VLM_COLD_START_PRELABELING_TASKS.md`
 - Experiment storage reduction + test-path fallback:
@@ -38,6 +43,15 @@ All notable changes to this project will be documented in this file.
   - `make test-api-focused` / `make test-api-safe` now invoke the API test script through `bash` for better Windows compatibility
 
 ### Changed
+- Deployed-model selection and runtime behavior:
+  - bbox prelabel configs now support an explicit `deployment_id` so video import and webcam capture can pin a compatible deployment instead of always resolving the project active deployment
+  - import/capture modal selectors now expose compatible deployed-model dropdowns for both advisory preview inference and real bbox prelabel sessions
+  - trainer builds now install `onnxruntime-gpu` on non-Darwin platforms so deployed inference can use CUDA when `CUDAExecutionProvider` is available
+- Modal preview latency tuning:
+  - preview inference now uses a single-flight scheduler so only one modal preview request is active at a time, with stale refreshes coalesced into one trailing rerun
+  - webcam preview now refreshes on frame-aligned callbacks when available and falls back to timer throttling otherwise
+  - video import preview now refreshes while the preview clip is actively playing instead of only on pause/seek
+  - modal preview capture now reuses a per-source canvas and downsamples advisory frames to reduce encode/upload latency without changing saved import/capture assets
 - Failing test follow-up cleanup:
   - realigned stale API tests to task-scoped category/annotation contracts and dataset-version export endpoints
   - default API test and coverage commands now exclude `apps/api/tests/ml`, with `make test-api-ml` using an ML-enabled API test container
@@ -312,6 +326,7 @@ All notable changes to this project will be documented in this file.
 - Docs refreshed to align with current implementation:
   - `README.md`
   - `docs/architecture.md`
+  - `docs/CHANGELOG.md`
   - `docu/Architecture.md`
   - `docu/TECHNICAL_REFERENCE.md`
   - `docu/Roadplan.md`

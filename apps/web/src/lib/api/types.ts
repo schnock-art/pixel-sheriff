@@ -7,6 +7,8 @@ export type PrelabelSamplingMode = "every_n_frames" | "every_n_seconds";
 export type PrelabelSessionStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
 export type PrelabelProposalStatus = "pending" | "accepted" | "edited" | "rejected";
 export type PrelabelDebugDetectionStatus = "matched" | "unmatched" | "discarded";
+export type PreviewInferenceTaskKind = "classification" | "bbox";
+export type PreviewInferenceDebugStatus = "matched" | "unmatched" | "discarded";
 
 export interface Project {
   id: string;
@@ -147,6 +149,7 @@ export interface PrelabelFrameSampling {
 
 export interface PrelabelConfig {
   source_type: PrelabelSourceType;
+  deployment_id?: string | null;
   prompts: string[];
   frame_sampling: PrelabelFrameSampling;
   confidence_threshold: number;
@@ -218,6 +221,40 @@ export interface PrelabelProposal {
   promoted_object_id: string | null;
   created_at: string | null;
   updated_at: string | null;
+}
+
+export interface PreviewInferenceBox {
+  class_id: string | null;
+  class_name: string;
+  score: number;
+  bbox: number[];
+  matched: boolean;
+}
+
+export interface PreviewInferencePrediction {
+  class_id: string;
+  class_name: string;
+  score: number;
+}
+
+export interface PreviewInferenceDebugItem {
+  label_text: string;
+  confidence: number;
+  bbox: number[];
+  status: PreviewInferenceDebugStatus;
+  category_id: string | null;
+  category_name: string | null;
+}
+
+export interface PreviewInferenceResponse {
+  task: PreviewInferenceTaskKind;
+  source_label: string;
+  device_selected: "cuda" | "cpu" | null;
+  preview_width: number | null;
+  preview_height: number | null;
+  boxes: PreviewInferenceBox[];
+  predictions: PreviewInferencePrediction[];
+  debug: PreviewInferenceDebugItem[];
 }
 
 export interface WebcamSessionCreatePayload {
