@@ -17,6 +17,7 @@ class DeploymentSourceCreate(BaseModel):
     experiment_id: str
     attempt: int = Field(ge=1)
     checkpoint_kind: CheckpointKind = "best_metric"
+    variant_key: Literal["preferred", "fp32", "ptq_int8", "qat_int8"] = "preferred"
 
 
 class DeploymentCreate(BaseModel):
@@ -31,6 +32,7 @@ class DeploymentSourceRead(BaseModel):
     experiment_id: str
     attempt: int = Field(ge=1)
     checkpoint_kind: CheckpointKind
+    variant_key: Literal["fp32", "ptq_int8", "qat_int8"] | None = None
     onnx_relpath: str
     metadata_relpath: str
 

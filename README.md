@@ -94,6 +94,7 @@ video file / webcam stream
 - immutable dataset versions with saved split membership
 - export zip generation with `manifest.json` and `coco_instances.json`
 - project-scoped models, experiments, and deployments
+- FP32, PTQ INT8, and QAT INT8 experiment variant comparison for `classification` and `detection` models
 - review-first deployment predictions with preview, accept, and reject in labeling
 - bbox prelabel sessions for video and webcam review flows
 

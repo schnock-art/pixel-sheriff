@@ -10,6 +10,8 @@ from sheriff_api.services.augmentation import AUGMENTATION_STEP_TYPES, task_defa
 
 ExperimentStatus = Literal["draft", "queued", "running", "completed", "failed", "canceled"]
 TrainingTask = Literal["classification", "detection", "segmentation"]
+ModelVariantKey = Literal["fp32", "ptq_int8", "qat_int8"]
+ModelVariantStatus = Literal["queued", "running", "ready", "failed", "unsupported"]
 
 
 class TrainingOptimizer(BaseModel):
@@ -335,6 +337,8 @@ class ExperimentOnnxResponse(BaseModel):
 
     attempt: int = Field(ge=1)
     status: Literal["exported", "failed"]
+    variant_key: ModelVariantKey | None = None
+    preferred_variant_key: ModelVariantKey | None = None
     model_onnx_url: str | None = None
     metadata_url: str
     input_shape: list[int] = Field(default_factory=list)
@@ -343,3 +347,64 @@ class ExperimentOnnxResponse(BaseModel):
     preprocess: dict[str, Any] = Field(default_factory=dict)
     validation: dict[str, Any] | None = None
     error: str | None = None
+    available_variants: list[ModelVariantKey] = Field(default_factory=list)
+
+
+class ExperimentVariantBenchmarkResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    status: str | None = None
+    provider: str | None = None
+    batch_size: int | None = None
+    mean_latency_ms: float | None = None
+    p50_latency_ms: float | None = None
+    p95_latency_ms: float | None = None
+    throughput_items_per_second: float | None = None
+
+
+class ExperimentVariantSplitResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    status: str | None = None
+    overall: dict[str, Any] | None = None
+    relpath: str | None = None
+
+
+class ExperimentVariantSummaryResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    variant_key: ModelVariantKey
+    label: str
+    kind: str
+    attempt: int = Field(ge=1)
+    status: ModelVariantStatus
+    preferred: bool = False
+    error: str | None = None
+    checkpoint_kind: str | None = None
+    quantized: bool | None = None
+    quantization_strategy: str | None = None
+    onnx: dict[str, Any] = Field(default_factory=dict)
+    evaluation: dict[str, ExperimentVariantSplitResponse] = Field(default_factory=dict)
+    benchmark: ExperimentVariantBenchmarkResponse | dict[str, Any] | None = None
+    qat: dict[str, Any] | None = None
+
+
+class ExperimentVariantSupportResponse(BaseModel):
+    ptq_supported: bool = False
+    qat_supported: bool = False
+    qat_reason: str | None = None
+
+
+class ExperimentVariantsResponse(BaseModel):
+    attempt: int = Field(ge=1)
+    preferred_variant_key: ModelVariantKey | None = None
+    support: ExperimentVariantSupportResponse = Field(default_factory=ExperimentVariantSupportResponse)
+    variants: dict[ModelVariantKey, ExperimentVariantSummaryResponse] = Field(default_factory=dict)
+
+
+class ExperimentVariantActionResponse(BaseModel):
+    ok: bool = True
+    attempt: int = Field(ge=1)
+    variant_key: ModelVariantKey
+    status: ModelVariantStatus
+    job_id: str | None = None

@@ -24,6 +24,12 @@ AI-assisted paths:
 - modal-only preview inference for `classification` and `bbox` import/capture tuning
 - sequence-first AI prelabels for bbox video and webcam workflows
 
+Experiment artifact variants:
+
+- `classification` and `detection` experiments publish comparable ONNX variants for `fp32`, `ptq_int8`, and `qat_int8`
+- PTQ is static INT8 quantization on top of the exported FP32 ONNX artifact
+- QAT currently means checkpoint fine-tune followed by static INT8 quantization of the fine-tuned ONNX export
+
 ## Runtime Topology
 
 Default Docker services:
@@ -316,6 +322,21 @@ Shared implementation lives in:
 
 - API config helpers: `apps/api/src/sheriff_api/services/augmentation.py`
 - trainer runtime augmentation: `apps/trainer/src/pixel_sheriff_trainer/augmentation.py`
+
+### Experiment Variants
+
+Current variant contract:
+
+- every completed experiment still exports the canonical FP32 ONNX artifact under the run `onnx/` directory
+- the trainer mirrors that FP32 export into the run `variants/fp32/` directory and can derive `ptq_int8` or `qat_int8` siblings from the same attempt
+- variant comparison is currently supported for `classification` and `detection`; `segmentation` remains FP32-only
+- each variant writes its own ONNX model, metadata, split evaluation summaries, CPU benchmark summary, and status row
+
+Current quantization behavior:
+
+- PTQ calibrates against the `train` split and writes static INT8 ONNX output
+- QAT fine-tunes from the selected checkpoint using the task-specific trainer loop, exports an intermediate FP32 ONNX, then applies the same static INT8 quantization flow
+- detection variants keep the current family constraints, so `retinanet` and `ssdlite320_mobilenet_v3_large` share the same variant lifecycle and SSDLite keeps its existing small-batch training guard
 
 ### Deployment Prediction Review
 

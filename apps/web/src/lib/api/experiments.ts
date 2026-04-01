@@ -8,12 +8,14 @@ import {
 } from "./paths";
 import type {
   ExperimentActionResponse,
+  ExperimentVariantActionResponse,
   ExperimentEvaluationPayload,
   ExperimentEvent,
   ExperimentEventEnvelope,
   ExperimentLogsChunk,
   ExperimentOnnxPayload,
   ExperimentRuntimePayload,
+  ExperimentVariantsPayload,
   ExperimentSamplesResponse,
   ProjectExperimentAnalyticsResponse,
   ProjectExperimentCreatePayload,
@@ -53,8 +55,31 @@ export function getExperimentRuntime(projectId: string, experimentId: string): P
   return apiGet<ExperimentRuntimePayload>(`/projects/${projectId}/experiments/${experimentId}/runtime`);
 }
 
-export function getExperimentOnnx(projectId: string, experimentId: string): Promise<ExperimentOnnxPayload> {
-  return apiGet<ExperimentOnnxPayload>(`/projects/${projectId}/experiments/${experimentId}/onnx`);
+export function getExperimentOnnx(
+  projectId: string,
+  experimentId: string,
+  options: { variant?: "preferred" | "fp32" | "ptq_int8" | "qat_int8" } = {},
+): Promise<ExperimentOnnxPayload> {
+  const variantQuery = options.variant ? `?variant=${encodeURIComponent(options.variant)}` : "";
+  return apiGet<ExperimentOnnxPayload>(`/projects/${projectId}/experiments/${experimentId}/onnx${variantQuery}`);
+}
+
+export function getExperimentVariants(projectId: string, experimentId: string): Promise<ExperimentVariantsPayload> {
+  return apiGet<ExperimentVariantsPayload>(`/projects/${projectId}/experiments/${experimentId}/variants`);
+}
+
+export function triggerExperimentPtq(projectId: string, experimentId: string): Promise<ExperimentVariantActionResponse> {
+  return apiPost<ExperimentVariantActionResponse, Record<string, never>>(
+    `/projects/${projectId}/experiments/${experimentId}/variants/ptq`,
+    {},
+  );
+}
+
+export function triggerExperimentQat(projectId: string, experimentId: string): Promise<ExperimentVariantActionResponse> {
+  return apiPost<ExperimentVariantActionResponse, Record<string, never>>(
+    `/projects/${projectId}/experiments/${experimentId}/variants/qat`,
+    {},
+  );
 }
 
 export function getExperimentLogs(

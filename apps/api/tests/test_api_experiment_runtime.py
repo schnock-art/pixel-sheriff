@@ -12,7 +12,9 @@ from .api_test_helpers import (
     _create_dataset_version_for_task,
     _create_detection_project_with_dataset_version,
     _create_project_model,
+    _create_segmentation_project_model,
     _seed_experiment_run_artifacts,
+    _seed_experiment_variant_artifacts,
     assert_api_error,
 )
 
@@ -639,6 +641,159 @@ async def test_experiment_onnx_download_endpoints_stream_model_and_metadata(clie
     metadata_payload = metadata_response.json()
     assert metadata_payload["status"] == "exported"
     assert metadata_payload["input_shape"] == [3, 224, 224]
+
+
+@pytest.mark.asyncio
+async def test_experiment_variants_endpoint_returns_seeded_variant_summaries(client: AsyncClient) -> None:
+    project_id, model_id = await _create_project_model(client, project_name="exp-variants")
+    created = await client.post(
+        f"/api/v1/projects/{project_id}/experiments",
+        json={"model_id": model_id, "name": "variants-run"},
+    )
+    assert created.status_code == 200
+    experiment_id = created.json()["id"]
+    _seed_experiment_run_artifacts(
+        project_id=project_id,
+        experiment_id=experiment_id,
+        attempt=1,
+        include_onnx=True,
+        onnx_status="exported",
+    )
+    _seed_experiment_variant_artifacts(
+        project_id=project_id,
+        experiment_id=experiment_id,
+        attempt=1,
+        variant_key="fp32",
+        preferred_variant_key="ptq_int8",
+    )
+    _seed_experiment_variant_artifacts(
+        project_id=project_id,
+        experiment_id=experiment_id,
+        attempt=1,
+        variant_key="ptq_int8",
+        preferred_variant_key="ptq_int8",
+    )
+
+    response = await client.get(f"/api/v1/projects/{project_id}/experiments/{experiment_id}/variants")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["attempt"] == 1
+    assert payload["preferred_variant_key"] == "ptq_int8"
+    assert payload["variants"]["fp32"]["status"] == "ready"
+    assert payload["variants"]["ptq_int8"]["preferred"] is True
+    assert payload["variants"]["ptq_int8"]["benchmark"]["mean_latency_ms"] == 12.3
+
+
+@pytest.mark.asyncio
+async def test_experiment_variants_endpoint_reports_detection_qat_support(client: AsyncClient) -> None:
+    project_id, model_id = await _create_project_model(client, project_name="exp-detection-variant-support")
+    created = await client.post(
+        f"/api/v1/projects/{project_id}/experiments",
+        json={"model_id": model_id, "name": "detection-variants"},
+    )
+    assert created.status_code == 200
+    experiment_id = created.json()["id"]
+    _seed_experiment_run_artifacts(
+        project_id=project_id,
+        experiment_id=experiment_id,
+        attempt=1,
+        include_onnx=True,
+        onnx_status="exported",
+    )
+
+    response = await client.get(f"/api/v1/projects/{project_id}/experiments/{experiment_id}/variants")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["support"] == {
+        "ptq_supported": True,
+        "qat_supported": True,
+        "qat_reason": None,
+    }
+
+
+@pytest.mark.asyncio
+async def test_trigger_detection_qat_variant_enqueues_quantize_job(client: AsyncClient) -> None:
+    project_id, model_id = await _create_project_model(client, project_name="exp-detection-qat")
+    created = await client.post(
+        f"/api/v1/projects/{project_id}/experiments",
+        json={"model_id": model_id, "name": "detection-qat"},
+    )
+    assert created.status_code == 200
+    experiment_id = created.json()["id"]
+    _seed_experiment_run_artifacts(
+        project_id=project_id,
+        experiment_id=experiment_id,
+        attempt=1,
+        include_onnx=True,
+        onnx_status="exported",
+    )
+
+    settings = get_settings()
+    experiment_dir = Path(settings.storage_root) / "experiments" / project_id / experiment_id
+    run_dir = experiment_dir / "runs" / "1"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "run.json").write_text(
+        json.dumps(
+            {
+                "attempt": 1,
+                "dataset_export": {"zip_relpath": f"exports/{project_id}/detection-qat.zip"},
+            },
+            indent=2,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    import sheriff_api.routers.experiments.variants as variants_router
+
+    calls: list[dict] = []
+
+    async def _enqueue(job_payload: dict) -> None:
+        calls.append(job_payload)
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(variants_router.train_queue, "enqueue_job", _enqueue)
+    response = await client.post(f"/api/v1/projects/{project_id}/experiments/{experiment_id}/variants/qat")
+    monkeypatch.undo()
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["variant_key"] == "qat_int8"
+    assert payload["status"] == "queued"
+    assert len(calls) == 1
+    assert calls[0]["job_type"] == "quantize_qat"
+    assert calls[0]["task"] == "detection"
+    assert calls[0]["variant_key"] == "qat_int8"
+    assert calls[0]["dataset_export"] == {"zip_relpath": f"exports/{project_id}/detection-qat.zip"}
+
+
+@pytest.mark.asyncio
+async def test_trigger_segmentation_qat_variant_returns_unsupported(client: AsyncClient) -> None:
+    project_id, model_id, _task_id = await _create_segmentation_project_model(
+        client,
+        project_name="exp-segmentation-qat-unsupported",
+    )
+    created = await client.post(
+        f"/api/v1/projects/{project_id}/experiments",
+        json={"model_id": model_id, "name": "segmentation-qat"},
+    )
+    assert created.status_code == 200
+    experiment_id = created.json()["id"]
+    _seed_experiment_run_artifacts(
+        project_id=project_id,
+        experiment_id=experiment_id,
+        attempt=1,
+        include_onnx=True,
+        onnx_status="exported",
+    )
+
+    response = await client.post(f"/api/v1/projects/{project_id}/experiments/{experiment_id}/variants/qat")
+    assert_api_error(
+        response,
+        status_code=409,
+        code="qat_unsupported",
+        message="QAT is not supported for this task",
+    )
 
 
 @pytest.mark.asyncio

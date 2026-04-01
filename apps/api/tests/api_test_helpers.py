@@ -274,6 +274,69 @@ async def _create_classification_project_model_with_categories(
     return project_id, created_model.json()["id"], task_id, category_ids
 
 
+async def _create_segmentation_project_model(client: AsyncClient, *, project_name: str) -> tuple[str, str, str]:
+    project = (await client.post("/api/v1/projects", json={"name": project_name, "task_type": "segmentation"})).json()
+    project_id = project["id"]
+    task_id = project["default_task_id"]
+
+    category_response = await client.post(
+        f"/api/v1/projects/{project_id}/categories",
+        json={"task_id": task_id, "name": "pet"},
+    )
+    assert category_response.status_code == 200
+    category_id = category_response.json()["id"]
+
+    upload = await client.post(
+        f"/api/v1/projects/{project_id}/assets/upload",
+        files={"file": ("sample.jpg", b"fake-image-bytes", "image/jpeg")},
+    )
+    assert upload.status_code == 200
+    asset = upload.json()
+
+    annotation = await client.post(
+        f"/api/v1/projects/{project_id}/annotations",
+        json={
+            "asset_id": asset["id"],
+            "task_id": task_id,
+            "status": "approved",
+            "payload_json": {
+                "version": "2.0",
+                "classification": {"category_ids": [category_id], "primary_category_id": category_id},
+                "image_basis": {"width": 100, "height": 80},
+                "objects": [
+                    {
+                        "id": "poly-1",
+                        "kind": "polygon",
+                        "category_id": category_id,
+                        "segmentation": [[10, 10, 30, 10, 30, 25, 10, 25]],
+                    }
+                ],
+            },
+        },
+    )
+    assert annotation.status_code == 200
+
+    created_dataset = await client.post(
+        f"/api/v1/projects/{project_id}/datasets/versions",
+        json={
+            "name": "segmentation-v1",
+            "task_id": task_id,
+            "selection": {"mode": "filter_snapshot", "filters": {"include_labeled_only": True}},
+            "split": {
+                "seed": 42,
+                "ratios": {"train": 1.0, "val": 0.0, "test": 0.0},
+                "stratify": {"enabled": False, "by": "label_primary"},
+            },
+            "set_active": True,
+        },
+    )
+    assert created_dataset.status_code == 200
+
+    created_model = await client.post(f"/api/v1/projects/{project_id}/models", json={})
+    assert created_model.status_code == 200
+    return project_id, created_model.json()["id"], task_id
+
+
 def _seed_experiment_run_artifacts(
     *,
     project_id: str,
@@ -456,6 +519,111 @@ def _seed_experiment_run_artifacts(
         }
     )
     status_path.write_text(json.dumps(status_payload, indent=2, sort_keys=True), encoding="utf-8")
+
+
+def _seed_experiment_variant_artifacts(
+    *,
+    project_id: str,
+    experiment_id: str,
+    attempt: int = 1,
+    variant_key: str,
+    preferred_variant_key: str | None = None,
+    status: str = "ready",
+    task: str = "classification",
+) -> None:
+    settings = get_settings()
+    experiment_dir = Path(settings.storage_root) / "experiments" / project_id / experiment_id
+    variant_dir = experiment_dir / "runs" / str(attempt) / "variants" / variant_key
+    onnx_dir = variant_dir / "onnx"
+    onnx_dir.mkdir(parents=True, exist_ok=True)
+    (onnx_dir / "model.onnx").write_bytes(f"fake-{variant_key}-onnx".encode("utf-8"))
+    (onnx_dir / "onnx.metadata.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "1",
+                "status": "exported" if status == "ready" else "failed",
+                "attempt": attempt,
+                "variant_key": variant_key,
+                "input_shape": [3, 224, 224],
+                "class_order": ["one", "two"],
+                "class_names": ["one", "two"],
+                "preprocess": {
+                    "resize": {"width": 224, "height": 224},
+                    "normalization": {"type": "imagenet"},
+                },
+                "validation": {"status": "passed" if status == "ready" else "failed"},
+                "task": task,
+            },
+            indent=2,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    for split in ["val", "test"]:
+        (variant_dir / f"evaluation.{split}.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": "1",
+                    "task": task,
+                    "split": split,
+                    "status": "ready",
+                    "overall": {"accuracy": 0.75, "macro_f1": 0.73, "mAP50": 0.66, "mAP50_95": 0.61},
+                },
+                indent=2,
+                sort_keys=True,
+            ),
+            encoding="utf-8",
+        )
+    (variant_dir / "benchmark.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "1",
+                "status": "ready",
+                "provider": "CPUExecutionProvider",
+                "mean_latency_ms": 12.3,
+                "throughput_items_per_second": 81.3,
+            },
+            indent=2,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    index_path = experiment_dir / "runs" / str(attempt) / "variants" / "index.json"
+    if index_path.exists():
+        index_payload = json.loads(index_path.read_text(encoding="utf-8"))
+    else:
+        index_payload = {"schema_version": "1", "attempt": attempt, "preferred_variant_key": preferred_variant_key or variant_key, "variants": {}}
+    if not isinstance(index_payload.get("variants"), dict):
+        index_payload["variants"] = {}
+    index_payload["variants"][variant_key] = {
+        "variant_key": variant_key,
+        "label": variant_key,
+        "kind": "baseline" if variant_key == "fp32" else ("ptq" if variant_key == "ptq_int8" else "qat"),
+        "attempt": attempt,
+        "status": status,
+        "preferred": preferred_variant_key == variant_key if preferred_variant_key else variant_key == index_payload.get("preferred_variant_key"),
+        "onnx": {
+            "model_relpath": str((onnx_dir / "model.onnx").relative_to(Path(settings.storage_root))).replace("\\", "/"),
+            "metadata_relpath": str((onnx_dir / "onnx.metadata.json").relative_to(Path(settings.storage_root))).replace("\\", "/"),
+            "size_bytes": int((onnx_dir / "model.onnx").stat().st_size),
+        },
+        "evaluation": {
+            split: {
+                "status": "ready",
+                "relpath": str((variant_dir / f"evaluation.{split}.json").relative_to(Path(settings.storage_root))).replace("\\", "/"),
+                "overall": {"accuracy": 0.75, "macro_f1": 0.73, "mAP50": 0.66, "mAP50_95": 0.61},
+            }
+            for split in ["val", "test"]
+        },
+        "benchmark": {
+            "status": "ready",
+            "provider": "CPUExecutionProvider",
+            "mean_latency_ms": 12.3,
+            "throughput_items_per_second": 81.3,
+        },
+    }
+    index_payload["preferred_variant_key"] = preferred_variant_key or index_payload.get("preferred_variant_key") or variant_key
+    index_path.write_text(json.dumps(index_payload, indent=2, sort_keys=True), encoding="utf-8")
 
 async def _create_detection_project_with_dataset_version(
     client: AsyncClient, *, project_name: str

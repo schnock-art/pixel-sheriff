@@ -12,11 +12,18 @@ from pixel_sheriff_trainer.io.metrics import append_metric
 from pixel_sheriff_trainer.io.run_logging import RunLogger
 from pixel_sheriff_trainer.io.runtime import write_runtime_info
 from pixel_sheriff_trainer.io.storage import ExperimentStorage
-from pixel_sheriff_trainer.jobs import TrainJob
+from pixel_sheriff_trainer.jobs import EvaluateVariantJob, ExperimentJob, QuantizePtqJob, QuantizeQatJob, TrainJob
 from pixel_sheriff_trainer.pipeline import PIPELINE_REGISTRY
 from pixel_sheriff_trainer.utils.seed import seed_everything
 from pixel_sheriff_trainer.utils.torchvision_cache import configure_torchvision_cache
 from pixel_sheriff_trainer.utils.time import utc_now_iso
+from pixel_sheriff_trainer.variants import (
+    VARIANT_FP32,
+    create_fp32_baseline_variant,
+    fail_variant,
+    run_ptq_variant,
+    run_qat_variant,
+)
 
 
 class TrainRunner:
@@ -149,7 +156,78 @@ class TrainRunner:
         except Exception:
             return None, "resume requested but checkpoint invalid; starting fresh"
 
-    def process(self, job: TrainJob) -> str:
+    def _append_variant_event(self, job: ExperimentJob, event: dict[str, Any]) -> None:
+        self.events.append(job.project_id, job.experiment_id, job.attempt, event)
+
+    def _process_variant_job(self, job: EvaluateVariantJob | QuantizePtqJob | QuantizeQatJob) -> str:
+        try:
+            if isinstance(job, EvaluateVariantJob):
+                if job.variant_key != VARIANT_FP32:
+                    raise ValueError(f"unsupported_variant:{job.variant_key}")
+                create_fp32_baseline_variant(
+                    self.storage,
+                    project_id=job.project_id,
+                    experiment_id=job.experiment_id,
+                    attempt=job.attempt,
+                    task=job.task,
+                    dataset_export=job.dataset_export,
+                    emit_event=lambda event: self._append_variant_event(job, event),
+                )
+                return "variant:fp32:ready"
+            if isinstance(job, QuantizePtqJob):
+                run_ptq_variant(
+                    self.storage,
+                    project_id=job.project_id,
+                    experiment_id=job.experiment_id,
+                    attempt=job.attempt,
+                    task=job.task,
+                    dataset_export=job.dataset_export,
+                    checkpoint_kind=job.checkpoint_kind,
+                    calibration_max_samples=job.calibration_max_samples,
+                    emit_event=lambda event: self._append_variant_event(job, event),
+                )
+                return "variant:ptq_int8:ready"
+            run_qat_variant(
+                self.storage,
+                project_id=job.project_id,
+                experiment_id=job.experiment_id,
+                attempt=job.attempt,
+                task=job.task,
+                model_config=job.model_config,
+                training_config=job.training_config,
+                dataset_export=job.dataset_export,
+                checkpoint_kind=job.checkpoint_kind,
+                epochs_override=job.epochs_override,
+                learning_rate_override=job.learning_rate_override,
+                emit_event=lambda event: self._append_variant_event(job, event),
+            )
+            return "variant:qat_int8:ready"
+        except Exception as exc:
+            fail_variant(
+                self.storage,
+                project_id=job.project_id,
+                experiment_id=job.experiment_id,
+                attempt=job.attempt,
+                variant_key=job.variant_key,
+                error=str(exc),
+            )
+            self._append_variant_event(
+                job,
+                {
+                    "type": "variant_status",
+                    "variant_key": job.variant_key,
+                    "status": "failed",
+                    "attempt": job.attempt,
+                    "error": str(exc),
+                    "ts": utc_now_iso(),
+                },
+            )
+            return f"failed:{job.variant_key}:{exc}"
+
+    def process(self, job: ExperimentJob) -> str:
+        if not isinstance(job, TrainJob):
+            return self._process_variant_job(job)
+
         status_row = self.storage.read_status(job.project_id, job.experiment_id)
         if status_row.get("active_job_id") != job.job_id:
             return "ignored:stale_job_id"
@@ -443,6 +521,18 @@ class TrainRunner:
                 run_logger.log(
                     f"onnx_export status=exported model_uri={onnx_result.model_uri} metadata_uri={onnx_result.metadata_uri}"
                 )
+                try:
+                    create_fp32_baseline_variant(
+                        self.storage,
+                        project_id=job.project_id,
+                        experiment_id=job.experiment_id,
+                        attempt=job.attempt,
+                        task=job.task,
+                        dataset_export=job.dataset_export,
+                        emit_event=lambda event: self._append_variant_event(job, event),
+                    )
+                except Exception as exc:
+                    run_logger.log(f"variant_fp32_failed error={exc}")
             else:
                 run_logger.log(f"onnx_export status=failed error={onnx_result.error}")
 

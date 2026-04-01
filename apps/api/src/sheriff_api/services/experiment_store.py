@@ -99,6 +99,40 @@ class ExperimentStore:
     def _onnx_metadata_path(self, project_id: str, experiment_id: str, attempt: int) -> Path:
         return self._onnx_dir(project_id, experiment_id, attempt) / "onnx.metadata.json"
 
+    def _variants_dir(self, project_id: str, experiment_id: str, attempt: int) -> Path:
+        return self._run_dir(project_id, experiment_id, attempt) / "variants"
+
+    def _variants_index_path(self, project_id: str, experiment_id: str, attempt: int) -> Path:
+        return self._variants_dir(project_id, experiment_id, attempt) / "index.json"
+
+    def _variant_dir(self, project_id: str, experiment_id: str, attempt: int, variant_key: str) -> Path:
+        return self._variants_dir(project_id, experiment_id, attempt) / variant_key
+
+    def _variant_status_path(self, project_id: str, experiment_id: str, attempt: int, variant_key: str) -> Path:
+        return self._variant_dir(project_id, experiment_id, attempt, variant_key) / "status.json"
+
+    def _variant_onnx_dir(self, project_id: str, experiment_id: str, attempt: int, variant_key: str) -> Path:
+        return self._variant_dir(project_id, experiment_id, attempt, variant_key) / "onnx"
+
+    def _variant_onnx_model_path(self, project_id: str, experiment_id: str, attempt: int, variant_key: str) -> Path:
+        return self._variant_onnx_dir(project_id, experiment_id, attempt, variant_key) / "model.onnx"
+
+    def _variant_onnx_metadata_path(self, project_id: str, experiment_id: str, attempt: int, variant_key: str) -> Path:
+        return self._variant_onnx_dir(project_id, experiment_id, attempt, variant_key) / "onnx.metadata.json"
+
+    def _variant_evaluation_path(
+        self,
+        project_id: str,
+        experiment_id: str,
+        attempt: int,
+        variant_key: str,
+        split: str,
+    ) -> Path:
+        return self._variant_dir(project_id, experiment_id, attempt, variant_key) / f"evaluation.{split}.json"
+
+    def _variant_benchmark_path(self, project_id: str, experiment_id: str, attempt: int, variant_key: str) -> Path:
+        return self._variant_dir(project_id, experiment_id, attempt, variant_key) / "benchmark.json"
+
     def _latest_evaluation_path(self, project_id: str, experiment_id: str) -> Path:
         return self._experiment_dir(project_id, experiment_id) / "evaluation.json"
 
@@ -492,6 +526,13 @@ class ExperimentStore:
                 return attempt
         return None
 
+    def latest_attempt_with_variants(self, project_id: str, experiment_id: str) -> int | None:
+        for attempt in self._candidate_attempts(project_id, experiment_id):
+            index_path = self._variants_index_path(project_id, experiment_id, attempt)
+            if index_path.exists() and index_path.is_file():
+                return attempt
+        return None
+
     def get_onnx_path(self, project_id: str, experiment_id: str, attempt: int, *, file_name: str = "model.onnx") -> Path:
         normalized = file_name.strip().lower()
         if normalized == "model.onnx":
@@ -499,6 +540,22 @@ class ExperimentStore:
         if normalized == "onnx.metadata.json":
             return self._onnx_metadata_path(project_id, experiment_id, attempt)
         raise ValueError(f"Unsupported ONNX artifact file: {file_name}")
+
+    def get_variant_onnx_path(
+        self,
+        project_id: str,
+        experiment_id: str,
+        attempt: int,
+        variant_key: str,
+        *,
+        file_name: str = "model.onnx",
+    ) -> Path:
+        normalized = file_name.strip().lower()
+        if normalized == "model.onnx":
+            return self._variant_onnx_model_path(project_id, experiment_id, attempt, variant_key)
+        if normalized == "onnx.metadata.json":
+            return self._variant_onnx_metadata_path(project_id, experiment_id, attempt, variant_key)
+        raise ValueError(f"Unsupported variant ONNX artifact file: {file_name}")
 
     def get_latest_onnx(self, project_id: str, experiment_id: str) -> dict[str, Any] | None:
         attempt = self.latest_attempt_with_onnx(project_id, experiment_id)
@@ -513,6 +570,29 @@ class ExperimentStore:
             "model_path": model_path if model_path.exists() else None,
             "metadata_path": metadata_path if metadata_path.exists() else None,
         }
+
+    def read_variants_index(
+        self,
+        project_id: str,
+        experiment_id: str,
+        *,
+        attempt: int | None = None,
+    ) -> tuple[int, dict[str, Any]] | None:
+        resolved_attempt = attempt if isinstance(attempt, int) and attempt >= 1 else self.latest_attempt_with_variants(project_id, experiment_id)
+        if isinstance(resolved_attempt, int) and resolved_attempt >= 1:
+            payload = self._read_json(self._variants_index_path(project_id, experiment_id, resolved_attempt), None)
+            if isinstance(payload, dict):
+                return resolved_attempt, payload
+        return None
+
+    def variant_status_path(self, project_id: str, experiment_id: str, attempt: int, variant_key: str) -> Path:
+        return self._variant_status_path(project_id, experiment_id, attempt, variant_key)
+
+    def variant_evaluation_path(self, project_id: str, experiment_id: str, attempt: int, variant_key: str, split: str) -> Path:
+        return self._variant_evaluation_path(project_id, experiment_id, attempt, variant_key, split)
+
+    def variant_benchmark_path(self, project_id: str, experiment_id: str, attempt: int, variant_key: str) -> Path:
+        return self._variant_benchmark_path(project_id, experiment_id, attempt, variant_key)
 
     def read_evaluation(self, project_id: str, experiment_id: str, *, attempt: int | None = None) -> tuple[int, dict[str, Any]] | None:
         resolved_attempt = attempt if isinstance(attempt, int) and attempt >= 1 else self.latest_attempt_with_evaluation(project_id, experiment_id)

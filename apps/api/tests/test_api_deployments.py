@@ -14,6 +14,7 @@ from .api_test_helpers import (
     _create_classification_project_model_with_categories,
     _create_detection_project_model_with_categories,
     _seed_experiment_run_artifacts,
+    _seed_experiment_variant_artifacts,
     assert_api_error,
 )
 
@@ -84,6 +85,45 @@ async def test_create_detection_deployment_maps_experiment_task_to_bbox(client: 
     payload = response.json()["deployment"]
     assert payload["task"] == "bbox"
     assert payload["task_id"] == task_id
+
+
+@pytest.mark.asyncio
+async def test_create_deployment_pins_explicit_variant_key(client: AsyncClient) -> None:
+    project_id, model_id, _task_id = await _create_classification_project_model(client, project_name="deploy-variant")
+    created = await client.post(
+        f"/api/v1/projects/{project_id}/experiments",
+        json={"model_id": model_id, "name": "deploy-variant-exp"},
+    )
+    assert created.status_code == 200
+    experiment_id = created.json()["id"]
+    _seed_experiment_run_artifacts(project_id=project_id, experiment_id=experiment_id, attempt=1, include_onnx=True)
+    _seed_experiment_variant_artifacts(
+        project_id=project_id,
+        experiment_id=experiment_id,
+        attempt=1,
+        variant_key="ptq_int8",
+        preferred_variant_key="ptq_int8",
+    )
+
+    response = await client.post(
+        f"/api/v1/projects/{project_id}/deployments",
+        json={
+            "name": "deploy-int8",
+            "task": "classification",
+            "device_preference": "auto",
+            "source": {
+                "experiment_id": experiment_id,
+                "attempt": 1,
+                "checkpoint_kind": "best_metric",
+                "variant_key": "ptq_int8",
+            },
+            "is_active": False,
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()["deployment"]
+    assert payload["source"]["variant_key"] == "ptq_int8"
+    assert "/variants/ptq_int8/" in payload["source"]["onnx_relpath"]
 
 
 @pytest.mark.asyncio

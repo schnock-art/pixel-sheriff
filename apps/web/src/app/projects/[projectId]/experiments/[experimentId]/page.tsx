@@ -15,6 +15,7 @@ import {
   getExperimentLogs,
   getExperimentOnnx,
   getExperimentRuntime,
+  getExperimentVariants,
   listExperimentSamples,
   listDeployments,
   listDatasetVersions,
@@ -22,14 +23,19 @@ import {
   resolveAssetUri,
   startExperiment,
   streamExperimentEvents,
+  triggerExperimentPtq,
+  triggerExperimentQat,
   updateExperiment,
   type ExperimentCheckpoint,
   type ExperimentEvaluationPayload,
   type ExperimentEvaluationSampleRow,
   type ExperimentMetricPoint,
+  type ExperimentVariantSummary,
+  type ExperimentVariantsPayload,
   type ExperimentOnnxPayload,
   type ExperimentRuntimePayload,
   type ExperimentStatus,
+  type ModelVariantKey,
   type ProjectExperimentRecord,
 } from "../../../../../lib/api";
 import {
@@ -137,6 +143,28 @@ function metricLabelForKey(key: string): string {
   return key.replace("val_", "val ").replace(/_/g, " ");
 }
 
+function formatBytes(value: unknown): string {
+  const numeric = asFiniteNumber(value);
+  if (numeric == null || numeric < 0) return "-";
+  if (numeric < 1024) return `${Math.round(numeric)} B`;
+  if (numeric < 1024 * 1024) return `${(numeric / 1024).toFixed(1)} KB`;
+  return `${(numeric / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function formatDelta(value: unknown, baseline: unknown, digits = 4): string {
+  const numeric = asFiniteNumber(value);
+  const baselineNumeric = asFiniteNumber(baseline);
+  if (numeric == null || baselineNumeric == null) return "-";
+  const delta = numeric - baselineNumeric;
+  const sign = delta > 0 ? "+" : "";
+  return `${sign}${delta.toFixed(digits)}`;
+}
+
+function variantMetricKeysForTask(task: string): string[] {
+  if (task === "detection") return ["mAP50", "mAP50_95", "precision", "recall"];
+  return ["accuracy", "macro_f1", "macro_precision", "macro_recall"];
+}
+
 export default function ExperimentDetailPage({ params }: ExperimentDetailPageProps) {
   const projectId = useMemo(() => decodeURIComponent(params.projectId), [params.projectId]);
   const experimentId = useMemo(() => decodeURIComponent(params.experimentId), [params.experimentId]);
@@ -176,6 +204,13 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
   const [onnxInfo, setOnnxInfo] = useState<ExperimentOnnxPayload | null>(null);
   const [onnxError, setOnnxError] = useState<string | null>(null);
   const [isOnnxLoading, setIsOnnxLoading] = useState(false);
+  const [variantsInfo, setVariantsInfo] = useState<ExperimentVariantsPayload | null>(null);
+  const [variantsError, setVariantsError] = useState<string | null>(null);
+  const [isVariantsLoading, setIsVariantsLoading] = useState(false);
+  const [selectedVariantKey, setSelectedVariantKey] = useState<ModelVariantKey | null>(null);
+  const [variantSplit, setVariantSplit] = useState<"val" | "test">("val");
+  const [isTriggeringPtq, setIsTriggeringPtq] = useState(false);
+  const [isTriggeringQat, setIsTriggeringQat] = useState(false);
   const [logsContent, setLogsContent] = useState("");
   const [logsCursor, setLogsCursor] = useState(0);
   const [logsAttempt, setLogsAttempt] = useState<number | null>(null);
@@ -209,6 +244,21 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
   const onnxInputShape = onnxInputShapeText(onnxInfo);
   const onnxClassSummary = onnxClassNamesText(onnxInfo);
   const onnxValidationSummary = onnxValidationText(onnxInfo);
+  const preferredVariantKey = variantsInfo?.preferred_variant_key ?? onnxInfo?.preferred_variant_key ?? null;
+  const availableVariantKeys = useMemo<ModelVariantKey[]>(
+    () =>
+      (variantsInfo?.variants ? Object.keys(variantsInfo.variants) : onnxInfo?.available_variants ?? []).filter((value): value is ModelVariantKey =>
+        value === "fp32" || value === "ptq_int8" || value === "qat_int8",
+      ),
+    [onnxInfo?.available_variants, variantsInfo?.variants],
+  );
+  const hasActiveVariantJob = useMemo(
+    () =>
+      Object.values(variantsInfo?.variants ?? {}).some(
+        (variant) => variant && (variant.status === "queued" || variant.status === "running"),
+      ),
+    [variantsInfo?.variants],
+  );
   const primaryMetricKey = metricKeyForTask(task);
   const primaryMetricLabel = metricLabelForKey(primaryMetricKey);
   const primaryColor = "#2f6fca";
@@ -226,6 +276,10 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
     if (typeof lastRunMessage === "string" && lastRunMessage.trim()) return lastRunMessage.trim();
     return null;
   }, [lastRunMessage, savedRecord?.error]);
+  const variantRows = variantsInfo?.variants ?? {};
+  const baselineVariant = variantRows.fp32 ?? null;
+  const ptqVariant = variantRows.ptq_int8 ?? null;
+  const qatVariant = variantRows.qat_int8 ?? null;
 
   const {
     chartWidth,
@@ -357,7 +411,9 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
   const loadOnnx = useCallback(async () => {
     setIsOnnxLoading(true);
     try {
-      const payload = await getExperimentOnnx(projectId, experimentId);
+      const payload = await getExperimentOnnx(projectId, experimentId, {
+        variant: selectedVariantKey ?? "preferred",
+      });
       setOnnxInfo(payload);
       setOnnxError(null);
     } catch (error) {
@@ -370,6 +426,29 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
       }
     } finally {
       setIsOnnxLoading(false);
+    }
+  }, [experimentId, projectId, selectedVariantKey]);
+
+  const loadVariants = useCallback(async () => {
+    setIsVariantsLoading(true);
+    try {
+      const payload = await getExperimentVariants(projectId, experimentId);
+      setVariantsInfo(payload);
+      setVariantsError(null);
+      setSelectedVariantKey((current) => {
+        if (current && payload.variants?.[current]) return current;
+        return payload.preferred_variant_key ?? current ?? null;
+      });
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 404) {
+        setVariantsInfo(null);
+        setVariantsError(null);
+      } else {
+        setVariantsInfo(null);
+        setVariantsError(parseApiErrorMessage(error, "Failed to load model variants"));
+      }
+    } finally {
+      setIsVariantsLoading(false);
     }
   }, [experimentId, projectId]);
 
@@ -429,6 +508,10 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
   }, [loadOnnx, status]);
 
   useEffect(() => {
+    void loadVariants();
+  }, [loadVariants, status]);
+
+  useEffect(() => {
     activeAttemptRef.current = activeAttempt;
   }, [activeAttempt]);
 
@@ -463,7 +546,7 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
   }, [toastMessage]);
 
   useEffect(() => {
-    if (!isRunningLike) return;
+    if (!isRunningLike && !hasActiveVariantJob) return;
     const stop = streamExperimentEvents(
       projectId,
       experimentId,
@@ -506,6 +589,13 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
         if (event.type === "onnx_export") {
           if (typeof event.attempt === "number") setActiveAttempt(event.attempt);
           void loadOnnx();
+          void loadVariants();
+          return;
+        }
+        if (event.type === "variant_status") {
+          if (typeof event.attempt === "number") setActiveAttempt(event.attempt);
+          void loadVariants();
+          void loadOnnx();
           return;
         }
         if (event.type === "done") {
@@ -524,11 +614,12 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
             setToastMessage("Training completed");
           }
           void loadDetail();
+          void loadVariants();
         }
       },
     });
     return () => stop();
-  }, [activeAttempt, experimentId, isRunningLike, loadDetail, loadOnnx, projectId]);
+  }, [activeAttempt, experimentId, hasActiveVariantJob, isRunningLike, loadDetail, loadOnnx, loadVariants, projectId]);
 
   function patchConfig(mutator: (next: Record<string, unknown>) => void) {
     setDraftConfig((current) => {
@@ -618,13 +709,14 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
       const deploymentList = await listDeployments(projectId);
       const deploymentNameBase = (savedRecord.name || draftName || `deploy_${experimentId.slice(0, 8)}`).trim();
       await createDeployment(projectId, {
-        name: `${deploymentNameBase} run ${onnxInfo.attempt}`,
+        name: `${deploymentNameBase} run ${onnxInfo.attempt} ${onnxInfo.variant_key ?? "preferred"}`,
         task: deploymentTaskForExperiment(savedRecord.task ?? task),
         device_preference: "auto",
         source: {
           experiment_id: experimentId,
           attempt: onnxInfo.attempt,
           checkpoint_kind: "best_metric",
+          variant_key: onnxInfo.variant_key ?? "preferred",
         },
         is_active: deploymentList.items.filter((item) => item.status === "available").length === 0,
       });
@@ -637,6 +729,38 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
       setToastMessage(message);
     } finally {
       setIsDeploying(false);
+    }
+  }
+
+  async function handleTriggerPtq() {
+    setIsTriggeringPtq(true);
+    try {
+      await triggerExperimentPtq(projectId, experimentId);
+      setToastTone("success");
+      setToastMessage("PTQ queued");
+      void loadVariants();
+    } catch (error) {
+      const message = parseApiErrorMessage(error, "Failed to start PTQ");
+      setToastTone("error");
+      setToastMessage(message);
+    } finally {
+      setIsTriggeringPtq(false);
+    }
+  }
+
+  async function handleTriggerQat() {
+    setIsTriggeringQat(true);
+    try {
+      await triggerExperimentQat(projectId, experimentId);
+      setToastTone("success");
+      setToastMessage("QAT queued");
+      void loadVariants();
+    } catch (error) {
+      const message = parseApiErrorMessage(error, "Failed to start QAT");
+      setToastTone("error");
+      setToastMessage(message);
+    } finally {
+      setIsTriggeringQat(false);
     }
   }
 
@@ -949,6 +1073,68 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
       recall: asFiniteNumber(value?.recall),
     }));
   }, [detectionOverall?.size_buckets]);
+
+  function renderVariantComparisonTable(rows: Array<ExperimentVariantSummary | null>, tableId: string) {
+    const metricKeys = variantMetricKeysForTask(task);
+    const baselineOverall = baselineVariant?.evaluation?.[variantSplit]?.overall ?? null;
+    const visibleRows = rows.filter((row): row is ExperimentVariantSummary => Boolean(row));
+    if (!visibleRows.length) {
+      return <p className="experiment-log-cursor">No model variants available yet.</p>;
+    }
+    return (
+      <div className="table-card">
+        <table className="project-table" data-testid={tableId}>
+          <thead>
+            <tr>
+              <th>Variant</th>
+              <th>Status</th>
+              {metricKeys.map((key) => (
+                <th key={key}>{key.replace(/_/g, " ")}</th>
+              ))}
+              <th>Size</th>
+              <th>Mean latency</th>
+              <th>Throughput</th>
+            </tr>
+          </thead>
+          <tbody>
+            {visibleRows.map((row) => {
+              const splitSummary = row.evaluation?.[variantSplit];
+              const overall = splitSummary?.overall ?? null;
+              const meanLatency = asFiniteNumber(
+                typeof row.benchmark === "object" && row.benchmark ? (row.benchmark as any).mean_latency_ms : null,
+              );
+              const throughput = asFiniteNumber(
+                typeof row.benchmark === "object" && row.benchmark ? (row.benchmark as any).throughput_items_per_second : null,
+              );
+              return (
+                <tr key={row.variant_key}>
+                  <td>
+                    <strong>{row.label}</strong>
+                    {row.preferred ? <div className="experiment-log-cursor">Preferred export</div> : null}
+                  </td>
+                  <td>{row.status}</td>
+                  {metricKeys.map((key) => (
+                    <td key={key}>
+                      {formatMetricValue(overall?.[key], 4)}
+                      {baselineOverall && row.variant_key !== "fp32" ? (
+                        <div className="experiment-log-cursor">Delta {formatDelta(overall?.[key], baselineOverall?.[key])}</div>
+                      ) : null}
+                    </td>
+                  ))}
+                  <td>{formatBytes(row.onnx?.size_bytes)}</td>
+                  <td>
+                    {formatMetricValue(meanLatency, 2)}
+                    {meanLatency != null ? " ms" : ""}
+                  </td>
+                  <td>{formatMetricValue(throughput, 2)}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    );
+  }
 
   return (
     <>
@@ -1534,12 +1720,15 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
                 </div>
 
                 <div className="experiment-card" data-testid="experiment-card-onnx">
-                  <h3>Exported Model (ONNX)</h3>
+                  <h3>Exported Models</h3>
                   <div className="experiment-status-row">
                     <span className="status-pill">{onnxStatus}</span>
                     {onnxInfo?.attempt ? <span>Run #{onnxInfo.attempt}</span> : null}
+                    {preferredVariantKey ? <span>Preferred: {preferredVariantKey}</span> : null}
                   </div>
                   <div className="experiment-onnx-grid">
+                    <span>Selected variant</span>
+                    <strong>{onnxInfo?.variant_key ?? preferredVariantKey ?? "-"}</strong>
                     <span>Input shape</span>
                     <strong>{onnxInputShape}</strong>
                     <span>Class order</span>
@@ -1547,14 +1736,31 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
                     <span>Validation</span>
                     <strong>{onnxValidationSummary}</strong>
                   </div>
+                  <div className="project-field">
+                    <label htmlFor="experiment-variant-select">Export variant</label>
+                    <select
+                      id="experiment-variant-select"
+                      value={selectedVariantKey ?? ""}
+                      onChange={(event) => setSelectedVariantKey((event.target.value || null) as ModelVariantKey | null)}
+                      disabled={availableVariantKeys.length < 1}
+                    >
+                      {availableVariantKeys.length < 1 ? <option value="">No variants available</option> : null}
+                      {availableVariantKeys.map((variantKey) => (
+                        <option key={variantKey} value={variantKey}>
+                          {variantKey}
+                          {preferredVariantKey === variantKey ? " (preferred)" : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                   <div className="experiment-logs-toolbar">
                     {onnxInfo?.model_onnx_url ? (
                       <a className="ghost-button" href={resolveAssetUri(onnxInfo.model_onnx_url)}>
-                        Download ONNX Model
+                        Download ONNX
                       </a>
                     ) : (
                       <button type="button" className="ghost-button" disabled>
-                        Download ONNX Model
+                        Download ONNX
                       </button>
                     )}
                     {onnxInfo?.metadata_url ? (
@@ -1582,10 +1788,73 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
                     ) : null}
                   </div>
                   {onnxError ? <p className="project-field-error">{onnxError}</p> : null}
+                  {variantsError ? <p className="project-field-error">{variantsError}</p> : null}
                   {onnxInfo?.status === "failed" && onnxInfo.error ? <p className="project-field-error">{onnxInfo.error}</p> : null}
                   {!onnxInfo && !onnxError && status === "completed" ? (
                     <p className="experiment-log-cursor">ONNX export is not available yet.</p>
                   ) : null}
+                </div>
+
+                <div className="experiment-card" data-testid="experiment-card-ptq">
+                  <h3>PTQ to INT8</h3>
+                  <p className="experiment-log-cursor">
+                    Compare the static INT8 PTQ export against the FP32 baseline on the {variantSplit.toUpperCase()} split.
+                  </p>
+                  <div className="experiment-logs-toolbar">
+                    <button
+                      type="button"
+                      className="primary-button"
+                      disabled={!variantsInfo?.support.ptq_supported || isTriggeringPtq || ptqVariant?.status === "running"}
+                      onClick={() => void handleTriggerPtq()}
+                    >
+                      {isTriggeringPtq || ptqVariant?.status === "running" ? "Running PTQ..." : "Trigger PTQ"}
+                    </button>
+                    <button
+                      type="button"
+                      className={`ghost-button${variantSplit === "val" ? " active" : ""}`}
+                      onClick={() => setVariantSplit("val")}
+                    >
+                      Val
+                    </button>
+                    <button
+                      type="button"
+                      className={`ghost-button${variantSplit === "test" ? " active" : ""}`}
+                      onClick={() => setVariantSplit("test")}
+                    >
+                      Test
+                    </button>
+                    <button type="button" className="ghost-button" onClick={() => void loadVariants()} disabled={isVariantsLoading}>
+                      {isVariantsLoading ? "Refreshing..." : "Refresh variants"}
+                    </button>
+                  </div>
+                  {!variantsInfo?.support.ptq_supported ? <p className="project-field-error">PTQ is not supported for this task.</p> : null}
+                  {ptqVariant?.error ? <p className="project-field-error">{ptqVariant.error}</p> : null}
+                  {renderVariantComparisonTable([baselineVariant, ptqVariant], "experiment-variant-table-ptq")}
+                </div>
+
+                <div className="experiment-card" data-testid="experiment-card-qat">
+                  <h3>QAT to INT8</h3>
+                  <p className="experiment-log-cursor">
+                    Fine-tune for the INT8 target when PTQ is not good enough, then compare QAT, PTQ, and FP32 on the {variantSplit.toUpperCase()} split.
+                  </p>
+                  <div className="experiment-logs-toolbar">
+                    <button
+                      type="button"
+                      className="primary-button"
+                      disabled={!variantsInfo?.support.qat_supported || isTriggeringQat || qatVariant?.status === "running"}
+                      onClick={() => void handleTriggerQat()}
+                    >
+                      {isTriggeringQat || qatVariant?.status === "running" ? "Running QAT..." : "Trigger QAT"}
+                    </button>
+                    <span className="experiment-log-cursor">
+                      Source checkpoint: {savedRecord?.artifacts_json?.selected_checkpoint_kind ? String(savedRecord.artifacts_json.selected_checkpoint_kind) : "best_metric"}
+                    </span>
+                  </div>
+                  {!variantsInfo?.support.qat_supported ? (
+                    <p className="project-field-error">{variantsInfo?.support.qat_reason ?? "QAT is classification-only in v1."}</p>
+                  ) : null}
+                  {qatVariant?.error ? <p className="project-field-error">{qatVariant.error}</p> : null}
+                  {renderVariantComparisonTable([baselineVariant, ptqVariant, qatVariant], "experiment-variant-table-qat")}
                 </div>
 
                 <div className="experiment-card">

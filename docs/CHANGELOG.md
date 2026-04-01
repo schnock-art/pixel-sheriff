@@ -5,6 +5,10 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- Detection INT8 variant parity:
+  - detection experiments now report both PTQ and QAT as supported model-variant flows
+  - detection QAT now mirrors classification semantics by fine-tuning from the selected checkpoint before producing a static INT8 ONNX export
+  - added focused trainer and API regression coverage for detection variant support, queuing, and artifact generation paths
 - Docs and test baseline cleanup:
   - moved historical `docu/` references into `docs/archive/` and added `docs/README.md` as the current docs index
   - moved the changelog into `docs/CHANGELOG.md` so the repo now has a single docs home

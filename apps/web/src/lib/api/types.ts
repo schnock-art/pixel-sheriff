@@ -684,6 +684,8 @@ export interface ExperimentRuntimePayload {
 export interface ExperimentOnnxPayload {
   attempt: number;
   status: "exported" | "failed";
+  variant_key?: "fp32" | "ptq_int8" | "qat_int8" | null;
+  preferred_variant_key?: "fp32" | "ptq_int8" | "qat_int8" | null;
   model_onnx_url?: string | null;
   metadata_url: string;
   input_shape?: number[];
@@ -692,6 +694,66 @@ export interface ExperimentOnnxPayload {
   preprocess?: Record<string, unknown>;
   validation?: Record<string, unknown> | null;
   error?: string | null;
+  available_variants?: Array<"fp32" | "ptq_int8" | "qat_int8">;
+}
+
+export type ModelVariantKey = "fp32" | "ptq_int8" | "qat_int8";
+export type RequestedModelVariantKey = "preferred" | ModelVariantKey;
+
+export interface ExperimentVariantSplitSummary {
+  status?: string | null;
+  overall?: Record<string, number | null> | null;
+  relpath?: string | null;
+}
+
+export interface ExperimentVariantBenchmarkSummary {
+  status?: string | null;
+  provider?: string | null;
+  batch_size?: number | null;
+  mean_latency_ms?: number | null;
+  p50_latency_ms?: number | null;
+  p95_latency_ms?: number | null;
+  throughput_items_per_second?: number | null;
+}
+
+export interface ExperimentVariantSummary {
+  variant_key: ModelVariantKey;
+  label: string;
+  kind: string;
+  attempt: number;
+  status: "queued" | "running" | "ready" | "failed" | "unsupported";
+  preferred?: boolean;
+  error?: string | null;
+  checkpoint_kind?: string | null;
+  quantized?: boolean | null;
+  quantization_strategy?: string | null;
+  onnx?: {
+    model_relpath?: string | null;
+    metadata_relpath?: string | null;
+    size_bytes?: number | null;
+  };
+  evaluation?: Record<string, ExperimentVariantSplitSummary>;
+  benchmark?: ExperimentVariantBenchmarkSummary | Record<string, unknown> | null;
+  qat?: Record<string, unknown> | null;
+}
+
+export interface ExperimentVariantsPayload {
+  attempt: number;
+  preferred_variant_key?: ModelVariantKey | null;
+  support: {
+    ptq_supported: boolean;
+    qat_supported: boolean;
+    qat_reason?: string | null;
+  };
+  variants: Partial<Record<ModelVariantKey, ExperimentVariantSummary>>;
+}
+
+export interface ExperimentVariantActionResponse {
+  ok: boolean;
+  attempt: number;
+  variant_key: ModelVariantKey;
+  status: "queued" | "running" | "ready" | "failed" | "unsupported";
+  job_id?: string | null;
 }
 
 export interface ExperimentLogsChunk {
@@ -708,6 +770,7 @@ export interface DeploymentSource {
   experiment_id: string;
   attempt: number;
   checkpoint_kind: "best_metric" | "best_loss" | "latest";
+  variant_key?: ModelVariantKey | null;
   onnx_relpath: string;
   metadata_relpath: string;
 }
@@ -739,6 +802,7 @@ export interface CreateDeploymentPayload {
     experiment_id: string;
     attempt: number;
     checkpoint_kind?: "best_metric" | "best_loss" | "latest";
+    variant_key?: RequestedModelVariantKey;
   };
   is_active?: boolean;
 }
@@ -826,6 +890,15 @@ export type ExperimentEvent =
   | ({ type: "metric"; attempt?: number; ts?: string } & ExperimentMetricPoint)
   | ({ type: "checkpoint"; attempt?: number; ts?: string } & ExperimentCheckpoint)
   | { type: "onnx_export"; status: "exported" | "failed"; attempt?: number; model_uri?: string; metadata_uri?: string; error?: string; ts?: string }
+  | {
+      type: "variant_status";
+      variant_key: ModelVariantKey;
+      status: "queued" | "running" | "ready" | "failed" | "unsupported";
+      attempt?: number;
+      ts?: string;
+      message?: string;
+      error?: string;
+    }
   | { type: "done"; status: ExperimentStatus; attempt?: number; job_id?: string; ts?: string; message?: string; error_code?: string };
 
 export interface ExperimentEventEnvelope {

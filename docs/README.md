@@ -6,6 +6,7 @@ If you are updating behavior or workflows, start with the current docs and activ
 
 ## Current Docs
 
+- `../AGENTS.md`: repo-level guidance for agents on which docs are canonical, when to update them, and the expectation that behavior changes ship with tests
 - `architecture.md`: current runtime and domain architecture, including low-latency sequence import/capture preview overlays, deployment selection, and trainer inference device behavior
 - `demo/README.md`: deterministic README and demo asset workflow
 - `CHANGELOG.md`: notable repository changes, including modal preview inference, preview latency tuning, deployed-model selection, and CUDA runtime updates

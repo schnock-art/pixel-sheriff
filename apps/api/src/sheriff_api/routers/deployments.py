@@ -33,6 +33,7 @@ from sheriff_api.services.inference_client import InferenceClient
 from sheriff_api.services.storage import LocalStorage
 
 from .experiments.shared import experiment_store, normalize_task, require_project
+from .experiments.onnx import _resolve_variant_paths
 
 router = APIRouter(tags=["deployments"])
 settings = get_settings()
@@ -399,18 +400,21 @@ async def create_deployment(
             details={"project_id": project_id, "experiment_id": payload.source.experiment_id},
         )
 
-    onnx_path = experiment_store.get_onnx_path(project_id, payload.source.experiment_id, payload.source.attempt, file_name="model.onnx")
-    metadata_path = experiment_store.get_onnx_path(
-        project_id, payload.source.experiment_id, payload.source.attempt, file_name="onnx.metadata.json"
+    resolved_attempt, resolved_variant_key, _preferred_variant_key, onnx_path, metadata_path, _available_variants = _resolve_variant_paths(
+        project_id=project_id,
+        experiment_id=payload.source.experiment_id,
+        current=experiment,
+        requested_variant=payload.source.variant_key,
     )
-    if not onnx_path.exists() or not metadata_path.exists():
+    if not isinstance(onnx_path, Path) or not isinstance(metadata_path, Path) or not onnx_path.exists() or not metadata_path.exists():
         raise api_error(status_code=404, code="onnx_not_found", message="ONNX export not available for this experiment")
 
     model_key = _onnx_sha256(onnx_path)
     source = {
         "experiment_id": payload.source.experiment_id,
-        "attempt": payload.source.attempt,
+        "attempt": resolved_attempt,
         "checkpoint_kind": payload.source.checkpoint_kind,
+        "variant_key": resolved_variant_key,
         "onnx_relpath": _relpath(onnx_path),
         "metadata_relpath": _relpath(metadata_path),
     }

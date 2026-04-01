@@ -423,13 +423,14 @@ def export_model_to_onnx(
     class_order: list[str] | None,
     class_names: list[str],
     extra_metadata: dict[str, Any] | None = None,
+    output_dir: Path | None = None,
 ) -> OnnxExportResult:
     """Generic ONNX export for any pre-built model.
 
     Callers are responsible for building and configuring the model before calling this.
     This function handles the ONNX serialization, validation, and metadata persistence.
     """
-    onnx_dir = storage.run_dir(project_id, experiment_id, attempt) / "onnx"
+    onnx_dir = output_dir if isinstance(output_dir, Path) else storage.run_dir(project_id, experiment_id, attempt) / "onnx"
     onnx_dir.mkdir(parents=True, exist_ok=True)
     model_path = onnx_dir / "model.onnx"
     metadata_path = onnx_dir / "onnx.metadata.json"

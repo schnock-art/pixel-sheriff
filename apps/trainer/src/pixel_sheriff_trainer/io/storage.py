@@ -46,6 +46,52 @@ class ExperimentStorage:
     def run_json_path(self, project_id: str, experiment_id: str, attempt: int) -> Path:
         return self.run_dir(project_id, experiment_id, attempt) / "run.json"
 
+    def variants_dir(self, project_id: str, experiment_id: str, attempt: int) -> Path:
+        return self.run_dir(project_id, experiment_id, attempt) / "variants"
+
+    def variants_index_path(self, project_id: str, experiment_id: str, attempt: int) -> Path:
+        return self.variants_dir(project_id, experiment_id, attempt) / "index.json"
+
+    def variant_dir(self, project_id: str, experiment_id: str, attempt: int, variant_key: str) -> Path:
+        return self.variants_dir(project_id, experiment_id, attempt) / variant_key
+
+    def variant_status_path(self, project_id: str, experiment_id: str, attempt: int, variant_key: str) -> Path:
+        return self.variant_dir(project_id, experiment_id, attempt, variant_key) / "status.json"
+
+    def variant_onnx_dir(self, project_id: str, experiment_id: str, attempt: int, variant_key: str) -> Path:
+        return self.variant_dir(project_id, experiment_id, attempt, variant_key) / "onnx"
+
+    def variant_onnx_model_path(self, project_id: str, experiment_id: str, attempt: int, variant_key: str) -> Path:
+        return self.variant_onnx_dir(project_id, experiment_id, attempt, variant_key) / "model.onnx"
+
+    def variant_onnx_metadata_path(self, project_id: str, experiment_id: str, attempt: int, variant_key: str) -> Path:
+        return self.variant_onnx_dir(project_id, experiment_id, attempt, variant_key) / "onnx.metadata.json"
+
+    def variant_evaluation_path(
+        self,
+        project_id: str,
+        experiment_id: str,
+        attempt: int,
+        variant_key: str,
+        split: str,
+    ) -> Path:
+        return self.variant_dir(project_id, experiment_id, attempt, variant_key) / f"evaluation.{split}.json"
+
+    def variant_benchmark_path(self, project_id: str, experiment_id: str, attempt: int, variant_key: str) -> Path:
+        return self.variant_dir(project_id, experiment_id, attempt, variant_key) / "benchmark.json"
+
+    def variant_training_log_path(self, project_id: str, experiment_id: str, attempt: int, variant_key: str) -> Path:
+        return self.variant_dir(project_id, experiment_id, attempt, variant_key) / "training.log"
+
+    def variant_metrics_path(self, project_id: str, experiment_id: str, attempt: int, variant_key: str) -> Path:
+        return self.variant_dir(project_id, experiment_id, attempt, variant_key) / "metrics.jsonl"
+
+    def variant_checkpoints_path(self, project_id: str, experiment_id: str, attempt: int, variant_key: str) -> Path:
+        return self.variant_dir(project_id, experiment_id, attempt, variant_key) / "checkpoints.json"
+
+    def variant_checkpoints_dir(self, project_id: str, experiment_id: str, attempt: int, variant_key: str) -> Path:
+        return self.variant_dir(project_id, experiment_id, attempt, variant_key) / "checkpoints"
+
     def events_path(self, project_id: str, experiment_id: str, attempt: int) -> Path:
         return self.run_dir(project_id, experiment_id, attempt) / "events.jsonl"
 

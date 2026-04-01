@@ -14,10 +14,12 @@ class TrainQueue:
         self._redis_url = redis_url or settings.redis_url
         self._queue_key = queue_key or settings.job_queue_key
 
-    async def enqueue_train_job(self, job_payload: dict[str, Any]) -> None:
+    async def enqueue_job(self, job_payload: dict[str, Any]) -> None:
         redis = Redis.from_url(self._redis_url, decode_responses=True)
         try:
             await redis.rpush(self._queue_key, json.dumps(job_payload, separators=(",", ":")))
         finally:
             await redis.aclose()
 
+    async def enqueue_train_job(self, job_payload: dict[str, Any]) -> None:
+        await self.enqueue_job(job_payload)

@@ -8,7 +8,7 @@ from redis.asyncio import Redis
 import uvicorn
 
 from pixel_sheriff_trainer.inference.app import create_app
-from pixel_sheriff_trainer.jobs import parse_train_job
+from pixel_sheriff_trainer.jobs import parse_job
 from pixel_sheriff_trainer.runner import TrainRunner
 
 
@@ -33,7 +33,7 @@ async def worker_loop() -> None:
                 continue
             _queue_name, raw_payload = popped
             try:
-                job = parse_train_job(raw_payload)
+                job = parse_job(raw_payload)
             except Exception as exc:
                 print(f"[trainer] invalid job payload: {exc}", flush=True)
                 continue
