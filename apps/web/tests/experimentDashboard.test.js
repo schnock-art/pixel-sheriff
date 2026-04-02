@@ -2,6 +2,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 
 const {
+  appendQatDashboardSeries,
   dashboardSeriesForTask,
   dashboardTabsForTask,
   filterPredictionRows,
@@ -64,4 +65,19 @@ test("dashboardTabsForTask and dashboardSeriesForTask expose detection metrics",
 
   const runtimeSeries = dashboardSeriesForTask("detection", "runtime");
   assert.deepEqual(runtimeSeries.map((series) => series.key), ["epoch_seconds", "eta_seconds"]);
+});
+
+test("appendQatDashboardSeries mirrors visible metrics as dashed QAT overlays", () => {
+  const baseSeries = dashboardSeriesForTask("classification", "accuracy");
+  const combined = appendQatDashboardSeries(baseSeries, [{ epoch: 1, train_accuracy: 0.6, val_accuracy: 0.7 }]);
+
+  assert.deepEqual(combined.map((series) => series.key), [
+    "train_accuracy",
+    "val_accuracy",
+    "qat:train_accuracy",
+    "qat:val_accuracy",
+  ]);
+  assert.equal(combined[2].source, "qat");
+  assert.equal(combined[2].metricKey, "train_accuracy");
+  assert.equal(combined[2].strokeDasharray, "6 4");
 });

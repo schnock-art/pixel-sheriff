@@ -175,7 +175,9 @@ function buildLinePoints(metrics, seriesKey, options = {}) {
     ? options.domain
     : metricDomain(rows, seriesKeys, { useLog, clampBounded: true });
   const range = Math.max(1e-9, domain.max - domain.min);
-  const maxEpoch = Math.max(...rows.map((row) => Number.parseInt(String(row.epoch), 10)).filter((epoch) => Number.isFinite(epoch)));
+  const maxEpoch = Number.isFinite(options.maxEpoch) && options.maxEpoch >= 1
+    ? Math.max(1, Math.floor(options.maxEpoch))
+    : Math.max(...rows.map((row) => Number.parseInt(String(row.epoch), 10)).filter((epoch) => Number.isFinite(epoch)));
   const chartWidth = Math.max(1, width - (padding * 2));
   const chartHeight = Math.max(1, height - (padding * 2));
 

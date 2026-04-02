@@ -424,6 +424,7 @@ class ExperimentVariantSummaryResponse(BaseModel):
     evaluation: dict[str, ExperimentVariantSplitResponse] = Field(default_factory=dict)
     benchmark: ExperimentVariantBenchmarkResponse | dict[str, Any] | None = None
     benchmarks: dict[str, ExperimentVariantBenchmarkResponse] = Field(default_factory=dict)
+    metrics: list[ExperimentMetricPoint] = Field(default_factory=list)
     qat: dict[str, Any] | None = None
 
 

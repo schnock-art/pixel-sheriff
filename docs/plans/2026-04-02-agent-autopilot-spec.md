@@ -41,6 +41,19 @@ Recommended framing:
 - the system must explain why it made a recommendation
 - the user stays in control of experiment launch, deployment activation, and label acceptance
 
+## V1 Decisions
+
+The following decisions are now in scope for the first implementation pass:
+
+- recommendation generation is deterministic and heuristic-driven
+- user-facing copy is rendered from structured outputs using a consistent template layer, not an LLM
+- rollout order is:
+  - model builder first
+  - experiments second
+  - deploy third
+- read-only advice is computed on demand and is not persisted in v1
+- durable persistence is reserved for accepted actions later, starting with accepted sweep plans or equivalent execution records
+
 ## Goals
 
 - Reduce the time from dataset version to first good experiment.
@@ -152,12 +165,15 @@ Includes:
 - baseline config recommendation
 - short rationale blocks
 - "recommended next actions" UI
+- templated natural-language rendering of structured recommendations
+- first UI entry point in model builder
 
 Does not include:
 
 - experiment queueing
 - auto-created experiments
 - deployment recommendation writes
+- persistence of read-only recommendation cards
 
 ### Phase 2: Sweep Runner
 
@@ -169,6 +185,8 @@ Includes:
 - one-click "create recommended sweep"
 - optional one-click "start all queued"
 - experiment grouping by autopilot run
+- rollout focus on experiments pages and experiment creation flows
+- variant follow-up recommendations for supported experiment outputs
 
 Guardrails:
 
@@ -176,15 +194,17 @@ Guardrails:
 - only supported combinations from registry and existing config contracts
 - no mutation of existing experiments
 
-### Phase 3: Variant Intelligence
+### Phase 3: Deployment Advisor
 
-Use the existing variant pipeline to recommend and compare export paths.
+Recommend, but do not automatically activate, a deployment candidate.
 
 Includes:
 
-- suggest PTQ, QAT, or FP16 when supported for the task
-- summarize tradeoffs across `fp32`, `fp16`, `ptq_int8`, and `qat_int8`
-- mark a recommended serving candidate and a recommended best-quality candidate
+- deployment candidate ranking
+- explicit rationale and caveats
+- recommended threshold range where applicable
+- reminder when no experiment meets a minimum confidence bar
+- deployment advice informed by current experiment and variant outputs
 
 ### Phase 4: Curation Loop
 
@@ -197,28 +217,30 @@ Includes:
 - "train again after review" recommendations
 - explanations tied to confusion rows, low-confidence samples, or rejected deployment predictions
 
-### Phase 5: Deployment Advisor
+### Phase 5: Optional LLM Polish Layer
 
-Recommend, but do not automatically activate, a deployment candidate.
+Keep the deterministic recommendation engine as the source of truth, and optionally add a polishing layer later.
 
 Includes:
 
-- deployment candidate ranking
-- explicit rationale and caveats
-- recommended threshold range where applicable
-- reminder when no experiment meets a minimum confidence bar
+- natural-language rewriting on top of structured outputs
+- explanation tone improvements without changing the recommendation contract
+- optional richer conversational summaries for the same underlying advice
 
 ## UX Proposal
 
 Introduce a project-scoped "Autopilot" surface in stages.
 
-Suggested initial surfaces:
+Rollout order:
 
 - model builder: "Recommend baseline"
 - experiments list/new experiment: "Plan sweep"
+- deploy page: "Recommend candidate"
+
+Later surfaces:
+
 - experiment detail: "Explain results" and "Recommend variants"
 - labeling workspace or dataset page: "Review hard examples"
-- deploy page: "Recommend candidate"
 
 Phase 1 UI should bias toward side panels, cards, or callouts inside existing pages rather than a brand-new top-level workflow.
 
@@ -231,9 +253,29 @@ The first version should be deterministic and repo-native:
 - use dataset metadata and experiment history
 - use explicit heuristics and scoring rules
 - produce structured recommendation payloads
-- optionally add LLM-generated explanation text later
+- render user-facing copy from those payloads using deterministic templates
+- keep explanation wording consistent so an optional LLM layer can be added later without changing the core contracts
 
 This avoids making product value depend on an external model provider before the internal recommendation contracts are stable.
+
+### Structured Output Plus Template Renderer
+
+The v1 engine should return structured recommendation payloads and let the UI or shared formatter build the final human-readable copy.
+
+Example output fields:
+
+- `summary`
+- `reasoning`
+- `recommended_config`
+- `next_actions`
+- `confidence`
+
+Example rendering pattern:
+
+- structured output: `task=detection`, `family=retinanet`, `input_size=640`, `augmentation_profile=none`
+- templated copy: "Based on this dataset, I recommend a RetinaNet baseline at 640 input with no heavy augmentation because bbox coverage is still limited."
+
+This keeps the product understandable, testable, and easy to upgrade later.
 
 ### Suggested API Shape
 
@@ -250,27 +292,28 @@ Likely endpoint families:
 
 The important part is the contract shape, not the exact paths yet.
 
-### Suggested Record Types
+### Persistence Policy
 
-Persist autopilot artifacts as explicit records rather than transient text blobs.
+V1 should not persist every read-only recommendation.
 
-Candidate record types:
+Recommended approach:
+
+- compute read-only advice on demand
+- persist accepted actions later
+- first persisted autopilot artifact should be an accepted sweep plan or equivalent execution record
+
+Why this scope is preferred:
+
+- keeps Phase 1 lightweight
+- avoids early schema and lifecycle complexity for stale advice
+- still leaves room for auditability once the product starts taking user-approved actions
+
+Later candidate record types:
 
 - `autopilot_runs`
-- `autopilot_recommendations`
 - `autopilot_sweep_plans`
-- `autopilot_explanations`
-
-Each record should store:
-
-- project/task/dataset context
-- inputs used
-- outputs produced
-- schema version
-- created timestamp
-- optional accepted/rejected state
-
-That gives the product an audit trail and keeps "why did it do that?" answerable.
+- `autopilot_action_acceptances`
+- `autopilot_execution_groups`
 
 ## Recommendation Inputs
 
@@ -324,25 +367,27 @@ Examples of repo-native heuristics that fit the current product:
 
 ## Roadmap
 
-### Milestone A: Contracts And Heuristics
+### Milestone A: Model Builder Advisor
 
 - define autopilot payload schemas
 - add dataset-health and baseline-recommendation services
 - add focused API tests for recommendation contracts
-- add a minimal web UI callout in model builder or experiments
+- add deterministic template rendering for user-facing copy
+- add the first web UI callout in model builder
 
-### Milestone B: Sweep Planning
+### Milestone B: Experiments And Sweep Planning
 
 - define sweep-plan schema
 - generate bounded experiment sets
 - support one-click creation of queued experiments
 - show autopilot-created experiment groups in the UI
+- add variant follow-up recommendations in experiment workflows
 
-### Milestone C: Variant Recommendation
+### Milestone C: Deploy Advisor
 
-- score FP32, FP16, PTQ, and QAT follow-ups using current task support
-- summarize export/runtime tradeoffs in experiment detail
 - add deployment-candidate recommendation payload
+- rank deployment candidates based on current experiment and variant outputs
+- surface the recommendation in the deploy page without auto-activating it
 
 ### Milestone D: Relabel Intelligence
 
@@ -350,16 +395,14 @@ Examples of repo-native heuristics that fit the current product:
 - aggregate low-confidence and wrong-prediction evidence
 - expose review queues back in labeling and dataset workflows
 
-### Milestone E: Optional LLM Layer
+### Milestone E: Optional LLM Polish Layer
 
 - add natural-language explanation generation on top of structured recommendations
 - keep structured recommendation generation deterministic underneath
 - never make the LLM the source of truth for supported combinations
 
-## Open Questions
+## Remaining Open Questions
 
-- Should Phase 1 ship with purely deterministic copy, or with optional LLM-written explanations?
-- Should autopilot artifacts live in PostgreSQL immediately, or start with file-backed persistence like some current model metadata paths?
 - Should sweep plans create experiments only, or also auto-start them behind a single confirmation?
 - What is the minimum dataset-health signal set needed to feel useful on day one?
 - Do we want "Autopilot" to be global branding, or should the first UI simply use labels like "Recommend baseline" and "Plan sweep"?

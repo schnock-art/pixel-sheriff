@@ -530,6 +530,7 @@ def _seed_experiment_variant_artifacts(
     preferred_variant_key: str | None = None,
     status: str = "ready",
     task: str = "classification",
+    metrics_rows: list[dict[str, object]] | None = None,
 ) -> None:
     settings = get_settings()
     experiment_dir = Path(settings.storage_root) / "experiments" / project_id / experiment_id
@@ -605,6 +606,12 @@ def _seed_experiment_variant_artifacts(
         ),
         encoding="utf-8",
     )
+    if metrics_rows:
+        metrics_path = variant_dir / "metrics.jsonl"
+        metrics_path.write_text(
+            "".join(f"{json.dumps(row, sort_keys=True)}\n" for row in metrics_rows),
+            encoding="utf-8",
+        )
     index_path = experiment_dir / "runs" / str(attempt) / "variants" / "index.json"
     if index_path.exists():
         index_payload = json.loads(index_path.read_text(encoding="utf-8"))

@@ -53,6 +53,7 @@ import {
   metricValueByKey,
 } from "../../../../../lib/workspace/experimentMetrics";
 import {
+  appendQatDashboardSeries,
   dashboardSeriesForTask,
   dashboardTabsForTask,
   filterPredictionRows,
@@ -416,8 +417,8 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
     }
   }, [experimentId, projectId]);
 
-  const loadOnnx = useCallback(async () => {
-    setIsOnnxLoading(true);
+  const loadOnnx = useCallback(async (options: { silent?: boolean } = {}) => {
+    if (!options.silent) setIsOnnxLoading(true);
     try {
       const payload = await getExperimentOnnx(projectId, experimentId, {
         variant: selectedVariantKey ?? "preferred",
@@ -433,12 +434,12 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
         setOnnxError(parseApiErrorMessage(error, "Failed to load ONNX export"));
       }
     } finally {
-      setIsOnnxLoading(false);
+      if (!options.silent) setIsOnnxLoading(false);
     }
   }, [experimentId, projectId, selectedVariantKey]);
 
-  const loadVariants = useCallback(async () => {
-    setIsVariantsLoading(true);
+  const loadVariants = useCallback(async (options: { silent?: boolean } = {}) => {
+    if (!options.silent) setIsVariantsLoading(true);
     try {
       const payload = await getExperimentVariants(projectId, experimentId);
       setVariantsInfo(payload);
@@ -456,7 +457,7 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
         setVariantsError(parseApiErrorMessage(error, "Failed to load model variants"));
       }
     } finally {
-      setIsVariantsLoading(false);
+      if (!options.silent) setIsVariantsLoading(false);
     }
   }, [experimentId, projectId]);
 
@@ -554,7 +555,7 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
   }, [toastMessage]);
 
   useEffect(() => {
-    if (!isRunningLike && !hasActiveVariantJob) return;
+    if (!isRunningLike) return;
     const stop = streamExperimentEvents(
       projectId,
       experimentId,
@@ -627,7 +628,29 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
       },
     });
     return () => stop();
-  }, [activeAttempt, experimentId, hasActiveVariantJob, isRunningLike, loadDetail, loadOnnx, loadVariants, projectId]);
+  }, [activeAttempt, experimentId, isRunningLike, loadDetail, loadOnnx, loadVariants, projectId]);
+
+  useEffect(() => {
+    if (!hasActiveVariantJob) return;
+    let cancelled = false;
+
+    async function refreshVariantArtifacts() {
+      await Promise.all([
+        loadVariants({ silent: true }),
+        loadOnnx({ silent: true }),
+      ]);
+    }
+
+    void refreshVariantArtifacts();
+    const timer = window.setInterval(() => {
+      if (cancelled) return;
+      void refreshVariantArtifacts();
+    }, 2000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [hasActiveVariantJob, loadOnnx, loadVariants]);
 
   function patchConfig(mutator: (next: Record<string, unknown>) => void) {
     setDraftConfig((current) => {
@@ -937,29 +960,43 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
   }, [evaluation?.per_class, perClassSort]);
 
   const dashboardTabs = useMemo(() => dashboardTabsForTask(task), [task]);
-
-  const dashboardAvailableSeries = useMemo(() => dashboardSeriesForTask(task, dashboardChartTab), [dashboardChartTab, task]);
+  const qatMetrics = useMemo(
+    () => (Array.isArray(qatVariant?.metrics) ? qatVariant.metrics : []),
+    [qatVariant?.metrics],
+  );
+  const dashboardAvailableSeries = useMemo(
+    () => appendQatDashboardSeries(dashboardSeriesForTask(task, dashboardChartTab), qatMetrics),
+    [dashboardChartTab, qatMetrics, task],
+  );
   const dashboardSeries = useMemo(
     () => dashboardAvailableSeries.filter((series) => dashboardEnabledSeries[series.key] !== false),
     [dashboardAvailableSeries, dashboardEnabledSeries],
   );
-  const dashboardSeriesKeys = useMemo(() => dashboardSeries.map((series) => series.key), [dashboardSeries]);
   const dashboardBounded =
     dashboardChartTab === "accuracy" ||
     dashboardChartTab === "prf" ||
     dashboardChartTab === "map" ||
     dashboardChartTab === "quality";
   const dashboardHasVisibleSeries = dashboardSeries.length > 0;
+  const dashboardEpochMax = useMemo(() => {
+    const epochs = dashboardSeries.flatMap((series) =>
+      (series.source === "qat" ? qatMetrics : metrics)
+        .map((row) => Number.parseInt(String(row?.epoch), 10))
+        .filter((epoch) => Number.isFinite(epoch) && epoch >= 1),
+    );
+    if (epochs.length < 1) return 1;
+    return Math.max(...epochs);
+  }, [dashboardSeries, metrics, qatMetrics]);
   const dashboardHasData = useMemo(
     () =>
-      dashboardSeriesKeys.length > 0 &&
-      metrics.some((row) =>
-        dashboardSeriesKeys.some((key) => {
-          const value = metricValueByKey(row, key);
+      dashboardSeries.length > 0 &&
+      dashboardSeries.some((series) =>
+        (series.source === "qat" ? qatMetrics : metrics).some((row) => {
+          const value = metricValueByKey(row, series.metricKey ?? series.key);
           return value != null;
         }),
       ),
-    [dashboardSeriesKeys, metrics],
+    [dashboardSeries, metrics, qatMetrics],
   );
   const dashboardAxisLabel =
     dashboardChartTab === "loss"
@@ -971,12 +1008,12 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
           : "Metric value";
   const dashboardValues = useMemo(
     () =>
-      metrics.flatMap((row) =>
-        dashboardSeriesKeys
-          .map((key) => metricValueByKey(row, key))
+      dashboardSeries.flatMap((series) =>
+        (series.source === "qat" ? qatMetrics : metrics)
+          .map((row) => metricValueByKey(row, series.metricKey ?? series.key))
           .filter((value): value is number => value != null),
       ),
-    [dashboardSeriesKeys, metrics],
+    [dashboardSeries, metrics, qatMetrics],
   );
   const dashboardDomain = useMemo(
     () =>
@@ -996,23 +1033,23 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
     [dashboardBounded, dashboardDomain, dashboardLogScale],
   );
   const dashboardXTicks = useMemo(
-    () => Array.from(new Set(buildTicks({ min: 1, max: chartMaxEpoch }, { count: 5 }).map((tick) => Math.max(1, Math.round(tick))))),
-    [chartMaxEpoch],
+    () => Array.from(new Set(buildTicks({ min: 1, max: dashboardEpochMax }, { count: 5 }).map((tick) => Math.max(1, Math.round(tick))))),
+    [dashboardEpochMax],
   );
   const dashboardLinePoints = useMemo(
     () =>
       dashboardSeries.map((series) => ({
         ...series,
-        points: buildLinePoints(metrics, series.key, {
+        points: buildLinePoints(series.source === "qat" ? qatMetrics : metrics, series.metricKey ?? series.key, {
           width: chartWidth,
           height: chartHeight,
           padding: chartPadding,
-          seriesKeys: dashboardSeriesKeys,
           domain: dashboardDomain,
           useLog: dashboardLogScale,
+          maxEpoch: dashboardEpochMax,
         }),
       })),
-    [chartHeight, chartPadding, chartWidth, dashboardDomain, dashboardLogScale, dashboardSeries, dashboardSeriesKeys, metrics],
+    [chartHeight, chartPadding, chartWidth, dashboardDomain, dashboardEpochMax, dashboardLogScale, dashboardSeries, metrics, qatMetrics],
   );
 
   useEffect(() => {
@@ -1153,6 +1190,7 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
                     : null;
               const meanLatency = asFiniteNumber(benchmarkSummary?.mean_latency_ms);
               const throughput = asFiniteNumber(benchmarkSummary?.throughput_items_per_second);
+              const benchmarkMessage = typeof benchmarkSummary?.message === "string" ? benchmarkSummary.message : null;
               return (
                 <tr key={row.variant_key}>
                   <td>
@@ -1172,8 +1210,8 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
                   <td>
                     {formatMetricValue(meanLatency, 2)}
                     {meanLatency != null ? " ms" : ""}
-                    {benchmarkSummary?.status === "unavailable" && benchmarkSummary?.message ? (
-                      <div className="experiment-log-cursor">{benchmarkSummary.message}</div>
+                    {benchmarkSummary?.status === "unavailable" && benchmarkMessage ? (
+                      <div className="experiment-log-cursor">{benchmarkMessage}</div>
                     ) : null}
                   </td>
                   <td>{formatMetricValue(throughput, 2)}</td>
@@ -2433,6 +2471,9 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
                       Last epoch time: {formatDurationSeconds(latestEpochSeconds)} | ETA: {formatDurationSeconds(latestEtaSeconds)} (finishes ~
                       {latestEtaClock})
                     </p>
+                    {qatMetrics.length > 0 ? (
+                      <p className="experiment-log-cursor">Dashed QAT lines use the same metric tabs and restart from QAT epoch 1.</p>
+                    ) : null}
                     {dashboardAvailableSeries.length > 0 ? (
                       <div className="experiment-series-toggle-row">
                         {dashboardAvailableSeries.map((series) => {
@@ -2496,7 +2537,7 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
                             );
                           })}
                           {dashboardXTicks.map((tickEpoch) => {
-                            const ratio = (tickEpoch - 1) / Math.max(1, chartMaxEpoch - 1);
+                            const ratio = (tickEpoch - 1) / Math.max(1, dashboardEpochMax - 1);
                             const x = chartPadding + (ratio * chartInnerWidth);
                             return (
                               <g key={`dashboard-x:${tickEpoch}`}>
@@ -2509,7 +2550,14 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
                           })}
                           {dashboardLinePoints.map((series) =>
                             series.points ? (
-                              <polyline key={series.key} fill="none" stroke={series.color} strokeWidth="2.1" points={series.points} />
+                              <polyline
+                                key={series.key}
+                                fill="none"
+                                stroke={series.color}
+                                strokeWidth="2.1"
+                                points={series.points}
+                                strokeDasharray={series.strokeDasharray ?? undefined}
+                              />
                             ) : null,
                           )}
                           <text className="axis-label" x={chartPadding + (chartInnerWidth / 2)} y={chartHeight - 4} textAnchor="middle">

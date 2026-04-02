@@ -47,6 +47,11 @@ All notable changes to this project will be documented in this file.
   - `make test-api-focused` / `make test-api-safe` now invoke the API test script through `bash` for better Windows compatibility
 
 ### Changed
+- Experiment variant UX and export plumbing:
+  - trainer installs `onnxconverter-common` so FP16 exports no longer fail in fresh environments with `fp16_conversion_unavailable: No module named 'onnxconverter_common'`
+  - experiment detail now polls PTQ/QAT variant artifacts separately from the base training SSE stream, which stops closed event streams from replaying and bouncing the page while a variant job is still running
+  - QAT fine-tune metric rows now flow through the variants API and render as dashed overlay lines in the normal experiment dashboard so QAT progress stays visible during the follow-up run
+  - documented the current detection INT8 caveat that PTQ/QAT still quantize the exported detection graph end-to-end, which can hurt mAP and may not beat FP32 on CUDA
 - Deployed-model selection and runtime behavior:
   - bbox prelabel configs now support an explicit `deployment_id` so video import and webcam capture can pin a compatible deployment instead of always resolving the project active deployment
   - import/capture modal selectors now expose compatible deployed-model dropdowns for both advisory preview inference and real bbox prelabel sessions

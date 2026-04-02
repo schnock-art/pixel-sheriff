@@ -48,6 +48,7 @@ export interface BuildLineOptions {
   seriesKeys?: string[];
   domain?: MetricDomain;
   useLog?: boolean;
+  maxEpoch?: number;
 }
 
 export interface CheckpointRow {

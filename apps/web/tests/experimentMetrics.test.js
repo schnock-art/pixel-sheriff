@@ -144,6 +144,22 @@ test("buildLinePoints respects explicit domain and supports log plotting", () =>
   assert.notEqual(linear, log);
 });
 
+test("buildLinePoints can align multiple series to an explicit max epoch", () => {
+  const aligned = buildLinePoints(
+    [
+      { epoch: 1, val_accuracy: 0.5 },
+      { epoch: 3, val_accuracy: 0.8 },
+    ],
+    "val_accuracy",
+    { width: 300, height: 120, padding: 10, maxEpoch: 6 },
+  );
+  const [firstPoint, lastPoint] = aligned.split(" ");
+  const firstX = Number(firstPoint.split(",")[0]);
+  const lastX = Number(lastPoint.split(",")[0]);
+  assert.equal(firstX, 10);
+  assert.ok(lastX < 290);
+});
+
 test("metricValueByKey handles aliases and runtime metrics", () => {
   const row = {
     epoch: 2,

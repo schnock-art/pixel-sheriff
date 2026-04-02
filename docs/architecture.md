@@ -330,13 +330,16 @@ Current variant contract:
 - every completed experiment still exports the canonical FP32 ONNX artifact under the run `onnx/` directory
 - the trainer mirrors that FP32 export into the run `variants/fp32/` directory and can derive `ptq_int8` or `qat_int8` siblings from the same attempt
 - variant comparison is currently supported for `classification` and `detection`; `segmentation` remains FP32-only
-- each variant writes its own ONNX model, metadata, split evaluation summaries, CPU benchmark summary, and status row
+- each variant writes its own ONNX model, metadata, split evaluation summaries, per-device benchmark summary, and status row
+- QAT variants also persist their fine-tune metric rows under the variant directory so the experiment detail dashboard can overlay live QAT progress on the normal charts
+- the experiment detail page streams the base training run over SSE, but PTQ/QAT follow-up jobs poll variant artifacts separately so completed-run event streams do not replay and bounce the page while a variant is still running
 
 Current quantization behavior:
 
 - PTQ calibrates against the `train` split and writes static INT8 ONNX output
 - QAT fine-tunes from the selected checkpoint using the task-specific trainer loop, exports an intermediate FP32 ONNX, then applies the same static INT8 quantization flow
 - detection variants keep the current family constraints, so `retinanet` and `ssdlite320_mobilenet_v3_large` share the same variant lifecycle and SSDLite keeps its existing small-batch training guard
+- detection PTQ/QAT currently quantize the exported detection graph end-to-end after ONNX export, so quality can regress materially and CUDA INT8 benchmarks may still underperform FP32 depending on execution-provider support
 
 ### Deployment Prediction Review
 

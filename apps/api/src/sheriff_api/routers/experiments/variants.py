@@ -238,11 +238,19 @@ async def get_project_experiment_variants(
     config_json = current.get("config_json")
     task = str(config_json.get("task") or "classification") if isinstance(config_json, dict) else "classification"
     listing = _list_variant_rows(project_id, experiment_id, attempt)
-    variants = {
-        key: ExperimentVariantSummaryResponse.model_validate(value)
-        for key, value in listing["variants"].items()
-        if key in VARIANT_KEYS and isinstance(value, dict)
-    }
+    variants = {}
+    for key, value in listing["variants"].items():
+        if key not in VARIANT_KEYS or not isinstance(value, dict):
+            continue
+        payload = dict(value)
+        payload["metrics"] = experiment_store.read_variant_metrics(
+            project_id,
+            experiment_id,
+            attempt=attempt,
+            variant_key=key,
+            limit=200,
+        )
+        variants[key] = ExperimentVariantSummaryResponse.model_validate(payload)
     return ExperimentVariantsResponse(
         attempt=attempt,
         preferred_variant_key=listing.get("preferred_variant_key"),

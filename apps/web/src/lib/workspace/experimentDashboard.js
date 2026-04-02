@@ -66,6 +66,17 @@ function filterPredictionRows(rows, options = {}) {
   return filtered.slice(0, limit);
 }
 
+function withSeriesDefaults(series, options = {}) {
+  const source = options.source ?? "base";
+  const strokeDasharray = options.strokeDasharray ?? null;
+  return (Array.isArray(series) ? series : []).map((row) => ({
+    ...row,
+    metricKey: row?.metricKey ?? row?.key,
+    source,
+    strokeDasharray,
+  }));
+}
+
 function dashboardTabsForTask(task) {
   if (task === "detection") {
     return [
@@ -89,59 +100,59 @@ function dashboardTabsForTask(task) {
 function dashboardSeriesForTask(task, tab) {
   if (task === "detection") {
     if (tab === "loss") {
-      return [
+      return withSeriesDefaults([
         { key: "train_loss", label: "train loss", color: "#cc6f36" },
-      ];
+      ]);
     }
     if (tab === "map") {
-      return [
+      return withSeriesDefaults([
         { key: "val_map", label: "val mAP@50", color: "#2f6fca" },
         { key: "val_map_50_95", label: "val mAP@50:95", color: "#2f9d58" },
-      ];
+      ]);
     }
     if (tab === "quality") {
-      return [
+      return withSeriesDefaults([
         { key: "val_precision", label: "val precision", color: "#2f6fca" },
         { key: "val_recall", label: "val recall", color: "#2f9d58" },
         { key: "val_matched_mean_iou", label: "val matched IoU", color: "#cc6f36" },
-      ];
+      ]);
     }
     if (tab === "counts") {
-      return [
+      return withSeriesDefaults([
         { key: "val_tp", label: "val TP", color: "#2f9d58" },
         { key: "val_fp", label: "val FP", color: "#c96262" },
         { key: "val_fn", label: "val FN", color: "#5b6fd1" },
         { key: "val_duplicate_fp", label: "duplicate FP", color: "#b8792f" },
-      ];
+      ]);
     }
     if (tab === "runtime") {
-      return [
+      return withSeriesDefaults([
         { key: "epoch_seconds", label: "epoch seconds", color: "#5b6fd1" },
         { key: "eta_seconds", label: "eta seconds", color: "#c96262" },
-      ];
+      ]);
     }
     return [];
   }
 
   if (task === "classification") {
     if (tab === "loss") {
-      return [
+      return withSeriesDefaults([
         { key: "train_loss", label: "train loss", color: "#cc6f36" },
         { key: "val_loss", label: "val loss", color: "#c96262" },
-      ];
+      ]);
     }
     if (tab === "accuracy") {
-      return [
+      return withSeriesDefaults([
         { key: "train_accuracy", label: "train accuracy", color: "#2f9d58" },
         { key: "val_accuracy", label: "val accuracy", color: "#2f6fca" },
-      ];
+      ]);
     }
     if (tab === "prf") {
-      return [
+      return withSeriesDefaults([
         { key: "val_macro_f1", label: "val macro f1", color: "#2f6fca" },
         { key: "val_macro_precision", label: "val macro precision", color: "#2f9d58" },
         { key: "val_macro_recall", label: "val macro recall", color: "#cc6f36" },
-      ];
+      ]);
     }
     return [];
   }
@@ -149,7 +160,25 @@ function dashboardSeriesForTask(task, tab) {
   return [];
 }
 
+function appendQatDashboardSeries(series, qatMetrics) {
+  const baseSeries = withSeriesDefaults(series);
+  if (!Array.isArray(qatMetrics) || qatMetrics.length < 1) {
+    return baseSeries;
+  }
+  return [
+    ...baseSeries,
+    ...baseSeries.map((row) => ({
+      ...row,
+      key: `qat:${row.metricKey}`,
+      label: `QAT ${row.label}`,
+      source: "qat",
+      strokeDasharray: "6 4",
+    })),
+  ];
+}
+
 module.exports = {
+  appendQatDashboardSeries,
   dashboardSeriesForTask,
   dashboardTabsForTask,
   normalizeConfusion,

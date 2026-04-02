@@ -133,6 +133,9 @@ class ExperimentStore:
     def _variant_benchmark_path(self, project_id: str, experiment_id: str, attempt: int, variant_key: str) -> Path:
         return self._variant_dir(project_id, experiment_id, attempt, variant_key) / "benchmark.json"
 
+    def _variant_metrics_path(self, project_id: str, experiment_id: str, attempt: int, variant_key: str) -> Path:
+        return self._variant_dir(project_id, experiment_id, attempt, variant_key) / "metrics.jsonl"
+
     def _latest_evaluation_path(self, project_id: str, experiment_id: str) -> Path:
         return self._experiment_dir(project_id, experiment_id) / "evaluation.json"
 
@@ -204,6 +207,29 @@ class ExperimentStore:
         except OSError:
             return 0
         return count
+
+    def _read_jsonl_rows(self, path: Path, *, limit: int | None = None) -> list[dict[str, Any]]:
+        if not path.exists():
+            return []
+        rows: list[dict[str, Any]] = []
+        try:
+            with path.open("r", encoding="utf-8") as handle:
+                for line in handle:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        parsed = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if isinstance(parsed, dict):
+                        rows.append(parsed)
+        except OSError:
+            return []
+
+        if isinstance(limit, int) and limit > 0:
+            return rows[-limit:]
+        return rows
 
     def _read_events_meta(self, project_id: str, experiment_id: str, attempt: int) -> dict[str, Any]:
         meta_default = {"line_count": 0, "updated_at": None}
@@ -440,27 +466,21 @@ class ExperimentStore:
             path = self._metrics_path(project_id, experiment_id, attempt)
         else:
             path = self._legacy_metrics_path(project_id, experiment_id)
-        if not path.exists():
-            return []
-        rows: list[dict[str, Any]] = []
-        try:
-            with path.open("r", encoding="utf-8") as handle:
-                for line in handle:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        parsed = json.loads(line)
-                    except json.JSONDecodeError:
-                        continue
-                    if isinstance(parsed, dict):
-                        rows.append(parsed)
-        except OSError:
-            return []
+        return self._read_jsonl_rows(path, limit=limit)
 
-        if isinstance(limit, int) and limit > 0:
-            return rows[-limit:]
-        return rows
+    def read_variant_metrics(
+        self,
+        project_id: str,
+        experiment_id: str,
+        *,
+        attempt: int,
+        variant_key: str,
+        limit: int | None = None,
+    ) -> list[dict[str, Any]]:
+        return self._read_jsonl_rows(
+            self._variant_metrics_path(project_id, experiment_id, attempt, variant_key),
+            limit=limit,
+        )
 
     def append_metric(self, *, project_id: str, experiment_id: str, attempt: int, metric_row: dict[str, Any]) -> None:
         path = self._metrics_path(project_id, experiment_id, attempt)
@@ -593,6 +613,9 @@ class ExperimentStore:
 
     def variant_benchmark_path(self, project_id: str, experiment_id: str, attempt: int, variant_key: str) -> Path:
         return self._variant_benchmark_path(project_id, experiment_id, attempt, variant_key)
+
+    def variant_metrics_path(self, project_id: str, experiment_id: str, attempt: int, variant_key: str) -> Path:
+        return self._variant_metrics_path(project_id, experiment_id, attempt, variant_key)
 
     def read_evaluation(self, project_id: str, experiment_id: str, *, attempt: int | None = None) -> tuple[int, dict[str, Any]] | None:
         resolved_attempt = attempt if isinstance(attempt, int) and attempt >= 1 else self.latest_attempt_with_evaluation(project_id, experiment_id)

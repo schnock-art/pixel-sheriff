@@ -737,6 +737,7 @@ export interface ExperimentVariantSummary {
   evaluation?: Record<string, ExperimentVariantSplitSummary>;
   benchmark?: ExperimentVariantBenchmarkSummary | Record<string, unknown> | null;
   benchmarks?: Record<string, ExperimentVariantBenchmarkSummary>;
+  metrics?: ExperimentMetricPoint[];
   qat?: Record<string, unknown> | null;
 }
 

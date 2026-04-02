@@ -708,6 +708,18 @@ async def test_experiment_variants_endpoint_returns_seeded_variant_summaries(cli
         variant_key="ptq_int8",
         preferred_variant_key="ptq_int8",
     )
+    _seed_experiment_variant_artifacts(
+        project_id=project_id,
+        experiment_id=experiment_id,
+        attempt=1,
+        variant_key="qat_int8",
+        preferred_variant_key="ptq_int8",
+        status="running",
+        metrics_rows=[
+            {"epoch": 1, "train_loss": 0.42, "val_accuracy": 0.71},
+            {"epoch": 2, "train_loss": 0.31, "val_accuracy": 0.79},
+        ],
+    )
 
     response = await client.get(f"/api/v1/projects/{project_id}/experiments/{experiment_id}/variants")
     assert response.status_code == 200
@@ -718,6 +730,9 @@ async def test_experiment_variants_endpoint_returns_seeded_variant_summaries(cli
     assert payload["variants"]["ptq_int8"]["preferred"] is True
     assert payload["variants"]["ptq_int8"]["benchmark"]["mean_latency_ms"] == 12.3
     assert payload["variants"]["ptq_int8"]["benchmarks"]["cuda"]["mean_latency_ms"] == 5.4
+    assert payload["variants"]["qat_int8"]["status"] == "running"
+    assert [row["epoch"] for row in payload["variants"]["qat_int8"]["metrics"]] == [1, 2]
+    assert payload["variants"]["qat_int8"]["metrics"][-1]["val_accuracy"] == 0.79
 
 
 @pytest.mark.asyncio
