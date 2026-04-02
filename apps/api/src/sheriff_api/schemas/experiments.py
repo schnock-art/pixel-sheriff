@@ -10,7 +10,7 @@ from sheriff_api.services.augmentation import AUGMENTATION_STEP_TYPES, task_defa
 
 ExperimentStatus = Literal["draft", "queued", "running", "completed", "failed", "canceled"]
 TrainingTask = Literal["classification", "detection", "segmentation"]
-ModelVariantKey = Literal["fp32", "ptq_int8", "qat_int8"]
+ModelVariantKey = Literal["fp32", "fp16", "ptq_int8", "qat_int8"]
 ModelVariantStatus = Literal["queued", "running", "ready", "failed", "unsupported"]
 
 
@@ -20,6 +20,13 @@ class TrainingOptimizer(BaseModel):
     type: Literal["adam", "adamw", "sgd"] = "adam"
     lr: float = Field(default=0.001, gt=0)
     weight_decay: float = Field(default=0.0, ge=0)
+    momentum: float | None = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def validate_optimizer(self) -> "TrainingOptimizer":
+        if self.type != "sgd" and self.momentum is not None:
+            raise ValueError("optimizer momentum is only supported for sgd")
+        return self
 
 
 class TrainingScheduler(BaseModel):
@@ -28,13 +35,25 @@ class TrainingScheduler(BaseModel):
     type: Literal["none", "step", "cosine"] = "none"
     params: dict[str, Any] = Field(default_factory=dict)
 
+    @model_validator(mode="after")
+    def validate_scheduler(self) -> "TrainingScheduler":
+        if self.type != "step":
+            return self
+        step_size = self.params.get("step_size")
+        gamma = self.params.get("gamma")
+        if not isinstance(step_size, int) or isinstance(step_size, bool) or int(step_size) < 1:
+            raise ValueError("step scheduler step_size must be an integer >= 1")
+        if not isinstance(gamma, (int, float)) or isinstance(gamma, bool) or float(gamma) <= 0:
+            raise ValueError("step scheduler gamma must be > 0")
+        return self
+
 
 class TrainingAdvanced(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     seed: int = 1337
     num_workers: int = Field(default=0, ge=0)
-    grad_clip_norm: float | None = None
+    grad_clip_norm: float | None = Field(default=None, ge=0)
 
 
 class TrainingBatching(BaseModel):
@@ -110,12 +129,28 @@ class TrainingAugmentationStep(BaseModel):
             return self
 
         if self.type == "rotate":
-            if set(params.keys()) != {"degrees"}:
-                raise ValueError("rotate requires only a numeric degrees param")
-            degrees = params.get("degrees")
-            if not isinstance(degrees, (int, float)) or isinstance(degrees, bool) or float(degrees) <= 0:
-                raise ValueError("rotate degrees must be > 0")
-            self.params = {"degrees": float(degrees)}
+            if set(params.keys()) == {"degrees"}:
+                degrees = params.get("degrees")
+                if not isinstance(degrees, (int, float)) or isinstance(degrees, bool) or float(degrees) <= 0:
+                    raise ValueError("rotate degrees must be > 0")
+                degrees_value = float(degrees)
+                self.params = {"min_degrees": -degrees_value, "max_degrees": degrees_value}
+                return self
+            if set(params.keys()) != {"min_degrees", "max_degrees"}:
+                raise ValueError("rotate requires degrees or min_degrees/max_degrees")
+            min_degrees = params.get("min_degrees")
+            max_degrees = params.get("max_degrees")
+            if not isinstance(min_degrees, (int, float)) or isinstance(min_degrees, bool):
+                raise ValueError("rotate min_degrees must be numeric")
+            if not isinstance(max_degrees, (int, float)) or isinstance(max_degrees, bool):
+                raise ValueError("rotate max_degrees must be numeric")
+            min_value = float(min_degrees)
+            max_value = float(max_degrees)
+            if max_value < min_value:
+                raise ValueError("rotate max_degrees must be >= min_degrees")
+            if max_value == min_value:
+                raise ValueError("rotate min_degrees and max_degrees must define a non-zero range")
+            self.params = {"min_degrees": min_value, "max_degrees": max_value}
             return self
 
         allowed_params = {"brightness", "contrast", "saturation", "hue"}
@@ -356,10 +391,12 @@ class ExperimentVariantBenchmarkResponse(BaseModel):
     status: str | None = None
     provider: str | None = None
     batch_size: int | None = None
+    sample_count: int | None = None
     mean_latency_ms: float | None = None
     p50_latency_ms: float | None = None
     p95_latency_ms: float | None = None
     throughput_items_per_second: float | None = None
+    message: str | None = None
 
 
 class ExperimentVariantSplitResponse(BaseModel):
@@ -386,10 +423,13 @@ class ExperimentVariantSummaryResponse(BaseModel):
     onnx: dict[str, Any] = Field(default_factory=dict)
     evaluation: dict[str, ExperimentVariantSplitResponse] = Field(default_factory=dict)
     benchmark: ExperimentVariantBenchmarkResponse | dict[str, Any] | None = None
+    benchmarks: dict[str, ExperimentVariantBenchmarkResponse] = Field(default_factory=dict)
     qat: dict[str, Any] | None = None
 
 
 class ExperimentVariantSupportResponse(BaseModel):
+    fp16_supported: bool = False
+    fp16_reason: str | None = None
     ptq_supported: bool = False
     qat_supported: bool = False
     qat_reason: str | None = None
@@ -408,3 +448,17 @@ class ExperimentVariantActionResponse(BaseModel):
     variant_key: ModelVariantKey
     status: ModelVariantStatus
     job_id: str | None = None
+
+
+class ExperimentVariantPtqRequest(BaseModel):
+    calibration_max_samples: int = Field(default=256, ge=1)
+
+
+class ExperimentVariantFp16Request(BaseModel):
+    checkpoint_kind: Literal["best_loss", "best_metric", "latest"] | None = None
+
+
+class ExperimentVariantQatRequest(BaseModel):
+    epochs_override: int | None = Field(default=None, ge=1)
+    learning_rate_override: float | None = Field(default=None, gt=0)
+    calibration_max_samples: int = Field(default=256, ge=1)

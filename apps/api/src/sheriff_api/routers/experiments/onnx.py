@@ -102,7 +102,7 @@ def _resolve_variant_paths(
 async def get_project_experiment_onnx(
     project_id: str,
     experiment_id: str,
-    variant: Literal["preferred", "fp32", "ptq_int8", "qat_int8"] = Query(default="preferred"),
+    variant: Literal["preferred", "fp32", "fp16", "ptq_int8", "qat_int8"] = Query(default="preferred"),
     db: AsyncSession = Depends(get_db),
 ) -> ExperimentOnnxResponse:
     await require_project(db, project_id)
@@ -166,7 +166,7 @@ async def download_project_experiment_onnx(
     project_id: str,
     experiment_id: str,
     file: Literal["model", "metadata"] = Query(default="model"),
-    variant: Literal["preferred", "fp32", "ptq_int8", "qat_int8"] = Query(default="preferred"),
+    variant: Literal["preferred", "fp32", "fp16", "ptq_int8", "qat_int8"] = Query(default="preferred"),
     db: AsyncSession = Depends(get_db),
 ) -> FileResponse:
     await require_project(db, project_id)

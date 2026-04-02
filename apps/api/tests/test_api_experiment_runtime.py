@@ -644,6 +644,41 @@ async def test_experiment_onnx_download_endpoints_stream_model_and_metadata(clie
 
 
 @pytest.mark.asyncio
+async def test_experiment_onnx_endpoints_accept_fp16_variant(client: AsyncClient) -> None:
+    project_id, model_id = await _create_project_model(client, project_name="exp-onnx-fp16")
+    created = await client.post(
+        f"/api/v1/projects/{project_id}/experiments",
+        json={"model_id": model_id, "name": "onnx-fp16"},
+    )
+    assert created.status_code == 200
+    experiment_id = created.json()["id"]
+    _seed_experiment_run_artifacts(
+        project_id=project_id,
+        experiment_id=experiment_id,
+        attempt=1,
+        include_onnx=True,
+        onnx_status="exported",
+    )
+    _seed_experiment_variant_artifacts(
+        project_id=project_id,
+        experiment_id=experiment_id,
+        attempt=1,
+        variant_key="fp16",
+        preferred_variant_key="fp16",
+    )
+
+    response = await client.get(f"/api/v1/projects/{project_id}/experiments/{experiment_id}/onnx?variant=fp16")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["variant_key"] == "fp16"
+    assert "variant=fp16" in payload["metadata_url"]
+
+    download = await client.get(f"/api/v1/projects/{project_id}/experiments/{experiment_id}/onnx/download?file=model&variant=fp16")
+    assert download.status_code == 200
+    assert download.content == b"fake-fp16-onnx"
+
+
+@pytest.mark.asyncio
 async def test_experiment_variants_endpoint_returns_seeded_variant_summaries(client: AsyncClient) -> None:
     project_id, model_id = await _create_project_model(client, project_name="exp-variants")
     created = await client.post(
@@ -682,6 +717,7 @@ async def test_experiment_variants_endpoint_returns_seeded_variant_summaries(cli
     assert payload["variants"]["fp32"]["status"] == "ready"
     assert payload["variants"]["ptq_int8"]["preferred"] is True
     assert payload["variants"]["ptq_int8"]["benchmark"]["mean_latency_ms"] == 12.3
+    assert payload["variants"]["ptq_int8"]["benchmarks"]["cuda"]["mean_latency_ms"] == 5.4
 
 
 @pytest.mark.asyncio
@@ -705,6 +741,8 @@ async def test_experiment_variants_endpoint_reports_detection_qat_support(client
     assert response.status_code == 200
     payload = response.json()
     assert payload["support"] == {
+        "fp16_supported": True,
+        "fp16_reason": None,
         "ptq_supported": True,
         "qat_supported": True,
         "qat_reason": None,
@@ -753,7 +791,10 @@ async def test_trigger_detection_qat_variant_enqueues_quantize_job(client: Async
 
     monkeypatch = pytest.MonkeyPatch()
     monkeypatch.setattr(variants_router.train_queue, "enqueue_job", _enqueue)
-    response = await client.post(f"/api/v1/projects/{project_id}/experiments/{experiment_id}/variants/qat")
+    response = await client.post(
+        f"/api/v1/projects/{project_id}/experiments/{experiment_id}/variants/qat",
+        json={"epochs_override": 4, "learning_rate_override": 0.0005, "calibration_max_samples": 32},
+    )
     monkeypatch.undo()
 
     assert response.status_code == 200
@@ -765,6 +806,62 @@ async def test_trigger_detection_qat_variant_enqueues_quantize_job(client: Async
     assert calls[0]["task"] == "detection"
     assert calls[0]["variant_key"] == "qat_int8"
     assert calls[0]["dataset_export"] == {"zip_relpath": f"exports/{project_id}/detection-qat.zip"}
+    assert calls[0]["epochs_override"] == 4
+    assert calls[0]["learning_rate_override"] == 0.0005
+    assert calls[0]["calibration_max_samples"] == 32
+
+
+@pytest.mark.asyncio
+async def test_trigger_detection_fp16_variant_enqueues_quantize_job(client: AsyncClient) -> None:
+    project_id, model_id = await _create_project_model(client, project_name="exp-detection-fp16")
+    created = await client.post(
+        f"/api/v1/projects/{project_id}/experiments",
+        json={"model_id": model_id, "name": "detection-fp16"},
+    )
+    assert created.status_code == 200
+    experiment_id = created.json()["id"]
+    _seed_experiment_run_artifacts(
+        project_id=project_id,
+        experiment_id=experiment_id,
+        attempt=1,
+        include_onnx=True,
+        onnx_status="exported",
+    )
+
+    settings = get_settings()
+    experiment_dir = Path(settings.storage_root) / "experiments" / project_id / experiment_id
+    run_dir = experiment_dir / "runs" / "1"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "run.json").write_text(
+        json.dumps(
+            {
+                "attempt": 1,
+                "dataset_export": {"zip_relpath": f"exports/{project_id}/detection-fp16.zip"},
+            },
+            indent=2,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    import sheriff_api.routers.experiments.variants as variants_router
+
+    calls: list[dict] = []
+
+    async def _enqueue(job_payload: dict) -> None:
+        calls.append(job_payload)
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(variants_router.train_queue, "enqueue_job", _enqueue)
+    response = await client.post(f"/api/v1/projects/{project_id}/experiments/{experiment_id}/variants/fp16")
+    monkeypatch.undo()
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["variant_key"] == "fp16"
+    assert payload["status"] == "queued"
+    assert calls[0]["job_type"] == "quantize_fp16"
+    assert calls[0]["variant_key"] == "fp16"
 
 
 @pytest.mark.asyncio

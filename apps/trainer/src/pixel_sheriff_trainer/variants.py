@@ -14,7 +14,7 @@ import torch
 from pixel_sheriff_ml.model_factory import build_classifier_model
 from pixel_sheriff_trainer.classification.dataset import _asset_label_samples
 from pixel_sheriff_trainer.classification.eval import ClassMetricsRow, ClassifierEvaluation, PredictionRow
-from pixel_sheriff_trainer.classification.train import resolve_device, run_training
+from pixel_sheriff_trainer.classification.train import run_training
 from pixel_sheriff_trainer.detection.evaluation import DetectionGroundTruth, DetectionPrediction, evaluate_detection_set
 from pixel_sheriff_trainer.detection.evaluation.boxes import bbox_xywh_to_xyxy
 from pixel_sheriff_trainer.detection.train import (
@@ -33,20 +33,24 @@ from pixel_sheriff_trainer.inference.app import _parse_detection_output, _run_on
 from pixel_sheriff_trainer.inference.preprocess import load_metadata, preprocess_asset, preprocess_asset_with_context
 from pixel_sheriff_trainer.io.storage import ExperimentStorage
 from pixel_sheriff_trainer.pipeline import PIPELINE_REGISTRY
+from pixel_sheriff_trainer.training_config import resolve_device
 from pixel_sheriff_trainer.utils.time import utc_now_iso
 
 
 VARIANT_FP32 = "fp32"
+VARIANT_FP16 = "fp16"
 VARIANT_PTQ_INT8 = "ptq_int8"
 VARIANT_QAT_INT8 = "qat_int8"
-VARIANT_PREFERRED_ORDER = (VARIANT_QAT_INT8, VARIANT_PTQ_INT8, VARIANT_FP32)
+VARIANT_PREFERRED_ORDER = (VARIANT_QAT_INT8, VARIANT_PTQ_INT8, VARIANT_FP16, VARIANT_FP32)
 VARIANT_LABELS = {
     VARIANT_FP32: "FP32",
+    VARIANT_FP16: "FP16",
     VARIANT_PTQ_INT8: "PTQ INT8",
     VARIANT_QAT_INT8: "QAT INT8",
 }
 VARIANT_KINDS = {
     VARIANT_FP32: "baseline",
+    VARIANT_FP16: "fp16",
     VARIANT_PTQ_INT8: "ptq",
     VARIANT_QAT_INT8: "qat",
 }
@@ -181,10 +185,14 @@ def _variant_event(
 
 def variant_task_support(task: str) -> dict[str, Any]:
     normalized = str(task or "").strip().lower()
+    fp16_supported = normalized in {"classification", "detection"}
     ptq_supported = normalized in {"classification", "detection"}
     qat_supported = normalized in {"classification", "detection"}
+    fp16_reason = None if fp16_supported else "FP16 is not supported for this task"
     qat_reason = None if qat_supported else "QAT is not supported for this task"
     return {
+        "fp16_supported": fp16_supported,
+        "fp16_reason": fp16_reason,
         "ptq_supported": ptq_supported,
         "qat_supported": qat_supported,
         "qat_reason": qat_reason,
@@ -388,14 +396,45 @@ def _classification_sample_buckets(predictions: list[PredictionRow], *, limit: i
     }
 
 
-def _onnx_session(path: Path, *, cpu_only: bool = False) -> Any:
+def _available_onnx_providers() -> list[str]:
     import onnxruntime as ort
 
-    if cpu_only:
-        providers = ["CPUExecutionProvider"]
-    else:
-        providers = ort.get_available_providers() or ["CPUExecutionProvider"]
+    return list(ort.get_available_providers() or ["CPUExecutionProvider"])
+
+
+def _onnx_session(path: Path, *, providers: list[str] | None = None, cpu_only: bool = False) -> Any:
+    import onnxruntime as ort
+
+    if providers is None:
+        providers = ["CPUExecutionProvider"] if cpu_only else (_available_onnx_providers() or ["CPUExecutionProvider"])
     return ort.InferenceSession(str(path), providers=providers)
+
+
+def _session_candidates_for_variant(variant_key: str) -> list[list[str]]:
+    available = _available_onnx_providers()
+    candidates: list[list[str]] = []
+    if variant_key == VARIANT_FP16 and "CUDAExecutionProvider" in available:
+        candidates.append(["CUDAExecutionProvider"])
+    if "CPUExecutionProvider" in available:
+        candidates.append(["CPUExecutionProvider"])
+    elif available:
+        candidates.append(list(available))
+    return candidates or [["CPUExecutionProvider"]]
+
+
+def _open_variant_session(path: Path, *, variant_key: str, providers: list[str] | None = None) -> tuple[Any, str]:
+    attempts = [providers] if providers is not None else _session_candidates_for_variant(variant_key)
+    last_error: Exception | None = None
+    for provider_list in attempts:
+        if not provider_list:
+            continue
+        try:
+            return _onnx_session(path, providers=list(provider_list)), str(provider_list[0])
+        except Exception as exc:
+            last_error = exc
+    if last_error is not None:
+        raise last_error
+    return _onnx_session(path, cpu_only=True), "CPUExecutionProvider"
 
 
 def _evaluate_classification_split(
@@ -404,6 +443,7 @@ def _evaluate_classification_split(
     split: str,
     metadata: dict[str, Any],
     onnx_path: Path,
+    variant_key: str,
 ) -> dict[str, Any]:
     manifest = _read_json(dataset_dir / "manifest.json", {})
     if not isinstance(manifest, dict):
@@ -418,7 +458,7 @@ def _evaluate_classification_split(
     if not selected:
         return {"schema_version": "1", "task": "classification", "split": split, "status": "unavailable", "message": "No labeled assets in split"}
 
-    session = _onnx_session(onnx_path, cpu_only=True)
+    session, _provider = _open_variant_session(onnx_path, variant_key=variant_key)
     predictions: list[PredictionRow] = []
     total_loss = 0.0
     for sample in selected:
@@ -495,6 +535,7 @@ def _evaluate_detection_split(
     split: str,
     metadata: dict[str, Any],
     onnx_path: Path,
+    variant_key: str,
 ) -> dict[str, Any]:
     manifest = _read_json(dataset_dir / "manifest.json", {})
     coco = _read_json(dataset_dir / "coco_instances.json", {})
@@ -536,7 +577,7 @@ def _evaluate_detection_split(
             continue
         annotations_by_image.setdefault(image_id, []).append(row)
 
-    session = _onnx_session(onnx_path, cpu_only=True)
+    session, _provider = _open_variant_session(onnx_path, variant_key=variant_key)
     predictions: list[DetectionPrediction] = []
     ground_truth: list[DetectionGroundTruth] = []
     for image_id, image_row in image_by_id.items():
@@ -659,9 +700,29 @@ def _write_variant_evaluations(
     evaluations: dict[str, Any] = {}
     for split in ("val", "test"):
         if task == "detection":
-            payload = _evaluate_detection_split(dataset_dir=dataset_dir, split=split, metadata=metadata, onnx_path=onnx_path)
+            payload = _evaluate_detection_split(
+                dataset_dir=dataset_dir,
+                split=split,
+                metadata=metadata,
+                onnx_path=onnx_path,
+                variant_key=variant_key,
+            )
+        elif task == "classification":
+            payload = _evaluate_classification_split(
+                dataset_dir=dataset_dir,
+                split=split,
+                metadata=metadata,
+                onnx_path=onnx_path,
+                variant_key=variant_key,
+            )
         else:
-            payload = _evaluate_classification_split(dataset_dir=dataset_dir, split=split, metadata=metadata, onnx_path=onnx_path)
+            payload = {
+                "schema_version": "1",
+                "task": task,
+                "split": split,
+                "status": "unavailable",
+                "message": "Variant evaluation is not supported for this task",
+            }
         _write_json(storage.variant_evaluation_path(project_id, experiment_id, attempt, variant_key, split), payload)
         evaluations[split] = {
             "status": payload.get("status"),
@@ -700,6 +761,51 @@ def _iter_split_samples_for_benchmark(
     return selected
 
 
+def _benchmark_variant_provider(
+    *,
+    model_path: Path,
+    metadata: dict[str, Any],
+    sample_paths: list[Path],
+    task: str,
+    provider_name: str,
+) -> dict[str, Any]:
+    session = _onnx_session(model_path, providers=[provider_name])
+    tensors = [preprocess_asset(path, metadata) for path in sample_paths]
+    for tensor in tensors[: min(3, len(tensors))]:
+        if task == "detection":
+            _run_onnx_detection(session, tensor)
+        else:
+            _run_onnx(session, tensor)
+
+    latencies_ms: list[float] = []
+    for index in range(12):
+        tensor = tensors[index % len(tensors)]
+        import time
+
+        t0 = time.perf_counter()
+        if task == "detection":
+            _run_onnx_detection(session, tensor)
+        else:
+            _run_onnx(session, tensor)
+        latencies_ms.append(float((time.perf_counter() - t0) * 1000.0))
+
+    mean_ms = float(sum(latencies_ms) / max(len(latencies_ms), 1))
+    p50_ms = float(statistics.median(latencies_ms))
+    p95_index = max(0, min(len(latencies_ms) - 1, math.ceil(len(latencies_ms) * 0.95) - 1))
+    p95_ms = float(sorted(latencies_ms)[p95_index])
+    return {
+        "status": "ready",
+        "provider": provider_name,
+        "batch_size": 1,
+        "sample_count": len(latencies_ms),
+        "mean_latency_ms": mean_ms,
+        "p50_latency_ms": p50_ms,
+        "p95_latency_ms": p95_ms,
+        "throughput_items_per_second": float(1000.0 / max(mean_ms, 1e-8)),
+        "computed_at": utc_now_iso(),
+    }
+
+
 def _write_variant_benchmark(
     storage: ExperimentStorage,
     *,
@@ -716,49 +822,42 @@ def _write_variant_benchmark(
     metadata = load_metadata(metadata_path)
     sample_paths = list(_iter_split_samples_for_benchmark(dataset_dir, task))
     if not sample_paths:
-        payload = {"schema_version": "1", "status": "unavailable", "message": "No benchmark samples available"}
+        payload = {"schema_version": "2", "status": "unavailable", "message": "No benchmark samples available", "devices": {}}
         _write_json(storage.variant_benchmark_path(project_id, experiment_id, attempt, variant_key), payload)
         return payload
 
-    session = _onnx_session(model_path, cpu_only=True)
-    tensors = [preprocess_asset(path, metadata) for path in sample_paths]
-    for tensor in tensors[: min(3, len(tensors))]:
-        if task == "detection":
-            _run_onnx_detection(session, tensor)
-        else:
-            _run_onnx(session, tensor)
+    device_payloads: dict[str, Any] = {}
+    available_providers = set(_available_onnx_providers())
+    provider_by_device = {
+        "cpu": "CPUExecutionProvider",
+        "cuda": "CUDAExecutionProvider",
+    }
+    for device_key, provider_name in provider_by_device.items():
+        if provider_name not in available_providers:
+            continue
+        try:
+            device_payloads[device_key] = _benchmark_variant_provider(
+                model_path=model_path,
+                metadata=metadata,
+                sample_paths=sample_paths,
+                task=task,
+                provider_name=provider_name,
+            )
+        except Exception as exc:
+            device_payloads[device_key] = {
+                "status": "unavailable",
+                "provider": provider_name,
+                "message": str(exc),
+            }
 
-    latencies_ms: list[float] = []
-    for index in range(12):
-        tensor = tensors[index % len(tensors)]
-        started = torch.cuda.Event(enable_timing=True) if torch.cuda.is_available() and False else None
-        _ = started
-        wall_started = torch.cuda.Event(enable_timing=True) if torch.cuda.is_available() and False else None
-        _ = wall_started
-        import time
-
-        t0 = time.perf_counter()
-        if task == "detection":
-            _run_onnx_detection(session, tensor)
-        else:
-            _run_onnx(session, tensor)
-        elapsed_ms = (time.perf_counter() - t0) * 1000.0
-        latencies_ms.append(float(elapsed_ms))
-
-    mean_ms = float(sum(latencies_ms) / max(len(latencies_ms), 1))
-    p50_ms = float(statistics.median(latencies_ms))
-    p95_index = max(0, min(len(latencies_ms) - 1, math.ceil(len(latencies_ms) * 0.95) - 1))
-    p95_ms = float(sorted(latencies_ms)[p95_index])
+    default_benchmark = device_payloads.get("cpu")
+    overall_status = "ready" if any(str(payload.get("status")) == "ready" for payload in device_payloads.values()) else "unavailable"
     payload = {
-        "schema_version": "1",
-        "status": "ready",
-        "provider": "CPUExecutionProvider",
-        "batch_size": 1,
-        "sample_count": len(latencies_ms),
-        "mean_latency_ms": mean_ms,
-        "p50_latency_ms": p50_ms,
-        "p95_latency_ms": p95_ms,
-        "throughput_items_per_second": float(1000.0 / max(mean_ms, 1e-8)),
+        "schema_version": "2",
+        "status": overall_status,
+        "benchmark": default_benchmark,
+        "devices": device_payloads,
+        "default_device": "cpu" if "cpu" in device_payloads else (next(iter(device_payloads.keys()), None)),
         "computed_at": utc_now_iso(),
     }
     _write_json(storage.variant_benchmark_path(project_id, experiment_id, attempt, variant_key), payload)
@@ -855,12 +954,128 @@ def create_fp32_baseline_variant(
                 "size_bytes": int(model_path.stat().st_size) if model_path.exists() else None,
             },
             "evaluation": evaluations,
-            "benchmark": benchmark,
+            "benchmark": benchmark.get("benchmark"),
+            "benchmarks": benchmark.get("devices", {}),
             "quantized": False,
         },
     )
     if emit_event is not None:
         emit_event(_variant_event(VARIANT_FP32, "ready", attempt=attempt, message="FP32 baseline ready"))
+    return row
+
+
+def run_fp16_variant(
+    storage: ExperimentStorage,
+    *,
+    project_id: str,
+    experiment_id: str,
+    attempt: int,
+    task: str,
+    dataset_export: dict[str, Any],
+    checkpoint_kind: str | None,
+    emit_event: callable | None = None,
+) -> dict[str, Any]:
+    normalized_task = str(task or "").strip().lower()
+    if normalized_task not in {"classification", "detection"}:
+        row = _update_variant_row(
+            storage,
+            project_id=project_id,
+            experiment_id=experiment_id,
+            attempt=attempt,
+            variant_key=VARIANT_FP16,
+            patch={"status": "unsupported", "error": "FP16 is not supported for this task"},
+        )
+        if emit_event is not None:
+            emit_event(_variant_event(VARIANT_FP16, "unsupported", attempt=attempt, error="FP16 is not supported for this task"))
+        return row
+
+    if emit_event is not None:
+        emit_event(_variant_event(VARIANT_FP16, "running", attempt=attempt, message="Converting FP16 variant"))
+    _update_variant_row(
+        storage,
+        project_id=project_id,
+        experiment_id=experiment_id,
+        attempt=attempt,
+        variant_key=VARIANT_FP16,
+        patch={"status": "running", "error": None, "checkpoint_kind": checkpoint_kind or "best_metric"},
+    )
+
+    base_model, base_metadata_path = _variant_onnx_paths(storage, project_id, experiment_id, attempt, VARIANT_FP32)
+    if not base_model.exists() or not base_metadata_path.exists():
+        create_fp32_baseline_variant(
+            storage,
+            project_id=project_id,
+            experiment_id=experiment_id,
+            attempt=attempt,
+            task=normalized_task,
+            dataset_export=dataset_export,
+            emit_event=None,
+        )
+    if not base_model.exists() or not base_metadata_path.exists():
+        raise ValueError("fp32_variant_missing")
+
+    try:
+        import onnx
+        from onnxconverter_common.float16 import convert_float_to_float16
+    except Exception as exc:
+        raise ValueError(f"fp16_conversion_unavailable:{exc}") from exc
+
+    model_path, metadata_path = _variant_onnx_paths(storage, project_id, experiment_id, attempt, VARIANT_FP16)
+    model_path.parent.mkdir(parents=True, exist_ok=True)
+    fp32_model = onnx.load_model(str(base_model))
+    fp16_model = convert_float_to_float16(fp32_model, keep_io_types=True)
+    onnx.save_model(fp16_model, str(model_path))
+
+    base_metadata = load_metadata(base_metadata_path)
+    metadata_payload = dict(base_metadata)
+    metadata_payload["variant_key"] = VARIANT_FP16
+    metadata_payload["variant_kind"] = "fp16"
+    metadata_payload["quantized"] = False
+    metadata_payload["numeric_precision"] = "fp16"
+    metadata_payload["checkpoint_kind"] = checkpoint_kind or base_metadata.get("checkpoint_kind")
+    metadata_payload["checkpoint_uri"] = base_metadata.get("checkpoint_uri")
+    metadata_payload["variant_exported_at"] = utc_now_iso()
+    _write_json(metadata_path, metadata_payload)
+
+    evaluations = _write_variant_evaluations(
+        storage,
+        project_id=project_id,
+        experiment_id=experiment_id,
+        attempt=attempt,
+        variant_key=VARIANT_FP16,
+        task=normalized_task,
+        dataset_export=dataset_export,
+    )
+    benchmark_payload = _write_variant_benchmark(
+        storage,
+        project_id=project_id,
+        experiment_id=experiment_id,
+        attempt=attempt,
+        variant_key=VARIANT_FP16,
+        task=normalized_task,
+        dataset_export=dataset_export,
+    )
+    row = _update_variant_row(
+        storage,
+        project_id=project_id,
+        experiment_id=experiment_id,
+        attempt=attempt,
+        variant_key=VARIANT_FP16,
+        patch={
+            "status": "ready",
+            "onnx": {
+                "model_relpath": _as_relative_uri(storage, model_path),
+                "metadata_relpath": _as_relative_uri(storage, metadata_path),
+                "size_bytes": int(model_path.stat().st_size),
+            },
+            "evaluation": evaluations,
+            "benchmark": benchmark_payload.get("benchmark"),
+            "benchmarks": benchmark_payload.get("devices", {}),
+            "quantized": False,
+        },
+    )
+    if emit_event is not None:
+        emit_event(_variant_event(VARIANT_FP16, "ready", attempt=attempt, message="FP16 variant ready"))
     return row
 
 
@@ -992,7 +1207,8 @@ def run_ptq_variant(
                 "size_bytes": int(model_path.stat().st_size),
             },
             "evaluation": evaluations,
-            "benchmark": benchmark,
+            "benchmark": benchmark.get("benchmark"),
+            "benchmarks": benchmark.get("devices", {}),
             "quantized": True,
             "quantization_strategy": "static_ptq",
         },
@@ -1077,6 +1293,7 @@ def run_qat_variant(
     checkpoint_kind: str | None,
     epochs_override: int | None,
     learning_rate_override: float | None,
+    calibration_max_samples: int,
     emit_event: callable | None = None,
 ) -> dict[str, Any]:
     from onnxruntime.quantization import QuantFormat, QuantType, quantize_static
@@ -1164,7 +1381,7 @@ def run_qat_variant(
     tuned_training_config["runtime"] = dict(training_config.get("runtime") or {})
     job_like.training_config = tuned_training_config
 
-    loaders = pipeline.build_loaders(job_like, workdir)
+    loaders = pipeline.build_loaders(job_like, workdir, storage)
     device = resolve_device(tuned_training_config)
     checkpoint_payload = torch.load(checkpoint_path, map_location="cpu")
     model_state = checkpoint_payload.get("model_state_dict") if isinstance(checkpoint_payload, dict) else None
@@ -1332,7 +1549,7 @@ def run_qat_variant(
         manifest=sample_manifest if isinstance(sample_manifest, dict) else {},
         dataset_dir=dataset_dir,
         split="train",
-        max_samples=256,
+        max_samples=calibration_max_samples,
     )
     tensors = [preprocess_asset(path, base_metadata) for path in calibration_paths if path.exists()]
     if not tensors:
@@ -1401,7 +1618,8 @@ def run_qat_variant(
                 "size_bytes": int(model_path.stat().st_size),
             },
             "evaluation": evaluations,
-            "benchmark": benchmark,
+            "benchmark": benchmark.get("benchmark"),
+            "benchmarks": benchmark.get("devices", {}),
             "quantized": True,
             "qat": {
                 "epochs": qat_epochs,

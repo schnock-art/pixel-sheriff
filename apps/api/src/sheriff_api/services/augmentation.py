@@ -44,7 +44,7 @@ def preset_augmentation_steps(profile: Any) -> list[dict[str, Any]]:
         return [
             {"type": "horizontal_flip", "p": 0.5, "params": {}},
             {"type": "color_jitter", "p": 1.0, "params": dict(COLOR_JITTER_DEFAULTS)},
-            {"type": "rotate", "p": 1.0, "params": {"degrees": 8.0}},
+            {"type": "rotate", "p": 1.0, "params": {"min_degrees": -8.0, "max_degrees": 8.0}},
         ]
     return []
 
@@ -79,8 +79,11 @@ def summarize_augmentation_steps(steps: Any) -> str:
             continue
         label = f"{step['type']}@{step['p']:.2f}"
         params = step["params"]
-        if step["type"] == "rotate" and "degrees" in params:
-            label = f"{label}({params['degrees']})"
+        if step["type"] == "rotate":
+            if "min_degrees" in params and "max_degrees" in params:
+                label = f"{label}({params['min_degrees']}..{params['max_degrees']})"
+            elif "degrees" in params:
+                label = f"{label}({-params['degrees']}..{params['degrees']})"
         elif step["type"] == "color_jitter":
             parts: list[str] = []
             for key in ("brightness", "contrast", "saturation", "hue"):

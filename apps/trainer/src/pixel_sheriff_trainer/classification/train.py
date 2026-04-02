@@ -6,61 +6,31 @@ from typing import Any, Callable
 
 import torch
 import torch.nn as nn
-import torch.optim as optim
 from torch.utils.data import DataLoader
 
 from pixel_sheriff_ml.model_factory import build_classifier_model
 from pixel_sheriff_trainer.classification.eval import ClassifierEvaluation, evaluate_classifier
+from pixel_sheriff_trainer.training_config import (
+    amp_enabled as config_amp_enabled,
+    as_bool as _as_bool,
+    as_float as _as_float,
+    as_int as _as_int,
+    build_optimizer,
+    build_scheduler,
+    grad_clip_norm_from_config,
+    resolve_device as shared_resolve_device,
+    resolve_runtime_info as shared_resolve_runtime_info,
+    resolve_runtime_loader_settings as shared_resolve_runtime_loader_settings,
+    RuntimeInfo,
+)
 
 
 def _build_classifier(model_config: dict[str, Any], num_classes: int) -> nn.Module:
     return build_classifier_model(model_config, num_classes_override=num_classes)
 
 
-def _as_int(value: Any, default: int) -> int:
-    try:
-        parsed = int(value)
-    except (TypeError, ValueError):
-        return int(default)
-    return int(parsed)
-
-
-def _as_float(value: Any, default: float) -> float:
-    try:
-        parsed = float(value)
-    except (TypeError, ValueError):
-        return float(default)
-    return float(parsed)
-
-
-def _as_bool(value: Any, default: bool) -> bool:
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, str):
-        normalized = value.strip().lower()
-        if normalized in {"1", "true", "yes", "on"}:
-            return True
-        if normalized in {"0", "false", "no", "off"}:
-            return False
-    return bool(default)
-
-
 def resolve_device(training_config: dict[str, Any]) -> torch.device:
-    runtime = training_config.get("runtime")
-    requested = "auto"
-    if isinstance(runtime, dict) and isinstance(runtime.get("device"), str):
-        requested = str(runtime["device"]).lower()
-    if requested == "cuda" and torch.cuda.is_available():
-        return torch.device("cuda")
-    if requested == "mps" and getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
-        return torch.device("mps")
-    if requested == "cpu":
-        return torch.device("cpu")
-    if torch.cuda.is_available():
-        return torch.device("cuda")
-    if getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
-        return torch.device("mps")
-    return torch.device("cpu")
+    return shared_resolve_device(training_config)
 
 
 def resolve_runtime_loader_settings(
@@ -68,86 +38,19 @@ def resolve_runtime_loader_settings(
     *,
     device: torch.device,
 ) -> tuple[int, bool, bool, int, bool, int]:
-    runtime = training_config.get("runtime")
-    advanced = training_config.get("advanced")
-
-    num_workers = 0
-    if isinstance(runtime, dict) and runtime.get("num_workers") is not None:
-        num_workers = max(0, _as_int(runtime.get("num_workers"), 0))
-    elif isinstance(advanced, dict) and advanced.get("num_workers") is not None:
-        num_workers = max(0, _as_int(advanced.get("num_workers"), 0))
-
-    pin_memory = device.type == "cuda"
-    if isinstance(runtime, dict) and runtime.get("pin_memory") is not None:
-        pin_memory = _as_bool(runtime.get("pin_memory"), pin_memory)
-
-    persistent_workers = num_workers > 0
-    if isinstance(runtime, dict) and runtime.get("persistent_workers") is not None:
-        persistent_workers = _as_bool(runtime.get("persistent_workers"), persistent_workers)
-    if num_workers < 1:
-        persistent_workers = False
-
-    prefetch_factor = 2
-    if isinstance(runtime, dict) and runtime.get("prefetch_factor") is not None:
-        prefetch_factor = max(1, _as_int(runtime.get("prefetch_factor"), prefetch_factor))
-
-    cache_resized_images = num_workers == 0
-    if isinstance(runtime, dict) and runtime.get("cache_resized_images") is not None:
-        cache_resized_images = _as_bool(runtime.get("cache_resized_images"), cache_resized_images)
-
-    max_cached_images = 1024
-    if isinstance(runtime, dict) and runtime.get("max_cached_images") is not None:
-        max_cached_images = max(0, _as_int(runtime.get("max_cached_images"), max_cached_images))
-
-    return num_workers, pin_memory, persistent_workers, prefetch_factor, cache_resized_images, max_cached_images
-
-
-@dataclass(frozen=True)
-class RuntimeInfo:
-    device_selected: str
-    cuda_available: bool
-    mps_available: bool
-    amp_enabled: bool
-    torch_version: str
-    torchvision_version: str
-    num_workers: int
-    pin_memory: bool
-    persistent_workers: bool
-    prefetch_factor: int
-    cache_resized_images: bool
-    max_cached_images: int
+    settings = shared_resolve_runtime_loader_settings(training_config, device=device)
+    return (
+        settings.num_workers,
+        settings.pin_memory,
+        settings.persistent_workers,
+        settings.prefetch_factor,
+        settings.cache_resized_images,
+        settings.max_cached_images,
+    )
 
 
 def resolve_runtime_info(training_config: dict[str, Any], *, device: torch.device) -> RuntimeInfo:
-    num_workers, pin_memory, persistent_workers, prefetch_factor, cache_resized_images, max_cached_images = resolve_runtime_loader_settings(
-        training_config,
-        device=device,
-    )
-    precision = str(training_config.get("precision", "fp32")).lower()
-    amp_enabled = precision == "amp" and device.type == "cuda"
-    torchvision_version = "unknown"
-    try:
-        import torchvision
-
-        torchvision_version = str(getattr(torchvision, "__version__", "unknown"))
-    except Exception:
-        torchvision_version = "unknown"
-    mps_backend = getattr(torch.backends, "mps", None)
-    mps_available = bool(mps_backend and mps_backend.is_available())
-    return RuntimeInfo(
-        device_selected=device.type,
-        cuda_available=bool(torch.cuda.is_available()),
-        mps_available=mps_available,
-        amp_enabled=amp_enabled,
-        torch_version=str(getattr(torch, "__version__", "unknown")),
-        torchvision_version=torchvision_version,
-        num_workers=int(num_workers),
-        pin_memory=bool(pin_memory),
-        persistent_workers=bool(persistent_workers),
-        prefetch_factor=int(prefetch_factor),
-        cache_resized_images=bool(cache_resized_images),
-        max_cached_images=int(max_cached_images),
-    )
+    return shared_resolve_runtime_info(training_config, device=device)
 
 
 @dataclass
@@ -218,47 +121,20 @@ def run_training(
     if resolved_device.type == "cuda":
         torch.backends.cudnn.benchmark = True
 
-    optimizer_cfg = training_config.get("optimizer")
-    if not isinstance(optimizer_cfg, dict):
-        optimizer_cfg = {}
-    lr = _as_float(optimizer_cfg.get("lr", 0.001), 0.001)
-    weight_decay = _as_float(optimizer_cfg.get("weight_decay", 0.0), 0.0)
-    optimizer_type = str(optimizer_cfg.get("type", "adam")).lower()
-    if optimizer_type == "sgd":
-        optimizer = optim.SGD(model.parameters(), lr=lr, momentum=0.9, weight_decay=weight_decay)
-    elif optimizer_type == "adamw":
-        optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
-    else:
-        optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
-
-    scheduler_cfg = training_config.get("scheduler")
-    if not isinstance(scheduler_cfg, dict):
-        scheduler_cfg = {}
-    scheduler_type = str(scheduler_cfg.get("type", "none")).lower()
     epochs = max(1, _as_int(training_config.get("epochs", 1), 1))
-    if scheduler_type == "step":
-        params = scheduler_cfg.get("params")
-        if not isinstance(params, dict):
-            params = {}
-        default_step = max(1, epochs // 3)
-        step_size = max(1, _as_int(params.get("step_size", default_step), default_step))
-        gamma = _as_float(params.get("gamma", 0.1), 0.1)
-        scheduler: Any = optim.lr_scheduler.StepLR(optimizer, step_size=step_size, gamma=gamma)
-    elif scheduler_type == "cosine":
-        scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max(1, epochs))
-    else:
-        scheduler = None
+    optimizer = build_optimizer(
+        model.parameters(),
+        training_config,
+        default_type="adam",
+        default_lr=0.001,
+        default_weight_decay=0.0,
+    )
+    scheduler = build_scheduler(optimizer, training_config, epochs=epochs, default_type="none")
 
     criterion = nn.CrossEntropyLoss()
-    use_amp = str(training_config.get("precision", "fp32")).lower() == "amp" and resolved_device.type == "cuda"
+    use_amp = config_amp_enabled(training_config, device=resolved_device)
     scaler = torch.cuda.amp.GradScaler(enabled=use_amp)
-    grad_clip_norm = None
-    advanced = training_config.get("advanced")
-    if isinstance(advanced, dict) and advanced.get("grad_clip_norm") is not None:
-        try:
-            grad_clip_norm = float(advanced.get("grad_clip_norm"))
-        except (TypeError, ValueError):
-            grad_clip_norm = None
+    grad_clip_norm = grad_clip_norm_from_config(training_config)
 
     if _has_batchnorm_layers(model) and _loader_may_emit_small_batch(train_loader):
         raise ValueError("batchnorm_small_batch_unsupported")

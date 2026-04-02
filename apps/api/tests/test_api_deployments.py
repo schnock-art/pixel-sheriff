@@ -127,6 +127,45 @@ async def test_create_deployment_pins_explicit_variant_key(client: AsyncClient) 
 
 
 @pytest.mark.asyncio
+async def test_create_deployment_accepts_fp16_variant_key(client: AsyncClient) -> None:
+    project_id, model_id, _task_id = await _create_classification_project_model(client, project_name="deploy-fp16")
+    created = await client.post(
+        f"/api/v1/projects/{project_id}/experiments",
+        json={"model_id": model_id, "name": "deploy-fp16-exp"},
+    )
+    assert created.status_code == 200
+    experiment_id = created.json()["id"]
+    _seed_experiment_run_artifacts(project_id=project_id, experiment_id=experiment_id, attempt=1, include_onnx=True)
+    _seed_experiment_variant_artifacts(
+        project_id=project_id,
+        experiment_id=experiment_id,
+        attempt=1,
+        variant_key="fp16",
+        preferred_variant_key="fp16",
+    )
+
+    response = await client.post(
+        f"/api/v1/projects/{project_id}/deployments",
+        json={
+            "name": "deploy-fp16",
+            "task": "classification",
+            "device_preference": "auto",
+            "source": {
+                "experiment_id": experiment_id,
+                "attempt": 1,
+                "checkpoint_kind": "best_metric",
+                "variant_key": "fp16",
+            },
+            "is_active": False,
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()["deployment"]
+    assert payload["source"]["variant_key"] == "fp16"
+    assert "/variants/fp16/" in payload["source"]["onnx_relpath"]
+
+
+@pytest.mark.asyncio
 async def test_predict_without_active_returns_no_active_deployment(client: AsyncClient) -> None:
     project = (await client.post("/api/v1/projects", json={"name": "predict-no-active"})).json()
     project_id = project["id"]

@@ -8,10 +8,12 @@ from typing import Any, Callable
 import zipfile
 
 from PIL import Image
+import torch
 from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms
 
 from pixel_sheriff_trainer.augmentation import apply_image_augmentation, resolve_training_augmentation
+from pixel_sheriff_trainer.training_config import resolve_runtime_loader_settings
 
 
 class ClassificationDataset(Dataset):
@@ -288,42 +290,18 @@ def build_classification_loaders(
     if batch_size < 1:
         batch_size = 16
 
-    runtime = training_config.get("runtime")
-    advanced = training_config.get("advanced")
-    num_workers = 0
-    if isinstance(runtime, dict) and isinstance(runtime.get("num_workers"), int):
-        num_workers = max(0, int(runtime["num_workers"]))
-    elif isinstance(advanced, dict) and isinstance(advanced.get("num_workers"), int):
-        num_workers = max(0, int(advanced["num_workers"]))
-
     resolved_device_type = str(device_type or "cpu").strip().lower()
-    pin_memory_default = resolved_device_type == "cuda"
-    pin_memory = pin_memory_default
-    if isinstance(runtime, dict) and isinstance(runtime.get("pin_memory"), bool):
-        pin_memory = bool(runtime["pin_memory"])
-
-    persistent_workers = num_workers > 0
-    if isinstance(runtime, dict) and isinstance(runtime.get("persistent_workers"), bool):
-        persistent_workers = bool(runtime["persistent_workers"])
-    if num_workers < 1:
-        persistent_workers = False
-
-    prefetch_factor = 2
-    if isinstance(runtime, dict) and isinstance(runtime.get("prefetch_factor"), int):
-        prefetch_factor = max(1, int(runtime["prefetch_factor"]))
-
-    cache_base_images_default = num_workers == 0
-    cache_base_images = cache_base_images_default
-    if isinstance(runtime, dict) and isinstance(runtime.get("cache_resized_images"), bool):
-        cache_base_images = bool(runtime["cache_resized_images"])
-    max_cached_images = 1024
-    if isinstance(runtime, dict) and isinstance(runtime.get("max_cached_images"), int):
-        max_cached_images = max(0, int(runtime["max_cached_images"]))
-
-    training_block = training_config.get("training")
-    drop_last = True
-    if isinstance(training_block, dict) and isinstance(training_block.get("drop_last"), bool):
-        drop_last = bool(training_block.get("drop_last"))
+    loader_settings = resolve_runtime_loader_settings(
+        training_config,
+        device=torch.device(resolved_device_type),
+    )
+    num_workers = loader_settings.num_workers
+    pin_memory = loader_settings.pin_memory
+    persistent_workers = loader_settings.persistent_workers
+    prefetch_factor = loader_settings.prefetch_factor
+    cache_base_images = loader_settings.cache_resized_images
+    max_cached_images = loader_settings.max_cached_images
+    drop_last = loader_settings.drop_last
 
     train_dataset = ClassificationDataset(
         train_samples,

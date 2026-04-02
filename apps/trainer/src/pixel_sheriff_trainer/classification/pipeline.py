@@ -20,15 +20,8 @@ from pixel_sheriff_trainer.pipeline import (
 class ClassificationPipeline(TaskPipeline):
     task_kind = "classification"
 
-    def build_loaders(self, job: Any, workdir: Path) -> TaskLoaders:
-        # workdir = {storage_root}/experiments/{project_id}/{experiment_id}/runs/{attempt}/workdir
-        # storage_root is at parents[5] (0-indexed from immediate parent)
+    def build_loaders(self, job: Any, workdir: Path, storage: Any) -> TaskLoaders:
         from pixel_sheriff_trainer.classification.train import resolve_device
-        from pixel_sheriff_trainer.io.storage import ExperimentStorage
-
-        storage_root = workdir.parents[5]
-        storage = ExperimentStorage(str(storage_root))
-
         zip_relpath = str(job.dataset_export.get("zip_relpath") or "")
         if not zip_relpath:
             raise ValueError("dataset_export_missing")

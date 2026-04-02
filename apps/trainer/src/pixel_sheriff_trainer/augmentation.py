@@ -50,9 +50,24 @@ def preset_augmentation_steps(profile: Any) -> list[AugmentationStep]:
         return [
             AugmentationStep(type="horizontal_flip", p=0.5, params={}),
             AugmentationStep(type="color_jitter", p=1.0, params=dict(COLOR_JITTER_DEFAULTS)),
-            AugmentationStep(type="rotate", p=1.0, params={"degrees": 8.0}),
+            AugmentationStep(type="rotate", p=1.0, params={"min_degrees": -8.0, "max_degrees": 8.0}),
         ]
     return []
+
+
+def _rotation_range(params: dict[str, float]) -> tuple[float, float] | None:
+    if "min_degrees" in params or "max_degrees" in params:
+        min_degrees = float(params.get("min_degrees", 0.0))
+        max_degrees = float(params.get("max_degrees", 0.0))
+    else:
+        degrees = float(params.get("degrees", 0.0))
+        min_degrees = -degrees
+        max_degrees = degrees
+    if max_degrees < min_degrees:
+        min_degrees, max_degrees = max_degrees, min_degrees
+    if min_degrees == 0.0 and max_degrees == 0.0:
+        return None
+    return min_degrees, max_degrees
 
 
 def _normalize_step(raw_step: Any) -> AugmentationStep | None:
@@ -74,6 +89,12 @@ def _normalize_step(raw_step: Any) -> AugmentationStep | None:
             safe_params[str(key)] = float(value)
         except (TypeError, ValueError):
             continue
+    if step_type == "rotate":
+        rotation_range = _rotation_range(safe_params)
+        safe_params = {}
+        if rotation_range is not None:
+            safe_params["min_degrees"] = float(rotation_range[0])
+            safe_params["max_degrees"] = float(rotation_range[1])
     return AugmentationStep(
         type=step_type,
         p=max(0.0, min(1.0, probability)),
@@ -124,10 +145,10 @@ def apply_image_augmentation(image: Image.Image, steps: list[AugmentationStep]) 
             augmented = jitter(augmented)
             continue
         if step.type == "rotate":
-            max_degrees = float(step.params.get("degrees", 0.0))
-            if max_degrees <= 0:
+            rotation_range = _rotation_range(step.params)
+            if rotation_range is None:
                 continue
-            angle = random.uniform(-max_degrees, max_degrees)
+            angle = random.uniform(rotation_range[0], rotation_range[1])
             augmented = TF.rotate(augmented, angle, interpolation=InterpolationMode.BILINEAR, expand=False, fill=0)
     return augmented
 
@@ -163,10 +184,10 @@ def apply_detection_augmentation(
             augmented = jitter(augmented)
             continue
         if step.type == "rotate":
-            max_degrees = float(step.params.get("degrees", 0.0))
-            if max_degrees <= 0:
+            rotation_range = _rotation_range(step.params)
+            if rotation_range is None:
                 continue
-            angle = random.uniform(-max_degrees, max_degrees)
+            angle = random.uniform(rotation_range[0], rotation_range[1])
             augmented = TF.rotate(augmented, angle, interpolation=InterpolationMode.BILINEAR, expand=False, fill=0)
             current_boxes, current_labels = _rotate_boxes(current_boxes, current_labels, width=width, height=height, angle=angle)
     return augmented, current_boxes, current_labels
@@ -200,10 +221,10 @@ def apply_segmentation_augmentation(
             augmented_image = jitter(augmented_image)
             continue
         if step.type == "rotate":
-            max_degrees = float(step.params.get("degrees", 0.0))
-            if max_degrees <= 0:
+            rotation_range = _rotation_range(step.params)
+            if rotation_range is None:
                 continue
-            angle = random.uniform(-max_degrees, max_degrees)
+            angle = random.uniform(rotation_range[0], rotation_range[1])
             augmented_image = TF.rotate(augmented_image, angle, interpolation=InterpolationMode.BILINEAR, expand=False, fill=0)
             augmented_mask = TF.rotate(augmented_mask, angle, interpolation=InterpolationMode.NEAREST, expand=False, fill=0)
     return augmented_image, augmented_mask

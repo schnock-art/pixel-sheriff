@@ -7,6 +7,7 @@ const {
   augmentationCategoryValue,
   defaultAugmentationProfileForTask,
   moveAugmentationStep,
+  normalizeRotateParams,
   readAugmentationSteps,
   removeAugmentationStep,
   setAugmentationProfile,
@@ -40,4 +41,18 @@ test("augmentation config editing preserves steps when profile changes", () => {
 test("augmentation analytics labels include custom bucket", () => {
   assert.equal(augmentationCategoryValue({ augmentation_mode: "custom" }), 4);
   assert.equal(augmentationCategoryLabel(4), "custom");
+});
+
+test("rotate augmentation normalizes legacy and canonical degree ranges", () => {
+  assert.deepEqual(normalizeRotateParams({ degrees: 8 }), { min_degrees: -8, max_degrees: 8 });
+  assert.deepEqual(normalizeRotateParams({ min_degrees: 5, max_degrees: -3 }), { min_degrees: -3, max_degrees: 5 });
+
+  const steps = readAugmentationSteps({
+    augmentation_steps: [
+      { type: "rotate", p: 1, params: { degrees: 6 } },
+      { type: "rotate", p: 1, params: { min_degrees: -4, max_degrees: 9 } },
+    ],
+  });
+  assert.deepEqual(steps[0].params, { min_degrees: -6, max_degrees: 6 });
+  assert.deepEqual(steps[1].params, { min_degrees: -4, max_degrees: 9 });
 });

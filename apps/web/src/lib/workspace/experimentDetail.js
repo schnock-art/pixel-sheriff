@@ -9,10 +9,31 @@ function cloneConfig(value) {
 function configValidation(config) {
   const issues = [];
   const optimizer = asRecord(config?.optimizer);
+  const scheduler = asRecord(config?.scheduler);
+  const schedulerParams = asRecord(scheduler.params);
+  const advanced = asRecord(config?.advanced);
   const lr = Number(optimizer.lr);
+  const weightDecay = Number(optimizer.weight_decay);
+  const momentum = optimizer.momentum == null || optimizer.momentum === "" ? null : Number(optimizer.momentum);
   const epochs = Number(config?.epochs);
   const batchSize = Number(config?.batch_size);
   if (!Number.isFinite(lr) || lr <= 0) issues.push("Learning rate must be > 0");
+  if (optimizer.weight_decay != null && optimizer.weight_decay !== "" && (!Number.isFinite(weightDecay) || weightDecay < 0)) {
+    issues.push("Weight decay must be >= 0");
+  }
+  if (optimizer.type === "sgd" && momentum != null && (!Number.isFinite(momentum) || momentum < 0)) {
+    issues.push("Momentum must be >= 0");
+  }
+  if (scheduler.type === "step") {
+    const stepSize = Number(schedulerParams.step_size);
+    const gamma = Number(schedulerParams.gamma);
+    if (!Number.isInteger(stepSize) || stepSize < 1) issues.push("Step scheduler step size must be >= 1");
+    if (!Number.isFinite(gamma) || gamma <= 0) issues.push("Step scheduler gamma must be > 0");
+  }
+  if (advanced.grad_clip_norm != null && advanced.grad_clip_norm !== "") {
+    const gradClip = Number(advanced.grad_clip_norm);
+    if (!Number.isFinite(gradClip) || gradClip < 0) issues.push("Gradient clip norm must be >= 0");
+  }
   if (!Number.isFinite(epochs) || epochs < 1) issues.push("Epochs must be >= 1");
   if (!Number.isFinite(batchSize) || batchSize < 1) issues.push("Batch size must be >= 1");
   return { isValid: issues.length === 0, issues };

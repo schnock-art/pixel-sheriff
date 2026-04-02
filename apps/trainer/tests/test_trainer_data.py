@@ -74,6 +74,18 @@ def test_resolve_training_augmentation_preserves_legacy_non_classification_behav
     assert classification_mode == "medium"
     assert [step.type for step in classification_steps] == ["horizontal_flip", "color_jitter"]
 
+    custom_mode, custom_steps = resolve_training_augmentation(
+        {
+            "task": "detection",
+            "augmentation_profile": "custom",
+            "augmentation_spec_version": 1,
+            "augmentation_steps": [{"type": "rotate", "p": 1.0, "params": {"degrees": 6}}],
+        },
+        "detection",
+    )
+    assert custom_mode == "custom"
+    assert custom_steps[0].params == {"min_degrees": -6.0, "max_degrees": 6.0}
+
 
 def test_apply_detection_augmentation_rotates_boxes_without_dropping_valid_targets(monkeypatch: pytest.MonkeyPatch) -> None:
     if not HAS_TORCH:
@@ -94,7 +106,7 @@ def test_apply_detection_augmentation_rotates_boxes_without_dropping_valid_targe
                 "task": "detection",
                 "augmentation_profile": "custom",
                 "augmentation_spec_version": 1,
-                "augmentation_steps": [{"type": "rotate", "p": 1.0, "params": {"degrees": 8}}],
+                "augmentation_steps": [{"type": "rotate", "p": 1.0, "params": {"min_degrees": -8, "max_degrees": 8}}],
             },
             "detection",
         )[1][0]],
@@ -159,6 +171,26 @@ def test_detection_loader_accepts_uuid_image_ids(tmp_path: Path) -> None:
     assert len(train_images) == 1
     assert tuple(train_targets[0]["boxes"].shape) == (1, 4)
     assert train_targets[0]["labels"].tolist() == [0]
+
+
+def test_detection_loader_honors_runtime_worker_settings(tmp_path: Path) -> None:
+    if not HAS_TORCH:
+        pytest.skip("torch/torchvision not available")
+    project_id = str(uuid.uuid4())
+    zip_path = _write_tiny_coco_export_zip(tmp_path, project_id, include_segmentation=False)
+    loaded = build_detection_loaders(
+        export_zip_path=zip_path,
+        workdir=tmp_path / "workdir_detection_runtime",
+        model_config={"input": {"input_size": [32, 32]}},
+        training_config={
+            "batch_size": 1,
+            "runtime": {"num_workers": 1, "prefetch_factor": 3, "persistent_workers": True},
+            "training": {"drop_last": False},
+        },
+    )
+    assert loaded.train_loader.drop_last is False
+    assert int(getattr(loaded.train_loader, "prefetch_factor", 0)) == 3
+    assert bool(getattr(loaded.train_loader, "persistent_workers", False)) is True
 
 
 def test_detection_loader_offsets_labels_for_ssdlite_family(tmp_path: Path) -> None:

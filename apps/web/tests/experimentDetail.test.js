@@ -26,15 +26,32 @@ test("asRecord and cloneConfig provide safe mutable config helpers", () => {
 });
 
 test("configValidation reports invalid numeric training inputs", () => {
-  const invalid = configValidation({ optimizer: { lr: 0 }, epochs: 0, batch_size: -1 });
+  const invalid = configValidation({
+    optimizer: { type: "sgd", lr: 0, weight_decay: -1, momentum: -0.1 },
+    scheduler: { type: "step", params: { step_size: 0, gamma: 0 } },
+    advanced: { grad_clip_norm: -2 },
+    epochs: 0,
+    batch_size: -1,
+  });
   assert.equal(invalid.isValid, false);
   assert.deepEqual(invalid.issues, [
     "Learning rate must be > 0",
+    "Weight decay must be >= 0",
+    "Momentum must be >= 0",
+    "Step scheduler step size must be >= 1",
+    "Step scheduler gamma must be > 0",
+    "Gradient clip norm must be >= 0",
     "Epochs must be >= 1",
     "Batch size must be >= 1",
   ]);
 
-  const valid = configValidation({ optimizer: { lr: 0.001 }, epochs: 5, batch_size: 16 });
+  const valid = configValidation({
+    optimizer: { type: "sgd", lr: 0.001, weight_decay: 0.0001, momentum: 0.9 },
+    scheduler: { type: "step", params: { step_size: 5, gamma: 0.1 } },
+    advanced: { grad_clip_norm: 1.5 },
+    epochs: 5,
+    batch_size: 16,
+  });
   assert.equal(valid.isValid, true);
   assert.deepEqual(valid.issues, []);
 });

@@ -5,10 +5,18 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 import torch
-import torch.optim as optim
 
 from pixel_sheriff_trainer.detection.dataset import _resolve_detection_label_offset
 from pixel_sheriff_trainer.detection.eval import DetectionEvaluation, evaluate_detection
+from pixel_sheriff_trainer.training_config import (
+    amp_enabled,
+    as_bool,
+    as_float,
+    as_int,
+    build_optimizer,
+    build_scheduler,
+    grad_clip_norm_from_config,
+)
 
 
 @dataclass
@@ -142,26 +150,26 @@ def run_detection_training(
     if resolved_device.type == "cuda":
         torch.backends.cudnn.benchmark = True
 
-    optimizer_cfg = training_config.get("optimizer") or {}
-    lr = float(optimizer_cfg.get("lr", 0.0001))
-    weight_decay = float(optimizer_cfg.get("weight_decay", 0.0001))
-    optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
-
-    epochs = max(1, int(training_config.get("epochs", 1)))
-    scheduler_cfg = training_config.get("scheduler") or {}
-    scheduler_type = str(scheduler_cfg.get("type", "cosine")).lower()
-    if scheduler_type == "cosine":
-        scheduler: Any = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max(1, epochs))
-    else:
-        scheduler = None
+    epochs = max(1, as_int(training_config.get("epochs", 1), 1))
+    optimizer = build_optimizer(
+        model.parameters(),
+        training_config,
+        default_type="adamw",
+        default_lr=0.0001,
+        default_weight_decay=0.0001,
+    )
+    scheduler = build_scheduler(optimizer, training_config, epochs=epochs, default_type="cosine")
+    use_amp = amp_enabled(training_config, device=resolved_device)
+    scaler = torch.cuda.amp.GradScaler(enabled=use_amp)
+    grad_clip_norm = grad_clip_norm_from_config(training_config)
 
     logging_cfg = training_config.get("logging") or {}
-    save_every = max(1, int(logging_cfg.get("save_every_epochs", 1)))
-    keep_best = bool(logging_cfg.get("keep_best", True))
+    save_every = max(1, as_int(logging_cfg.get("save_every_epochs", 1), 1))
+    keep_best = as_bool(logging_cfg.get("keep_best", True), True)
 
     evaluation_cfg = training_config.get("evaluation") or {}
-    eval_interval = max(1, int(evaluation_cfg.get("eval_interval_epochs", 1)))
-    diagnostics_iou_threshold = float(evaluation_cfg.get("diagnostics_iou_threshold", 0.50))
+    eval_interval = max(1, as_int(evaluation_cfg.get("eval_interval_epochs", 1), 1))
+    diagnostics_iou_threshold = as_float(evaluation_cfg.get("diagnostics_iou_threshold", 0.50), 0.50)
     score_threshold = evaluation_cfg.get("score_threshold")
     max_detections_per_image = evaluation_cfg.get("max_detections_per_image")
     label_offset = _resolve_detection_label_offset(model_config)
@@ -177,7 +185,7 @@ def run_detection_training(
         scheduler_state = resume_state.get("scheduler_state_dict")
         if scheduler is not None and isinstance(scheduler_state, dict):
             scheduler.load_state_dict(scheduler_state)
-        resumed_epoch = int(resume_state.get("epoch", 0))
+        resumed_epoch = as_int(resume_state.get("epoch", 0), 0)
         if resumed_epoch >= 1:
             start_epoch = resumed_epoch + 1
 
@@ -202,11 +210,15 @@ def run_detection_training(
             targets = [{k: v.to(resolved_device, non_blocking=non_blocking) for k, v in t.items()} for t in targets]
 
             optimizer.zero_grad(set_to_none=True)
-            loss_dict = model(images, targets)
-            losses = sum(loss for loss in loss_dict.values())
-            losses.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-            optimizer.step()
+            with torch.cuda.amp.autocast(enabled=use_amp):
+                loss_dict = model(images, targets)
+                losses = sum(loss for loss in loss_dict.values())
+            scaler.scale(losses).backward()
+            if grad_clip_norm is not None and grad_clip_norm > 0:
+                scaler.unscale_(optimizer)
+                torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip_norm)
+            scaler.step(optimizer)
+            scaler.update()
 
             total_loss += float(losses.item())
             num_batches += 1
@@ -227,7 +239,7 @@ def run_detection_training(
                     class_names=class_names,
                     class_order=class_order,
                     diagnostics_iou_threshold=diagnostics_iou_threshold,
-                    score_threshold=float(score_threshold) if isinstance(score_threshold, (int, float)) else None,
+                    score_threshold=as_float(score_threshold, 0.0) if isinstance(score_threshold, (int, float)) else None,
                     max_detections_per_image=(
                         int(max_detections_per_image)
                         if isinstance(max_detections_per_image, int)
@@ -249,7 +261,7 @@ def run_detection_training(
                         class_names=class_names,
                         class_order=class_order,
                         diagnostics_iou_threshold=diagnostics_iou_threshold,
-                        score_threshold=float(score_threshold) if isinstance(score_threshold, (int, float)) else None,
+                        score_threshold=as_float(score_threshold, 0.0) if isinstance(score_threshold, (int, float)) else None,
                         max_detections_per_image=(
                             int(max_detections_per_image)
                             if isinstance(max_detections_per_image, int)

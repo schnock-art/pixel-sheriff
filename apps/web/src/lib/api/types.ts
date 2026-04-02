@@ -684,8 +684,8 @@ export interface ExperimentRuntimePayload {
 export interface ExperimentOnnxPayload {
   attempt: number;
   status: "exported" | "failed";
-  variant_key?: "fp32" | "ptq_int8" | "qat_int8" | null;
-  preferred_variant_key?: "fp32" | "ptq_int8" | "qat_int8" | null;
+  variant_key?: "fp32" | "fp16" | "ptq_int8" | "qat_int8" | null;
+  preferred_variant_key?: "fp32" | "fp16" | "ptq_int8" | "qat_int8" | null;
   model_onnx_url?: string | null;
   metadata_url: string;
   input_shape?: number[];
@@ -694,10 +694,10 @@ export interface ExperimentOnnxPayload {
   preprocess?: Record<string, unknown>;
   validation?: Record<string, unknown> | null;
   error?: string | null;
-  available_variants?: Array<"fp32" | "ptq_int8" | "qat_int8">;
+  available_variants?: Array<"fp32" | "fp16" | "ptq_int8" | "qat_int8">;
 }
 
-export type ModelVariantKey = "fp32" | "ptq_int8" | "qat_int8";
+export type ModelVariantKey = "fp32" | "fp16" | "ptq_int8" | "qat_int8";
 export type RequestedModelVariantKey = "preferred" | ModelVariantKey;
 
 export interface ExperimentVariantSplitSummary {
@@ -710,10 +710,12 @@ export interface ExperimentVariantBenchmarkSummary {
   status?: string | null;
   provider?: string | null;
   batch_size?: number | null;
+  sample_count?: number | null;
   mean_latency_ms?: number | null;
   p50_latency_ms?: number | null;
   p95_latency_ms?: number | null;
   throughput_items_per_second?: number | null;
+  message?: string | null;
 }
 
 export interface ExperimentVariantSummary {
@@ -734,6 +736,7 @@ export interface ExperimentVariantSummary {
   };
   evaluation?: Record<string, ExperimentVariantSplitSummary>;
   benchmark?: ExperimentVariantBenchmarkSummary | Record<string, unknown> | null;
+  benchmarks?: Record<string, ExperimentVariantBenchmarkSummary>;
   qat?: Record<string, unknown> | null;
 }
 
@@ -741,6 +744,8 @@ export interface ExperimentVariantsPayload {
   attempt: number;
   preferred_variant_key?: ModelVariantKey | null;
   support: {
+    fp16_supported: boolean;
+    fp16_reason?: string | null;
     ptq_supported: boolean;
     qat_supported: boolean;
     qat_reason?: string | null;

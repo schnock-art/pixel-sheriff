@@ -39,14 +39,21 @@ class QuantizePtqJob(BaseJob):
 
 
 @dataclass(frozen=True)
+class QuantizeFp16Job(BaseJob):
+    variant_key: str
+    checkpoint_kind: str | None
+
+
+@dataclass(frozen=True)
 class QuantizeQatJob(BaseJob):
     variant_key: str
     checkpoint_kind: str | None
     epochs_override: int | None = None
     learning_rate_override: float | None = None
+    calibration_max_samples: int = 256
 
 
-ExperimentJob = TrainJob | EvaluateVariantJob | QuantizePtqJob | QuantizeQatJob
+ExperimentJob = TrainJob | EvaluateVariantJob | QuantizePtqJob | QuantizeFp16Job | QuantizeQatJob
 
 
 def _as_dict(raw_payload: str | dict[str, Any]) -> dict[str, Any]:
@@ -125,10 +132,18 @@ def parse_job(raw_payload: str | dict[str, Any]) -> ExperimentJob:
             calibration_max_samples=max(1, calibration_max_samples),
             **base,
         )
+    if job_type == "quantize_fp16":
+        variant_key = str(payload.get("variant_key") or "").strip().lower() or "fp16"
+        return QuantizeFp16Job(
+            variant_key=variant_key,
+            checkpoint_kind=str(payload.get("checkpoint_kind")) if payload.get("checkpoint_kind") is not None else None,
+            **base,
+        )
     if job_type == "quantize_qat":
         variant_key = str(payload.get("variant_key") or "").strip().lower() or "qat_int8"
         epochs_override = payload.get("epochs_override")
         learning_rate_override = payload.get("learning_rate_override")
+        calibration_max_samples = int(payload.get("calibration_max_samples") or 256)
         return QuantizeQatJob(
             variant_key=variant_key,
             checkpoint_kind=str(payload.get("checkpoint_kind")) if payload.get("checkpoint_kind") is not None else None,
@@ -136,6 +151,7 @@ def parse_job(raw_payload: str | dict[str, Any]) -> ExperimentJob:
             learning_rate_override=float(learning_rate_override)
             if isinstance(learning_rate_override, (int, float)) and float(learning_rate_override) > 0
             else None,
+            calibration_max_samples=max(1, calibration_max_samples),
             **base,
         )
     raise ValueError(f"unsupported_job_type:{job_type}")

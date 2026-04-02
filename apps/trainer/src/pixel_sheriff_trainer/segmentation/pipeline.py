@@ -5,7 +5,6 @@ from pathlib import Path
 from typing import Any, Callable
 
 from pixel_sheriff_trainer.export_onnx import OnnxExportResult, _resolve_best_checkpoint, _as_relative_uri
-from pixel_sheriff_trainer.io.storage import ExperimentStorage
 from pixel_sheriff_trainer.pipeline import (
     EvaluationResult,
     PIPELINE_REGISTRY,
@@ -23,20 +22,21 @@ from pixel_sheriff_trainer.utils.time import utc_now_iso
 class SegmentationPipeline(TaskPipeline):
     task_kind = "segmentation"
 
-    def build_loaders(self, job: Any, workdir: Path) -> TaskLoaders:
-        storage_root = workdir.parents[5]
-        storage = ExperimentStorage(str(storage_root))
+    def build_loaders(self, job: Any, workdir: Path, storage: Any) -> TaskLoaders:
+        from pixel_sheriff_trainer.training_config import resolve_device
 
         zip_relpath = str(job.dataset_export.get("zip_relpath") or "")
         if not zip_relpath:
             raise ValueError("dataset_export_missing")
         zip_path = storage.resolve(zip_relpath)
+        device = resolve_device(job.training_config)
 
         loaded = build_segmentation_loaders(
             export_zip_path=zip_path,
             workdir=workdir,
             model_config=job.model_config,
             training_config=job.training_config,
+            device_type=device.type,
         )
         return TaskLoaders(
             train=loaded.train_loader,

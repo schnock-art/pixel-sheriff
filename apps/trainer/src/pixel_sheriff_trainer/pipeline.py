@@ -40,7 +40,7 @@ class TaskPipeline:
 
     task_kind: ClassVar[str]
 
-    def build_loaders(self, job: Any, workdir: Path) -> TaskLoaders:
+    def build_loaders(self, job: Any, workdir: Path, storage: Any) -> TaskLoaders:
         raise NotImplementedError
 
     def run_training(

@@ -5,13 +5,16 @@ from pathlib import Path
 from typing import Any, Literal
 import uuid
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Body, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sheriff_api.db.session import get_db
 from sheriff_api.errors import api_error
 from sheriff_api.schemas.experiments import (
+    ExperimentVariantFp16Request,
     ExperimentVariantActionResponse,
+    ExperimentVariantPtqRequest,
+    ExperimentVariantQatRequest,
     ExperimentVariantSummaryResponse,
     ExperimentVariantsResponse,
 )
@@ -21,10 +24,11 @@ from .shared import experiment_store, model_store, require_project, train_queue
 router = APIRouter()
 
 VARIANT_FP32 = "fp32"
+VARIANT_FP16 = "fp16"
 VARIANT_PTQ_INT8 = "ptq_int8"
 VARIANT_QAT_INT8 = "qat_int8"
-VARIANT_KEYS = {VARIANT_FP32, VARIANT_PTQ_INT8, VARIANT_QAT_INT8}
-VARIANT_PREFERRED_ORDER = (VARIANT_QAT_INT8, VARIANT_PTQ_INT8, VARIANT_FP32)
+VARIANT_KEYS = {VARIANT_FP32, VARIANT_FP16, VARIANT_PTQ_INT8, VARIANT_QAT_INT8}
+VARIANT_PREFERRED_ORDER = (VARIANT_QAT_INT8, VARIANT_PTQ_INT8, VARIANT_FP16, VARIANT_FP32)
 
 
 def _read_json(path: Path | None, default: Any) -> Any:
@@ -45,6 +49,8 @@ def _write_json(path: Path, payload: Any) -> None:
 def _variant_task_support(task: str) -> dict[str, Any]:
     normalized = str(task or "").strip().lower()
     return {
+        "fp16_supported": normalized in {"classification", "detection"},
+        "fp16_reason": None if normalized in {"classification", "detection"} else "FP16 is not supported for this task",
         "ptq_supported": normalized in {"classification", "detection"},
         "qat_supported": normalized in {"classification", "detection"},
         "qat_reason": None if normalized in {"classification", "detection"} else "QAT is not supported for this task",
@@ -166,8 +172,8 @@ def _upsert_variant_row(project_id: str, experiment_id: str, attempt: int, varia
     if not isinstance(current, dict):
         current = {
             "variant_key": variant_key,
-            "label": {"fp32": "FP32", "ptq_int8": "PTQ INT8", "qat_int8": "QAT INT8"}.get(variant_key, variant_key),
-            "kind": {"fp32": "baseline", "ptq_int8": "ptq", "qat_int8": "qat"}.get(variant_key, "baseline"),
+            "label": {"fp32": "FP32", "fp16": "FP16", "ptq_int8": "PTQ INT8", "qat_int8": "QAT INT8"}.get(variant_key, variant_key),
+            "kind": {"fp32": "baseline", "fp16": "fp16", "ptq_int8": "ptq", "qat_int8": "qat"}.get(variant_key, "baseline"),
             "attempt": attempt,
             "status": "queued",
             "preferred": False,
@@ -343,6 +349,7 @@ async def _enqueue_variant_job(
 async def trigger_project_experiment_ptq(
     project_id: str,
     experiment_id: str,
+    payload: ExperimentVariantPtqRequest = Body(default=ExperimentVariantPtqRequest()),
     db: AsyncSession = Depends(get_db),
 ) -> ExperimentVariantActionResponse:
     await require_project(db, project_id)
@@ -362,7 +369,42 @@ async def trigger_project_experiment_ptq(
         attempt=attempt,
         variant_key=VARIANT_PTQ_INT8,
         job_type="quantize_ptq",
-        extra={"calibration_max_samples": 256},
+        extra={"calibration_max_samples": int(payload.calibration_max_samples)},
+    )
+
+
+@router.post(
+    "/projects/{project_id}/experiments/{experiment_id}/variants/fp16",
+    response_model=ExperimentVariantActionResponse,
+)
+async def trigger_project_experiment_fp16(
+    project_id: str,
+    experiment_id: str,
+    payload: ExperimentVariantFp16Request = Body(default=ExperimentVariantFp16Request()),
+    db: AsyncSession = Depends(get_db),
+) -> ExperimentVariantActionResponse:
+    await require_project(db, project_id)
+    current = experiment_store.get(project_id, experiment_id, metrics_limit=1)
+    if current is None:
+        raise api_error(status_code=404, code="experiment_not_found", message="Experiment not found in project")
+    config_json = current.get("config_json")
+    task = str(config_json.get("task") or "classification") if isinstance(config_json, dict) else "classification"
+    support = _variant_task_support(task)
+    if not support["fp16_supported"]:
+        raise api_error(
+            status_code=409,
+            code="fp16_unsupported",
+            message=str(support["fp16_reason"] or "FP16 is not supported for this task"),
+        )
+    attempt = _require_variant_attempt(current, project_id=project_id, experiment_id=experiment_id)
+    return await _enqueue_variant_job(
+        project_id=project_id,
+        experiment_id=experiment_id,
+        current=current,
+        attempt=attempt,
+        variant_key=VARIANT_FP16,
+        job_type="quantize_fp16",
+        extra={"checkpoint_kind": payload.checkpoint_kind} if payload.checkpoint_kind is not None else {},
     )
 
 
@@ -373,6 +415,7 @@ async def trigger_project_experiment_ptq(
 async def trigger_project_experiment_qat(
     project_id: str,
     experiment_id: str,
+    payload: ExperimentVariantQatRequest = Body(default=ExperimentVariantQatRequest()),
     db: AsyncSession = Depends(get_db),
 ) -> ExperimentVariantActionResponse:
     await require_project(db, project_id)
@@ -396,5 +439,9 @@ async def trigger_project_experiment_qat(
         attempt=attempt,
         variant_key=VARIANT_QAT_INT8,
         job_type="quantize_qat",
-        extra={},
+        extra={
+            "epochs_override": payload.epochs_override,
+            "learning_rate_override": payload.learning_rate_override,
+            "calibration_max_samples": int(payload.calibration_max_samples),
+        },
     )

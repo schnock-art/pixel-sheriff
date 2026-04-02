@@ -12,6 +12,7 @@ from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms
 
 from pixel_sheriff_trainer.augmentation import apply_detection_augmentation, resolve_training_augmentation
+from pixel_sheriff_trainer.training_config import resolve_runtime_loader_settings
 
 
 @dataclass
@@ -135,6 +136,7 @@ def build_detection_loaders(
     workdir: Path,
     model_config: dict[str, Any],
     training_config: dict[str, Any],
+    device_type: str | None = None,
 ) -> LoadedDetectionData:
     dataset_dir = _extract_if_missing(export_zip_path, workdir)
     coco_path = dataset_dir / "coco_instances.json"
@@ -259,10 +261,12 @@ def build_detection_loaders(
     _augmentation_mode, augmentation_steps = resolve_training_augmentation(training_config, "detection")
 
     batch_size = max(1, int(training_config.get("batch_size", 4)))
-    training_block = training_config.get("training")
-    drop_last = True
-    if isinstance(training_block, dict) and isinstance(training_block.get("drop_last"), bool):
-        drop_last = bool(training_block.get("drop_last"))
+    resolved_device_type = str(device_type or "cpu").strip().lower()
+    loader_settings = resolve_runtime_loader_settings(
+        training_config,
+        device=torch.device(resolved_device_type),
+    )
+    drop_last = loader_settings.drop_last
 
     def collate_fn(batch: list[tuple[Any, dict[str, Any]]]) -> tuple[list[Any], list[dict[str, Any]]]:
         return [item[0] for item in batch], [item[1] for item in batch]
@@ -278,14 +282,30 @@ def build_detection_loaders(
         target_width=target_width, target_height=target_height,
     )
 
-    train_loader: DataLoader[Any] = DataLoader(
-        train_dataset, batch_size=batch_size, shuffle=True,
-        num_workers=0, drop_last=drop_last, collate_fn=collate_fn,
-    )
-    val_loader: DataLoader[Any] = DataLoader(
-        val_dataset, batch_size=1, shuffle=False,
-        num_workers=0, collate_fn=collate_fn,
-    )
+    train_loader_kwargs: dict[str, Any] = {
+        "batch_size": batch_size,
+        "shuffle": True,
+        "num_workers": loader_settings.num_workers,
+        "drop_last": drop_last,
+        "pin_memory": loader_settings.pin_memory,
+        "collate_fn": collate_fn,
+    }
+    val_loader_kwargs: dict[str, Any] = {
+        "batch_size": 1,
+        "shuffle": False,
+        "num_workers": loader_settings.num_workers,
+        "drop_last": False,
+        "pin_memory": loader_settings.pin_memory,
+        "collate_fn": collate_fn,
+    }
+    if loader_settings.num_workers > 0:
+        train_loader_kwargs["persistent_workers"] = loader_settings.persistent_workers
+        val_loader_kwargs["persistent_workers"] = loader_settings.persistent_workers
+        train_loader_kwargs["prefetch_factor"] = loader_settings.prefetch_factor
+        val_loader_kwargs["prefetch_factor"] = loader_settings.prefetch_factor
+
+    train_loader = DataLoader(train_dataset, **train_loader_kwargs)
+    val_loader = DataLoader(val_dataset, **val_loader_kwargs)
 
     return LoadedDetectionData(
         train_loader=train_loader,

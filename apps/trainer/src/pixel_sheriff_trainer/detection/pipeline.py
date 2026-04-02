@@ -12,7 +12,6 @@ from pixel_sheriff_trainer.detection.train import (
 )
 from pixel_sheriff_trainer.export_onnx import OnnxExportResult, _resolve_best_checkpoint, _as_relative_uri
 from pixel_sheriff_trainer.io.detection_evaluation import write_detection_evaluation
-from pixel_sheriff_trainer.io.storage import ExperimentStorage
 from pixel_sheriff_trainer.pipeline import (
     EvaluationResult,
     PIPELINE_REGISTRY,
@@ -26,22 +25,21 @@ from pixel_sheriff_trainer.utils.torchvision_cache import configure_torchvision_
 class DetectionPipeline(TaskPipeline):
     task_kind = "detection"
 
-    def build_loaders(self, job: Any, workdir: Path) -> TaskLoaders:
-        from pixel_sheriff_trainer.io.storage import ExperimentStorage
-
-        storage_root = workdir.parents[5]
-        storage = ExperimentStorage(str(storage_root))
+    def build_loaders(self, job: Any, workdir: Path, storage: Any) -> TaskLoaders:
+        from pixel_sheriff_trainer.training_config import resolve_device
 
         zip_relpath = str(job.dataset_export.get("zip_relpath") or "")
         if not zip_relpath:
             raise ValueError("dataset_export_missing")
         zip_path = storage.resolve(zip_relpath)
+        device = resolve_device(job.training_config)
 
         loaded = build_detection_loaders(
             export_zip_path=zip_path,
             workdir=workdir,
             model_config=job.model_config,
             training_config=job.training_config,
+            device_type=device.type,
         )
         return TaskLoaders(
             train=loaded.train_loader,

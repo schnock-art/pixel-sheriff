@@ -325,14 +325,30 @@ def extract_experiment_config(config_json: dict[str, Any]) -> dict[str, Any]:
     optimizer = config_json.get("optimizer")
     optimizer_type = None
     optimizer_lr = None
+    optimizer_weight_decay = None
+    optimizer_momentum = None
     if isinstance(optimizer, dict):
         optimizer_type = str(optimizer.get("type") or "") or None
         optimizer_lr = safe_float(optimizer.get("lr"))
+        optimizer_weight_decay = safe_float(optimizer.get("weight_decay"))
+        optimizer_momentum = safe_float(optimizer.get("momentum"))
+    scheduler = config_json.get("scheduler")
+    scheduler_type = str(scheduler.get("type") or "") or None if isinstance(scheduler, dict) else None
+    scheduler_params = scheduler.get("params") if isinstance(scheduler, dict) and isinstance(scheduler.get("params"), dict) else {}
+    advanced = config_json.get("advanced")
     augmentation = effective_augmentation_metadata(config_json)
     return {
-        "optimizer": {"type": optimizer_type, "lr": optimizer_lr},
+        "optimizer": {
+            "type": optimizer_type,
+            "lr": optimizer_lr,
+            "weight_decay": optimizer_weight_decay,
+            "momentum": optimizer_momentum,
+        },
+        "scheduler": {"type": scheduler_type, "params": scheduler_params},
         "batch_size": safe_int(config_json.get("batch_size")),
         "epochs": safe_int(config_json.get("epochs")),
+        "precision": str(config_json.get("precision") or "fp32"),
+        "grad_clip_norm": safe_float(advanced.get("grad_clip_norm")) if isinstance(advanced, dict) else None,
         "augmentation": augmentation["augmentation"],
         "augmentation_mode": augmentation["augmentation_mode"],
         "augmentation_summary": augmentation["augmentation_summary"],

@@ -11,6 +11,7 @@ If you are updating behavior or workflows, start with the current docs and activ
 - `demo/README.md`: deterministic README and demo asset workflow
 - `CHANGELOG.md`: notable repository changes, including modal preview inference, preview latency tuning, deployed-model selection, and CUDA runtime updates
 - `plans/`: dated design notes, implementation plans, and active cleanup trackers
+- `plans/2026-04-02-agent-autopilot-spec.md`: proposed constrained agent-autopilot roadmap covering dataset health, baseline recommendations, sweep planning, variant guidance, relabel loops, and deployment advice
 - `plans/2026-03-15-cleanup-coverage-refactor-tracker.md`: active cleanup, coverage, and refactor tracker
 - `archive/`: historical references moved from `docu/`
 

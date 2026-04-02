@@ -23,6 +23,7 @@ import {
   resolveAssetUri,
   startExperiment,
   streamExperimentEvents,
+  triggerExperimentFp16,
   triggerExperimentPtq,
   triggerExperimentQat,
   updateExperiment,
@@ -209,8 +210,14 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
   const [isVariantsLoading, setIsVariantsLoading] = useState(false);
   const [selectedVariantKey, setSelectedVariantKey] = useState<ModelVariantKey | null>(null);
   const [variantSplit, setVariantSplit] = useState<"val" | "test">("val");
+  const [variantBenchmarkDevice, setVariantBenchmarkDevice] = useState<"cpu" | "cuda">("cpu");
+  const [isTriggeringFp16, setIsTriggeringFp16] = useState(false);
   const [isTriggeringPtq, setIsTriggeringPtq] = useState(false);
   const [isTriggeringQat, setIsTriggeringQat] = useState(false);
+  const [ptqCalibrationMaxSamples, setPtqCalibrationMaxSamples] = useState("256");
+  const [qatCalibrationMaxSamples, setQatCalibrationMaxSamples] = useState("256");
+  const [qatEpochsOverride, setQatEpochsOverride] = useState("");
+  const [qatLearningRateOverride, setQatLearningRateOverride] = useState("");
   const [logsContent, setLogsContent] = useState("");
   const [logsCursor, setLogsCursor] = useState(0);
   const [logsAttempt, setLogsAttempt] = useState<number | null>(null);
@@ -248,7 +255,7 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
   const availableVariantKeys = useMemo<ModelVariantKey[]>(
     () =>
       (variantsInfo?.variants ? Object.keys(variantsInfo.variants) : onnxInfo?.available_variants ?? []).filter((value): value is ModelVariantKey =>
-        value === "fp32" || value === "ptq_int8" || value === "qat_int8",
+        value === "fp32" || value === "fp16" || value === "ptq_int8" || value === "qat_int8",
       ),
     [onnxInfo?.available_variants, variantsInfo?.variants],
   );
@@ -278,6 +285,7 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
   }, [lastRunMessage, savedRecord?.error]);
   const variantRows = variantsInfo?.variants ?? {};
   const baselineVariant = variantRows.fp32 ?? null;
+  const fp16Variant = variantRows.fp16 ?? null;
   const ptqVariant = variantRows.ptq_int8 ?? null;
   const qatVariant = variantRows.qat_int8 ?? null;
 
@@ -735,7 +743,10 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
   async function handleTriggerPtq() {
     setIsTriggeringPtq(true);
     try {
-      await triggerExperimentPtq(projectId, experimentId);
+      const calibrationMaxSamples = Number.parseInt(ptqCalibrationMaxSamples, 10);
+      await triggerExperimentPtq(projectId, experimentId, {
+        calibration_max_samples: Number.isFinite(calibrationMaxSamples) && calibrationMaxSamples >= 1 ? calibrationMaxSamples : 256,
+      });
       setToastTone("success");
       setToastMessage("PTQ queued");
       void loadVariants();
@@ -748,10 +759,31 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
     }
   }
 
+  async function handleTriggerFp16() {
+    setIsTriggeringFp16(true);
+    try {
+      await triggerExperimentFp16(projectId, experimentId);
+      setToastTone("success");
+      setToastMessage("FP16 queued");
+      void loadVariants();
+    } catch (error) {
+      const message = parseApiErrorMessage(error, "Failed to start FP16 export");
+      setToastTone("error");
+      setToastMessage(message);
+    } finally {
+      setIsTriggeringFp16(false);
+    }
+  }
+
   async function handleTriggerQat() {
     setIsTriggeringQat(true);
     try {
-      await triggerExperimentQat(projectId, experimentId);
+      const calibrationMaxSamples = Number.parseInt(qatCalibrationMaxSamples, 10);
+      await triggerExperimentQat(projectId, experimentId, {
+        epochs_override: patchNumber(qatEpochsOverride) ?? undefined,
+        learning_rate_override: patchNumber(qatLearningRateOverride) ?? undefined,
+        calibration_max_samples: Number.isFinite(calibrationMaxSamples) && calibrationMaxSamples >= 1 ? calibrationMaxSamples : 256,
+      });
       setToastTone("success");
       setToastMessage("QAT queued");
       void loadVariants();
@@ -820,12 +852,25 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
   const datasetVersionId = typeof draftConfig?.dataset_version_id === "string" ? draftConfig.dataset_version_id : "-";
   const optimizerType = typeof optimizer.type === "string" ? optimizer.type : "adam";
   const learningRate = typeof optimizer.lr === "number" ? String(optimizer.lr) : "";
+  const weightDecay = typeof optimizer.weight_decay === "number" ? String(optimizer.weight_decay) : "0";
+  const momentum = typeof optimizer.momentum === "number" ? String(optimizer.momentum) : "0.9";
+  const scheduler = asRecord(draftConfig?.scheduler);
+  const schedulerParams = asRecord(scheduler.params);
+  const schedulerType = typeof scheduler.type === "string" ? scheduler.type : "none";
+  const schedulerStepSize = typeof schedulerParams.step_size === "number" ? String(schedulerParams.step_size) : "10";
+  const schedulerGamma = typeof schedulerParams.gamma === "number" ? String(schedulerParams.gamma) : "0.1";
   const epochs = typeof draftConfig?.epochs === "number" ? String(draftConfig.epochs) : "";
   const batchSize = typeof draftConfig?.batch_size === "number" ? String(draftConfig.batch_size) : "";
   const augmentationProfile = readAugmentationProfile(draftConfig ?? {}, task);
   const augmentationSteps = readAugmentationSteps(draftConfig ?? {});
   const precision = typeof draftConfig?.precision === "string" ? draftConfig.precision : "fp32";
   const seed = typeof advanced.seed === "number" ? String(advanced.seed) : "1337";
+  const gradClipNorm = typeof advanced.grad_clip_norm === "number" ? String(advanced.grad_clip_norm) : "";
+  const evaluationConfig = asRecord(draftConfig?.evaluation);
+  const evalInterval = typeof evaluationConfig.eval_interval_epochs === "number" ? String(evaluationConfig.eval_interval_epochs) : "1";
+  const resumeConfig = asRecord(draftConfig?.resume);
+  const resumeEnabled = Boolean(resumeConfig.enabled);
+  const resumeCheckpointKind = typeof resumeConfig.checkpoint_kind === "string" ? resumeConfig.checkpoint_kind : "latest";
   const numWorkers =
     typeof runtimeConfig.num_workers === "number"
       ? String(runtimeConfig.num_workers)
@@ -1100,12 +1145,14 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
             {visibleRows.map((row) => {
               const splitSummary = row.evaluation?.[variantSplit];
               const overall = splitSummary?.overall ?? null;
-              const meanLatency = asFiniteNumber(
-                typeof row.benchmark === "object" && row.benchmark ? (row.benchmark as any).mean_latency_ms : null,
-              );
-              const throughput = asFiniteNumber(
-                typeof row.benchmark === "object" && row.benchmark ? (row.benchmark as any).throughput_items_per_second : null,
-              );
+              const benchmarkSummary =
+                row.benchmarks && typeof row.benchmarks === "object"
+                  ? (row.benchmarks[variantBenchmarkDevice] ?? null)
+                  : typeof row.benchmark === "object" && row.benchmark
+                    ? row.benchmark
+                    : null;
+              const meanLatency = asFiniteNumber(benchmarkSummary?.mean_latency_ms);
+              const throughput = asFiniteNumber(benchmarkSummary?.throughput_items_per_second);
               return (
                 <tr key={row.variant_key}>
                   <td>
@@ -1125,6 +1172,9 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
                   <td>
                     {formatMetricValue(meanLatency, 2)}
                     {meanLatency != null ? " ms" : ""}
+                    {benchmarkSummary?.status === "unavailable" && benchmarkSummary?.message ? (
+                      <div className="experiment-log-cursor">{benchmarkSummary.message}</div>
+                    ) : null}
                   </td>
                   <td>{formatMetricValue(throughput, 2)}</td>
                 </tr>
@@ -1246,6 +1296,44 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
                     />
                   </label>
                   <label className="project-field">
+                    <span>Weight Decay</span>
+                    <input
+                      type="number"
+                      step="0.0001"
+                      min="0"
+                      value={weightDecay}
+                      disabled={!isEditable}
+                      onChange={(event) =>
+                        patchConfig((next) => {
+                          const opt = asRecord(next.optimizer);
+                          const parsed = patchNumber(event.target.value);
+                          if (parsed !== null && parsed >= 0) opt.weight_decay = parsed;
+                          next.optimizer = opt;
+                        })
+                      }
+                    />
+                  </label>
+                  {optimizerType === "sgd" ? (
+                    <label className="project-field">
+                      <span>Momentum</span>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={momentum}
+                        disabled={!isEditable}
+                        onChange={(event) =>
+                          patchConfig((next) => {
+                            const opt = asRecord(next.optimizer);
+                            const parsed = patchNumber(event.target.value);
+                            if (parsed !== null && parsed >= 0) opt.momentum = parsed;
+                            next.optimizer = opt;
+                          })
+                        }
+                      />
+                    </label>
+                  ) : null}
+                  <label className="project-field">
                     <span>Epochs</span>
                     <input
                       type="number"
@@ -1277,6 +1365,88 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
                       }
                     />
                   </label>
+                  <label className="project-field">
+                    <span>Precision</span>
+                    <select
+                      value={precision}
+                      disabled={!isEditable}
+                      onChange={(event) =>
+                        patchConfig((next) => {
+                          next.precision = event.target.value;
+                        })
+                      }
+                    >
+                      <option value="fp32">fp32</option>
+                      <option value="amp">amp</option>
+                    </select>
+                  </label>
+                  <label className="project-field">
+                    <span>Scheduler</span>
+                    <select
+                      value={schedulerType}
+                      disabled={!isEditable}
+                      onChange={(event) =>
+                        patchConfig((next) => {
+                          const nextScheduler = asRecord(next.scheduler);
+                          nextScheduler.type = event.target.value;
+                          if (event.target.value === "step") {
+                            nextScheduler.params = { step_size: 10, gamma: 0.1 };
+                          } else {
+                            nextScheduler.params = {};
+                          }
+                          next.scheduler = nextScheduler;
+                        })
+                      }
+                    >
+                      <option value="none">none</option>
+                      <option value="step">step</option>
+                      <option value="cosine">cosine</option>
+                    </select>
+                  </label>
+                  {schedulerType === "step" ? (
+                    <>
+                      <label className="project-field">
+                        <span>Step Size</span>
+                        <input
+                          type="number"
+                          min="1"
+                          step="1"
+                          value={schedulerStepSize}
+                          disabled={!isEditable}
+                          onChange={(event) =>
+                            patchConfig((next) => {
+                              const nextScheduler = asRecord(next.scheduler);
+                              const nextParams = asRecord(nextScheduler.params);
+                              const parsed = Number.parseInt(event.target.value, 10);
+                              if (Number.isFinite(parsed) && parsed >= 1) nextParams.step_size = parsed;
+                              nextScheduler.params = nextParams;
+                              next.scheduler = nextScheduler;
+                            })
+                          }
+                        />
+                      </label>
+                      <label className="project-field">
+                        <span>Gamma</span>
+                        <input
+                          type="number"
+                          min="0.0001"
+                          step="0.01"
+                          value={schedulerGamma}
+                          disabled={!isEditable}
+                          onChange={(event) =>
+                            patchConfig((next) => {
+                              const nextScheduler = asRecord(next.scheduler);
+                              const nextParams = asRecord(nextScheduler.params);
+                              const parsed = patchNumber(event.target.value);
+                              if (parsed !== null && parsed > 0) nextParams.gamma = parsed;
+                              nextScheduler.params = nextParams;
+                              next.scheduler = nextScheduler;
+                            })
+                          }
+                        />
+                      </label>
+                    </>
+                  ) : null}
                   <label className="project-field">
                     <span>Augmentation</span>
                     <select
@@ -1381,26 +1551,48 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
                             ) : null}
 
                             {step.type === "rotate" ? (
-                              <label className="project-field" style={{ maxWidth: 180, marginBottom: 0 }}>
-                                <span>Degrees</span>
-                                <input
-                                  type="number"
-                                  min="0.1"
-                                  step="0.5"
-                                  value={String(typeof step.params?.degrees === "number" ? step.params.degrees : 8)}
-                                  disabled={!isEditable}
-                                  onChange={(event) =>
-                                    patchConfig((next) => {
-                                      const parsed = Number(event.target.value);
-                                      updateAugmentationStep(next, index, {
-                                        params: {
-                                          degrees: Number.isFinite(parsed) && parsed > 0 ? parsed : 8,
-                                        },
-                                      });
-                                    })
-                                  }
-                                />
-                              </label>
+                              <div style={{ display: "grid", gap: 8, gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))" }}>
+                                <label className="project-field" style={{ marginBottom: 0 }}>
+                                  <span>Min Degrees</span>
+                                  <input
+                                    type="number"
+                                    step="0.5"
+                                    value={String(typeof step.params?.min_degrees === "number" ? step.params.min_degrees : -8)}
+                                    disabled={!isEditable}
+                                    onChange={(event) =>
+                                      patchConfig((next) => {
+                                        const parsed = Number(event.target.value);
+                                        updateAugmentationStep(next, index, {
+                                          params: {
+                                            ...(step.params ?? {}),
+                                            min_degrees: Number.isFinite(parsed) ? parsed : -8,
+                                          },
+                                        });
+                                      })
+                                    }
+                                  />
+                                </label>
+                                <label className="project-field" style={{ marginBottom: 0 }}>
+                                  <span>Max Degrees</span>
+                                  <input
+                                    type="number"
+                                    step="0.5"
+                                    value={String(typeof step.params?.max_degrees === "number" ? step.params.max_degrees : 8)}
+                                    disabled={!isEditable}
+                                    onChange={(event) =>
+                                      patchConfig((next) => {
+                                        const parsed = Number(event.target.value);
+                                        updateAugmentationStep(next, index, {
+                                          params: {
+                                            ...(step.params ?? {}),
+                                            max_degrees: Number.isFinite(parsed) ? parsed : 8,
+                                          },
+                                        });
+                                      })
+                                    }
+                                  />
+                                </label>
+                              </div>
                             ) : null}
 
                             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -1484,6 +1676,41 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
                         />
                       </label>
                       <label className="project-field">
+                        <span>Gradient Clip Norm</span>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.1"
+                          value={gradClipNorm}
+                          disabled={!isEditable}
+                          onChange={(event) =>
+                            patchConfig((next) => {
+                              const adv = asRecord(next.advanced);
+                              adv.grad_clip_norm = patchNumber(event.target.value) ?? null;
+                              next.advanced = adv;
+                            })
+                          }
+                        />
+                      </label>
+                      <label className="project-field">
+                        <span>Eval Interval</span>
+                        <input
+                          type="number"
+                          min="1"
+                          step="1"
+                          value={evalInterval}
+                          disabled={!isEditable}
+                          onChange={(event) =>
+                            patchConfig((next) => {
+                              const evalCfg = asRecord(next.evaluation);
+                              const parsed = Number.parseInt(event.target.value, 10);
+                              if (Number.isFinite(parsed) && parsed >= 1) evalCfg.eval_interval_epochs = parsed;
+                              next.evaluation = evalCfg;
+                            })
+                          }
+                        />
+                      </label>
+                      <label className="project-field">
                         <span>Num Workers</span>
                         <input
                           type="number"
@@ -1505,6 +1732,39 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
                             })
                           }
                         />
+                      </label>
+                      <label className="model-builder-checkbox">
+                        <input
+                          type="checkbox"
+                          checked={resumeEnabled}
+                          disabled={!isEditable}
+                          onChange={(event) =>
+                            patchConfig((next) => {
+                              const resume = asRecord(next.resume);
+                              resume.enabled = event.target.checked;
+                              next.resume = resume;
+                            })
+                          }
+                        />
+                        <span>Resume from checkpoint</span>
+                      </label>
+                      <label className="project-field">
+                        <span>Resume Checkpoint</span>
+                        <select
+                          value={resumeCheckpointKind}
+                          disabled={!isEditable || !resumeEnabled}
+                          onChange={(event) =>
+                            patchConfig((next) => {
+                              const resume = asRecord(next.resume);
+                              resume.checkpoint_kind = event.target.value;
+                              next.resume = resume;
+                            })
+                          }
+                        >
+                          <option value="latest">latest</option>
+                          <option value="best_loss">best_loss</option>
+                          <option value="best_metric">best_metric</option>
+                        </select>
                       </label>
                       <label className="project-field">
                         <span>Pin Memory</span>
@@ -1600,21 +1860,6 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
                           }
                         />
                         <span>Cache resized images in memory</span>
-                      </label>
-                      <label className="project-field">
-                        <span>Precision</span>
-                        <select
-                          value={precision}
-                          disabled={!isEditable}
-                          onChange={(event) =>
-                            patchConfig((next) => {
-                              next.precision = event.target.value;
-                            })
-                          }
-                        >
-                          <option value="fp32">fp32</option>
-                          <option value="amp">amp</option>
-                        </select>
                       </label>
                     </div>
                   ) : null}
@@ -1795,20 +2040,12 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
                   ) : null}
                 </div>
 
-                <div className="experiment-card" data-testid="experiment-card-ptq">
-                  <h3>PTQ to INT8</h3>
+                <div className="experiment-card" data-testid="experiment-card-variants">
+                  <h3>Model Variants</h3>
                   <p className="experiment-log-cursor">
-                    Compare the static INT8 PTQ export against the FP32 baseline on the {variantSplit.toUpperCase()} split.
+                    Compare FP32, FP16, PTQ INT8, and QAT INT8 on the {variantSplit.toUpperCase()} split, and switch latency/throughput views between {variantBenchmarkDevice.toUpperCase()} benchmarks.
                   </p>
                   <div className="experiment-logs-toolbar">
-                    <button
-                      type="button"
-                      className="primary-button"
-                      disabled={!variantsInfo?.support.ptq_supported || isTriggeringPtq || ptqVariant?.status === "running"}
-                      onClick={() => void handleTriggerPtq()}
-                    >
-                      {isTriggeringPtq || ptqVariant?.status === "running" ? "Running PTQ..." : "Trigger PTQ"}
-                    </button>
                     <button
                       type="button"
                       className={`ghost-button${variantSplit === "val" ? " active" : ""}`}
@@ -1823,38 +2060,123 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
                     >
                       Test
                     </button>
+                    <button
+                      type="button"
+                      className={`ghost-button${variantBenchmarkDevice === "cpu" ? " active" : ""}`}
+                      onClick={() => setVariantBenchmarkDevice("cpu")}
+                    >
+                      CPU Bench
+                    </button>
+                    <button
+                      type="button"
+                      className={`ghost-button${variantBenchmarkDevice === "cuda" ? " active" : ""}`}
+                      onClick={() => setVariantBenchmarkDevice("cuda")}
+                    >
+                      CUDA Bench
+                    </button>
                     <button type="button" className="ghost-button" onClick={() => void loadVariants()} disabled={isVariantsLoading}>
                       {isVariantsLoading ? "Refreshing..." : "Refresh variants"}
                     </button>
                   </div>
-                  {!variantsInfo?.support.ptq_supported ? <p className="project-field-error">PTQ is not supported for this task.</p> : null}
-                  {ptqVariant?.error ? <p className="project-field-error">{ptqVariant.error}</p> : null}
-                  {renderVariantComparisonTable([baselineVariant, ptqVariant], "experiment-variant-table-ptq")}
-                </div>
 
-                <div className="experiment-card" data-testid="experiment-card-qat">
-                  <h3>QAT to INT8</h3>
-                  <p className="experiment-log-cursor">
-                    Fine-tune for the INT8 target when PTQ is not good enough, then compare QAT, PTQ, and FP32 on the {variantSplit.toUpperCase()} split.
-                  </p>
-                  <div className="experiment-logs-toolbar">
-                    <button
-                      type="button"
-                      className="primary-button"
-                      disabled={!variantsInfo?.support.qat_supported || isTriggeringQat || qatVariant?.status === "running"}
-                      onClick={() => void handleTriggerQat()}
-                    >
-                      {isTriggeringQat || qatVariant?.status === "running" ? "Running QAT..." : "Trigger QAT"}
-                    </button>
+                  <div style={{ display: "grid", gap: 12 }}>
+                    <div style={{ display: "grid", gap: 8, gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))" }}>
+                      <div className="project-field" style={{ marginBottom: 0 }}>
+                        <span>FP16 Export</span>
+                        <button
+                          type="button"
+                          className="primary-button"
+                          disabled={!variantsInfo?.support.fp16_supported || isTriggeringFp16 || fp16Variant?.status === "running"}
+                          onClick={() => void handleTriggerFp16()}
+                        >
+                          {isTriggeringFp16 || fp16Variant?.status === "running" ? "Running FP16..." : "Trigger FP16"}
+                        </button>
+                      </div>
+                      <label className="project-field" style={{ marginBottom: 0 }}>
+                        <span>PTQ Calibration Samples</span>
+                        <input
+                          type="number"
+                          min="1"
+                          step="1"
+                          value={ptqCalibrationMaxSamples}
+                          onChange={(event) => setPtqCalibrationMaxSamples(event.target.value)}
+                          disabled={!variantsInfo?.support.ptq_supported || isTriggeringPtq}
+                        />
+                      </label>
+                      <div className="project-field" style={{ marginBottom: 0 }}>
+                        <span>PTQ to INT8</span>
+                        <button
+                          type="button"
+                          className="primary-button"
+                          disabled={!variantsInfo?.support.ptq_supported || isTriggeringPtq || ptqVariant?.status === "running"}
+                          onClick={() => void handleTriggerPtq()}
+                        >
+                          {isTriggeringPtq || ptqVariant?.status === "running" ? "Running PTQ..." : "Trigger PTQ"}
+                        </button>
+                      </div>
+                      <label className="project-field" style={{ marginBottom: 0 }}>
+                        <span>QAT Epoch Override</span>
+                        <input
+                          type="number"
+                          min="1"
+                          step="1"
+                          value={qatEpochsOverride}
+                          onChange={(event) => setQatEpochsOverride(event.target.value)}
+                          disabled={!variantsInfo?.support.qat_supported || isTriggeringQat}
+                          placeholder="auto"
+                        />
+                      </label>
+                      <label className="project-field" style={{ marginBottom: 0 }}>
+                        <span>QAT LR Override</span>
+                        <input
+                          type="number"
+                          min="0.0000001"
+                          step="0.0001"
+                          value={qatLearningRateOverride}
+                          onChange={(event) => setQatLearningRateOverride(event.target.value)}
+                          disabled={!variantsInfo?.support.qat_supported || isTriggeringQat}
+                          placeholder="auto"
+                        />
+                      </label>
+                      <label className="project-field" style={{ marginBottom: 0 }}>
+                        <span>QAT Calibration Samples</span>
+                        <input
+                          type="number"
+                          min="1"
+                          step="1"
+                          value={qatCalibrationMaxSamples}
+                          onChange={(event) => setQatCalibrationMaxSamples(event.target.value)}
+                          disabled={!variantsInfo?.support.qat_supported || isTriggeringQat}
+                        />
+                      </label>
+                      <div className="project-field" style={{ marginBottom: 0 }}>
+                        <span>QAT to INT8</span>
+                        <button
+                          type="button"
+                          className="primary-button"
+                          disabled={!variantsInfo?.support.qat_supported || isTriggeringQat || qatVariant?.status === "running"}
+                          onClick={() => void handleTriggerQat()}
+                        >
+                          {isTriggeringQat || qatVariant?.status === "running" ? "Running QAT..." : "Trigger QAT"}
+                        </button>
+                      </div>
+                    </div>
                     <span className="experiment-log-cursor">
                       Source checkpoint: {savedRecord?.artifacts_json?.selected_checkpoint_kind ? String(savedRecord.artifacts_json.selected_checkpoint_kind) : "best_metric"}
                     </span>
                   </div>
-                  {!variantsInfo?.support.qat_supported ? (
-                    <p className="project-field-error">{variantsInfo?.support.qat_reason ?? "QAT is classification-only in v1."}</p>
+
+                  {!variantsInfo?.support.fp16_supported ? (
+                    <p className="project-field-error">{variantsInfo?.support.fp16_reason ?? "FP16 is not supported for this task."}</p>
                   ) : null}
+                  {!variantsInfo?.support.ptq_supported ? <p className="project-field-error">PTQ is not supported for this task.</p> : null}
+                  {!variantsInfo?.support.qat_supported ? (
+                    <p className="project-field-error">{variantsInfo?.support.qat_reason ?? "QAT is not supported for this task."}</p>
+                  ) : null}
+                  {fp16Variant?.error ? <p className="project-field-error">{fp16Variant.error}</p> : null}
+                  {ptqVariant?.error ? <p className="project-field-error">{ptqVariant.error}</p> : null}
                   {qatVariant?.error ? <p className="project-field-error">{qatVariant.error}</p> : null}
-                  {renderVariantComparisonTable([baselineVariant, ptqVariant, qatVariant], "experiment-variant-table-qat")}
+                  {renderVariantComparisonTable([baselineVariant, fp16Variant, ptqVariant, qatVariant], "experiment-variant-table")}
                 </div>
 
                 <div className="experiment-card">

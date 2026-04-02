@@ -13,6 +13,7 @@ from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms
 
 from pixel_sheriff_trainer.augmentation import apply_segmentation_augmentation, resolve_training_augmentation
+from pixel_sheriff_trainer.training_config import resolve_runtime_loader_settings
 
 
 @dataclass
@@ -132,6 +133,7 @@ def build_segmentation_loaders(
     workdir: Path,
     model_config: dict[str, Any],
     training_config: dict[str, Any],
+    device_type: str | None = None,
 ) -> LoadedSegmentationData:
     dataset_dir = _extract_if_missing(export_zip_path, workdir)
     coco_path = dataset_dir / "coco_instances.json"
@@ -239,6 +241,11 @@ def build_segmentation_loaders(
     _augmentation_mode, augmentation_steps = resolve_training_augmentation(training_config, "segmentation")
 
     batch_size = max(1, int(training_config.get("batch_size", 4)))
+    resolved_device_type = str(device_type or "cpu").strip().lower()
+    loader_settings = resolve_runtime_loader_settings(
+        training_config,
+        device=torch.device(resolved_device_type),
+    )
 
     train_dataset = SegmentationDataset(
         train_samples, annotations_by_image, cat_id_to_idx, image_transform,
@@ -251,12 +258,28 @@ def build_segmentation_loaders(
         target_width=target_width, target_height=target_height,
     )
 
-    train_loader: DataLoader[Any] = DataLoader(
-        train_dataset, batch_size=batch_size, shuffle=True, num_workers=0,
-    )
-    val_loader: DataLoader[Any] = DataLoader(
-        val_dataset, batch_size=batch_size, shuffle=False, num_workers=0,
-    )
+    train_loader_kwargs: dict[str, Any] = {
+        "batch_size": batch_size,
+        "shuffle": True,
+        "num_workers": loader_settings.num_workers,
+        "drop_last": loader_settings.drop_last,
+        "pin_memory": loader_settings.pin_memory,
+    }
+    val_loader_kwargs: dict[str, Any] = {
+        "batch_size": batch_size,
+        "shuffle": False,
+        "num_workers": loader_settings.num_workers,
+        "drop_last": False,
+        "pin_memory": loader_settings.pin_memory,
+    }
+    if loader_settings.num_workers > 0:
+        train_loader_kwargs["persistent_workers"] = loader_settings.persistent_workers
+        val_loader_kwargs["persistent_workers"] = loader_settings.persistent_workers
+        train_loader_kwargs["prefetch_factor"] = loader_settings.prefetch_factor
+        val_loader_kwargs["prefetch_factor"] = loader_settings.prefetch_factor
+
+    train_loader: DataLoader[Any] = DataLoader(train_dataset, **train_loader_kwargs)
+    val_loader: DataLoader[Any] = DataLoader(val_dataset, **val_loader_kwargs)
 
     return LoadedSegmentationData(
         train_loader=train_loader,

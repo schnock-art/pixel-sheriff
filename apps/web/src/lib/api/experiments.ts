@@ -58,7 +58,7 @@ export function getExperimentRuntime(projectId: string, experimentId: string): P
 export function getExperimentOnnx(
   projectId: string,
   experimentId: string,
-  options: { variant?: "preferred" | "fp32" | "ptq_int8" | "qat_int8" } = {},
+  options: { variant?: "preferred" | "fp32" | "fp16" | "ptq_int8" | "qat_int8" } = {},
 ): Promise<ExperimentOnnxPayload> {
   const variantQuery = options.variant ? `?variant=${encodeURIComponent(options.variant)}` : "";
   return apiGet<ExperimentOnnxPayload>(`/projects/${projectId}/experiments/${experimentId}/onnx${variantQuery}`);
@@ -68,17 +68,36 @@ export function getExperimentVariants(projectId: string, experimentId: string): 
   return apiGet<ExperimentVariantsPayload>(`/projects/${projectId}/experiments/${experimentId}/variants`);
 }
 
-export function triggerExperimentPtq(projectId: string, experimentId: string): Promise<ExperimentVariantActionResponse> {
-  return apiPost<ExperimentVariantActionResponse, Record<string, never>>(
+export function triggerExperimentPtq(
+  projectId: string,
+  experimentId: string,
+  payload: { calibration_max_samples?: number } = {},
+): Promise<ExperimentVariantActionResponse> {
+  return apiPost<ExperimentVariantActionResponse, { calibration_max_samples?: number }>(
     `/projects/${projectId}/experiments/${experimentId}/variants/ptq`,
-    {},
+    payload,
   );
 }
 
-export function triggerExperimentQat(projectId: string, experimentId: string): Promise<ExperimentVariantActionResponse> {
-  return apiPost<ExperimentVariantActionResponse, Record<string, never>>(
+export function triggerExperimentFp16(
+  projectId: string,
+  experimentId: string,
+  payload: { checkpoint_kind?: "best_metric" | "best_loss" | "latest" } = {},
+): Promise<ExperimentVariantActionResponse> {
+  return apiPost<ExperimentVariantActionResponse, { checkpoint_kind?: "best_metric" | "best_loss" | "latest" }>(
+    `/projects/${projectId}/experiments/${experimentId}/variants/fp16`,
+    payload,
+  );
+}
+
+export function triggerExperimentQat(
+  projectId: string,
+  experimentId: string,
+  payload: { epochs_override?: number; learning_rate_override?: number; calibration_max_samples?: number } = {},
+): Promise<ExperimentVariantActionResponse> {
+  return apiPost<ExperimentVariantActionResponse, { epochs_override?: number; learning_rate_override?: number; calibration_max_samples?: number }>(
     `/projects/${projectId}/experiments/${experimentId}/variants/qat`,
-    {},
+    payload,
   );
 }
 

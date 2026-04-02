@@ -19,7 +19,7 @@ function createAugmentationStep(type = "horizontal_flip") {
     return {
       type: "rotate",
       p: 1,
-      params: { degrees: 8 },
+      params: { min_degrees: -8, max_degrees: 8 },
     };
   }
   if (normalizedType === "vertical_flip") {
@@ -36,16 +36,32 @@ function createAugmentationStep(type = "horizontal_flip") {
   };
 }
 
+function normalizeRotateParams(params) {
+  const source = params && typeof params === "object" ? { ...params } : {};
+  if (Number.isFinite(Number(source.degrees))) {
+    const degrees = Math.abs(Number(source.degrees));
+    return { min_degrees: -degrees, max_degrees: degrees };
+  }
+  const rawMin = Number(source.min_degrees);
+  const rawMax = Number(source.max_degrees);
+  const minDegrees = Number.isFinite(rawMin) ? rawMin : -8;
+  const maxDegrees = Number.isFinite(rawMax) ? rawMax : 8;
+  return minDegrees <= maxDegrees
+    ? { min_degrees: minDegrees, max_degrees: maxDegrees }
+    : { min_degrees: maxDegrees, max_degrees: minDegrees };
+}
+
 function normalizeAugmentationStep(step) {
   if (!step || typeof step !== "object") return createAugmentationStep();
   const fallback = createAugmentationStep(step.type);
   const rawProbability = Number(step.p);
   const probability = Number.isFinite(rawProbability) ? Math.max(0, Math.min(1, rawProbability)) : fallback.p;
   const params = step.params && typeof step.params === "object" ? { ...step.params } : {};
+  const normalizedParams = fallback.type === "rotate" ? normalizeRotateParams(params) : params;
   return {
     type: fallback.type,
     p: probability,
-    params,
+    params: normalizedParams,
   };
 }
 
@@ -125,6 +141,7 @@ module.exports = {
   AUGMENTATION_PROFILE_LABELS,
   defaultAugmentationProfileForTask,
   createAugmentationStep,
+  normalizeRotateParams,
   normalizeAugmentationStep,
   readAugmentationProfile,
   readAugmentationSteps,

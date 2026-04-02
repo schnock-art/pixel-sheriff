@@ -577,11 +577,28 @@ def _seed_experiment_variant_artifacts(
     (variant_dir / "benchmark.json").write_text(
         json.dumps(
             {
-                "schema_version": "1",
+                "schema_version": "2",
                 "status": "ready",
-                "provider": "CPUExecutionProvider",
-                "mean_latency_ms": 12.3,
-                "throughput_items_per_second": 81.3,
+                "benchmark": {
+                    "status": "ready",
+                    "provider": "CPUExecutionProvider",
+                    "mean_latency_ms": 12.3,
+                    "throughput_items_per_second": 81.3,
+                },
+                "devices": {
+                    "cpu": {
+                        "status": "ready",
+                        "provider": "CPUExecutionProvider",
+                        "mean_latency_ms": 12.3,
+                        "throughput_items_per_second": 81.3,
+                    },
+                    "cuda": {
+                        "status": "ready",
+                        "provider": "CUDAExecutionProvider",
+                        "mean_latency_ms": 5.4,
+                        "throughput_items_per_second": 185.0,
+                    },
+                },
             },
             indent=2,
             sort_keys=True,
@@ -598,7 +615,7 @@ def _seed_experiment_variant_artifacts(
     index_payload["variants"][variant_key] = {
         "variant_key": variant_key,
         "label": variant_key,
-        "kind": "baseline" if variant_key == "fp32" else ("ptq" if variant_key == "ptq_int8" else "qat"),
+        "kind": "baseline" if variant_key == "fp32" else ("fp16" if variant_key == "fp16" else ("ptq" if variant_key == "ptq_int8" else "qat")),
         "attempt": attempt,
         "status": status,
         "preferred": preferred_variant_key == variant_key if preferred_variant_key else variant_key == index_payload.get("preferred_variant_key"),
@@ -620,6 +637,20 @@ def _seed_experiment_variant_artifacts(
             "provider": "CPUExecutionProvider",
             "mean_latency_ms": 12.3,
             "throughput_items_per_second": 81.3,
+        },
+        "benchmarks": {
+            "cpu": {
+                "status": "ready",
+                "provider": "CPUExecutionProvider",
+                "mean_latency_ms": 12.3,
+                "throughput_items_per_second": 81.3,
+            },
+            "cuda": {
+                "status": "ready",
+                "provider": "CUDAExecutionProvider",
+                "mean_latency_ms": 5.4,
+                "throughput_items_per_second": 185.0,
+            },
         },
     }
     index_payload["preferred_variant_key"] = preferred_variant_key or index_payload.get("preferred_variant_key") or variant_key
