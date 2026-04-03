@@ -73,6 +73,7 @@ import {
 } from "../../../../../lib/workspace/experimentDetail";
 import { onnxClassNamesText, onnxInputShapeText, onnxStatusLabel, onnxValidationText } from "../../../../../lib/workspace/experimentOnnx";
 import { mergeLogChunk, runtimeBadgeLabel } from "../../../../../lib/workspace/experimentRuntime";
+import { describeQatSupport, describeQatVariant } from "../../../../../lib/workspace/experimentVariants";
 import { deploymentTaskForExperiment } from "../../../../../lib/workspace/deployHelpers.js";
 import {
   addAugmentationStep,
@@ -289,6 +290,7 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
   const fp16Variant = variantRows.fp16 ?? null;
   const ptqVariant = variantRows.ptq_int8 ?? null;
   const qatVariant = variantRows.qat_int8 ?? null;
+  const qatSupportSummary = useMemo(() => describeQatSupport(variantsInfo?.support ?? null), [variantsInfo?.support]);
 
   const {
     chartWidth,
@@ -1188,6 +1190,7 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
                   : typeof row.benchmark === "object" && row.benchmark
                     ? row.benchmark
                     : null;
+              const qatWarning = describeQatVariant(row);
               const meanLatency = asFiniteNumber(benchmarkSummary?.mean_latency_ms);
               const throughput = asFiniteNumber(benchmarkSummary?.throughput_items_per_second);
               const benchmarkMessage = typeof benchmarkSummary?.message === "string" ? benchmarkSummary.message : null;
@@ -1196,6 +1199,7 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
                   <td>
                     <strong>{row.label}</strong>
                     {row.preferred ? <div className="experiment-log-cursor">Preferred export</div> : null}
+                    {qatWarning ? <div className="experiment-log-cursor">{qatWarning}</div> : null}
                   </td>
                   <td>{row.status}</td>
                   {metricKeys.map((key) => (
@@ -2208,8 +2212,14 @@ export default function ExperimentDetailPage({ params }: ExperimentDetailPagePro
                     <p className="project-field-error">{variantsInfo?.support.fp16_reason ?? "FP16 is not supported for this task."}</p>
                   ) : null}
                   {!variantsInfo?.support.ptq_supported ? <p className="project-field-error">PTQ is not supported for this task.</p> : null}
-                  {!variantsInfo?.support.qat_supported ? (
-                    <p className="project-field-error">{variantsInfo?.support.qat_reason ?? "QAT is not supported for this task."}</p>
+                  {qatSupportSummary.state === "unsupported" ? (
+                    <p className="project-field-error">{qatSupportSummary.message}</p>
+                  ) : null}
+                  {qatSupportSummary.state === "experimental" ? (
+                    <p className="experiment-log-cursor">
+                      {qatSupportSummary.message}
+                      {qatSupportSummary.mode ? ` (${qatSupportSummary.mode})` : ""}
+                    </p>
                   ) : null}
                   {fp16Variant?.error ? <p className="project-field-error">{fp16Variant.error}</p> : null}
                   {ptqVariant?.error ? <p className="project-field-error">{ptqVariant.error}</p> : null}

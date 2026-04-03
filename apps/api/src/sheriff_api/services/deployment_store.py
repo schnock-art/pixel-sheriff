@@ -100,6 +100,12 @@ class DeploymentStore:
         device_preference: str,
         source: dict[str, Any],
         model_key: str,
+        provider: str = "onnxruntime",
+        runtime_backend: str = "onnxruntime",
+        precision: str = "fp32",
+        validation_status: str = "passed",
+        validation_summary: dict[str, Any] | None = None,
+        target_device: dict[str, Any] | None = None,
         is_active: bool = False,
     ) -> dict[str, Any]:
         doc = self._read_doc(project_id)
@@ -109,11 +115,16 @@ class DeploymentStore:
             "task_id": task_id,
             "name": name,
             "task": task,
-            "provider": "onnxruntime",
+            "provider": provider,
+            "runtime_backend": runtime_backend,
+            "precision": precision,
             "device_preference": device_preference,
             "model_key": model_key,
             "source": source,
             "status": "available",
+            "validation_status": validation_status,
+            "validation_summary": validation_summary if isinstance(validation_summary, dict) else None,
+            "target_device": target_device if isinstance(target_device, dict) else None,
             "created_at": timestamp,
             "updated_at": timestamp,
         }
@@ -132,6 +143,14 @@ class DeploymentStore:
         device_preference: str | None = None,
         status: str | None = None,
         is_active: bool | None = None,
+        source: dict[str, Any] | None = None,
+        model_key: str | None = None,
+        provider: str | None = None,
+        runtime_backend: str | None = None,
+        precision: str | None = None,
+        validation_status: str | None = None,
+        validation_summary: dict[str, Any] | None = None,
+        target_device: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None:
         doc = self._read_doc(project_id)
         target: dict[str, Any] | None = None
@@ -151,6 +170,26 @@ class DeploymentStore:
             target["status"] = status
             if status == "archived" and doc.get("active_deployment_id") == deployment_id:
                 doc["active_deployment_id"] = None
+        if isinstance(source, dict):
+            target["source"] = source
+        if isinstance(model_key, str):
+            target["model_key"] = model_key
+        if isinstance(provider, str):
+            target["provider"] = provider
+        if isinstance(runtime_backend, str):
+            target["runtime_backend"] = runtime_backend
+        if isinstance(precision, str):
+            target["precision"] = precision
+        if isinstance(validation_status, str):
+            target["validation_status"] = validation_status
+        if isinstance(validation_summary, dict):
+            target["validation_summary"] = validation_summary
+        elif validation_summary is None:
+            target["validation_summary"] = None
+        if isinstance(target_device, dict):
+            target["target_device"] = target_device
+        elif target_device is None:
+            target["target_device"] = None
         if is_active is True:
             doc["active_deployment_id"] = deployment_id
         if is_active is False and doc.get("active_deployment_id") == deployment_id:

@@ -7,10 +7,13 @@ from pydantic import BaseModel, Field
 
 
 DeploymentTask = Literal["classification", "bbox", "segmentation"]
-DeploymentProvider = Literal["onnxruntime"]
+DeploymentProvider = Literal["onnxruntime", "tensorrt"]
+DeploymentRuntimeBackend = Literal["onnxruntime", "tensorrt"]
 DevicePreference = Literal["auto", "cuda", "cpu"]
 DeploymentStatus = Literal["available", "archived"]
 CheckpointKind = Literal["best_metric", "best_loss", "latest"]
+DeploymentPrecision = Literal["fp32", "fp16", "int8"]
+DeploymentValidationStatus = Literal["pending", "passed", "failed"]
 
 
 class DeploymentSourceCreate(BaseModel):
@@ -33,8 +36,10 @@ class DeploymentSourceRead(BaseModel):
     attempt: int = Field(ge=1)
     checkpoint_kind: CheckpointKind
     variant_key: Literal["fp32", "fp16", "ptq_int8", "qat_int8"] | None = None
+    requested_variant_key: Literal["preferred", "fp32", "fp16", "ptq_int8", "qat_int8"] | None = None
     onnx_relpath: str
     metadata_relpath: str
+    engine_relpath: str | None = None
 
 
 class DeploymentItem(BaseModel):
@@ -42,11 +47,16 @@ class DeploymentItem(BaseModel):
     task_id: str | None = None
     name: str
     task: DeploymentTask
-    provider: DeploymentProvider
+    provider: DeploymentProvider = "onnxruntime"
+    runtime_backend: DeploymentRuntimeBackend = "onnxruntime"
+    precision: DeploymentPrecision = "fp32"
     device_preference: DevicePreference
     model_key: str
     source: DeploymentSourceRead
     status: DeploymentStatus
+    validation_status: DeploymentValidationStatus = "passed"
+    validation_summary: dict[str, Any] | None = None
+    target_device: dict[str, Any] | None = None
     created_at: datetime
     updated_at: datetime
 

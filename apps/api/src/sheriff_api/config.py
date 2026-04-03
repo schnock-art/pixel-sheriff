@@ -25,6 +25,10 @@ class Settings(BaseSettings):
     prelabel_queue_key: str = "pixel_sheriff:prelabel_jobs:v1"
     trainer_inference_base_url: str = "http://trainer:8020"
     trainer_inference_timeout_seconds: float = 15.0
+    ssdlite_int8_max_map50_95_drop: float = 0.02
+    ssdlite_int8_max_map50_drop: float = 0.01
+    ssdlite_int8_max_recall_drop: float = 0.02
+    ssdlite_int8_min_cuda_speedup: float = 0.20
 
     @model_validator(mode="after")
     def apply_database_url_default(self) -> "Settings":

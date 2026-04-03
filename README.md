@@ -94,7 +94,9 @@ video file / webcam stream
 - immutable dataset versions with saved split membership
 - export zip generation with `manifest.json` and `coco_instances.json`
 - project-scoped models, experiments, and deployments
-- FP32, PTQ INT8, and QAT INT8 experiment variant comparison for `classification` and `detection` models
+- FP32, FP16, PTQ INT8, and QAT INT8 experiment variant comparison for `classification` and selected `detection` models
+- FP16 variant generation now validates converted ONNX artifacts before publishing them, so broken detection exports fail fast instead of only failing later during runtime load
+- `qat_int8` now means real fake-quant QAT for `resnet_classifier` and `efficientnet_v2_classifier`, plus experimental `ssdlite320_mobilenet_v3_large`; deployable INT8 artifacts still come from float ONNX export plus ONNX Runtime QDQ and `retinanet` remains PTQ-only
 - review-first deployment predictions with preview, accept, and reject in labeling
 - bbox prelabel sessions for video and webcam review flows
 

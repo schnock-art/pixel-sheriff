@@ -111,10 +111,11 @@ def run_training(
     should_cancel: Callable[[], bool],
     on_epoch: Callable[[EpochMetrics], None],
     on_checkpoint: Callable[[str, int, str | None, float | None, dict[str, Any]], None],
+    model: nn.Module | None = None,
     device: torch.device | None = None,
     resume_state: dict[str, Any] | None = None,
 ) -> tuple[str, ClassifierEvaluation | None]:
-    model = _build_classifier(model_config, num_classes)
+    model = model if model is not None else _build_classifier(model_config, num_classes)
     resolved_device = device or resolve_device(training_config)
     model.to(resolved_device)
 

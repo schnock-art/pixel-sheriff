@@ -19,7 +19,7 @@ from sheriff_api.schemas.experiments import (
     ExperimentVariantsResponse,
 )
 
-from .shared import experiment_store, model_store, require_project, train_queue
+from .shared import experiment_store, model_store, require_project, shared_architecture_family, train_queue
 
 router = APIRouter()
 
@@ -46,14 +46,46 @@ def _write_json(path: Path, payload: Any) -> None:
     path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
 
-def _variant_task_support(task: str) -> dict[str, Any]:
+def _variant_task_support(task: str, model_config: dict[str, Any] | None = None) -> dict[str, Any]:
     normalized = str(task or "").strip().lower()
+    family = shared_architecture_family(model_config or {}) if isinstance(model_config, dict) else ""
     return {
         "fp16_supported": normalized in {"classification", "detection"},
         "fp16_reason": None if normalized in {"classification", "detection"} else "FP16 is not supported for this task",
         "ptq_supported": normalized in {"classification", "detection"},
-        "qat_supported": normalized in {"classification", "detection"},
-        "qat_reason": None if normalized in {"classification", "detection"} else "QAT is not supported for this task",
+        "qat_supported": (
+            normalized == "classification" and family in {"resnet_classifier", "efficientnet_v2_classifier"}
+        ) or (
+            normalized == "detection" and family == "ssdlite320_mobilenet_v3_large"
+        ),
+        "qat_reason": (
+            None
+            if (normalized == "classification" and family in {"resnet_classifier", "efficientnet_v2_classifier"})
+            or (normalized == "detection" and family == "ssdlite320_mobilenet_v3_large")
+            else (
+                "Real fake-quant QAT v1 is not supported for detection family 'retinanet'"
+                if normalized == "detection" and family == "retinanet"
+                else (
+                    f"Real fake-quant QAT v1 is not supported for classifier family '{family or 'unknown'}'"
+                    if normalized == "classification"
+                    else (
+                        f"Real fake-quant QAT v1 is not supported for detection family '{family or 'unknown'}'"
+                        if normalized == "detection"
+                        else "QAT is not supported for this task"
+                    )
+                )
+            )
+        ),
+        "qat_mode": "fake_quant" if (
+            (normalized == "classification" and family in {"resnet_classifier", "efficientnet_v2_classifier"})
+            or (normalized == "detection" and family == "ssdlite320_mobilenet_v3_large")
+        ) else None,
+        "qat_experimental": normalized == "detection" and family == "ssdlite320_mobilenet_v3_large",
+        "qat_warning": (
+            "Real fake-quant QAT is experimental for SSDLite and still exports through float ONNX + ORT QDQ."
+            if normalized == "detection" and family == "ssdlite320_mobilenet_v3_large"
+            else None
+        ),
     }
 
 
@@ -74,6 +106,17 @@ def _preferred_variant_key(variants: dict[str, Any]) -> str | None:
         if variant_key in variants:
             return variant_key
     return None
+
+
+def _model_config_for_experiment(project_id: str, current: dict[str, Any] | None) -> dict[str, Any] | None:
+    model_id = str(current.get("model_id") or "") if isinstance(current, dict) else ""
+    if not model_id:
+        return None
+    model_record = model_store.get(project_id, model_id)
+    if not isinstance(model_record, dict):
+        return None
+    model_config = model_record.get("config_json")
+    return model_config if isinstance(model_config, dict) else None
 
 
 def _load_variant_index(project_id: str, experiment_id: str, attempt: int) -> dict[str, Any] | None:
@@ -237,6 +280,7 @@ async def get_project_experiment_variants(
     attempt = _require_variant_attempt(current, project_id=project_id, experiment_id=experiment_id)
     config_json = current.get("config_json")
     task = str(config_json.get("task") or "classification") if isinstance(config_json, dict) else "classification"
+    model_config = _model_config_for_experiment(project_id, current)
     listing = _list_variant_rows(project_id, experiment_id, attempt)
     variants = {}
     for key, value in listing["variants"].items():
@@ -254,7 +298,7 @@ async def get_project_experiment_variants(
     return ExperimentVariantsResponse(
         attempt=attempt,
         preferred_variant_key=listing.get("preferred_variant_key"),
-        support=_variant_task_support(task),
+        support=_variant_task_support(task, model_config),
         variants=variants,
     )
 
@@ -366,7 +410,7 @@ async def trigger_project_experiment_ptq(
         raise api_error(status_code=404, code="experiment_not_found", message="Experiment not found in project")
     config_json = current.get("config_json")
     task = str(config_json.get("task") or "classification") if isinstance(config_json, dict) else "classification"
-    support = _variant_task_support(task)
+    support = _variant_task_support(task, _model_config_for_experiment(project_id, current))
     if not support["ptq_supported"]:
         raise api_error(status_code=409, code="ptq_unsupported", message="PTQ is not supported for this task")
     attempt = _require_variant_attempt(current, project_id=project_id, experiment_id=experiment_id)
@@ -397,7 +441,7 @@ async def trigger_project_experiment_fp16(
         raise api_error(status_code=404, code="experiment_not_found", message="Experiment not found in project")
     config_json = current.get("config_json")
     task = str(config_json.get("task") or "classification") if isinstance(config_json, dict) else "classification"
-    support = _variant_task_support(task)
+    support = _variant_task_support(task, _model_config_for_experiment(project_id, current))
     if not support["fp16_supported"]:
         raise api_error(
             status_code=409,
@@ -432,7 +476,7 @@ async def trigger_project_experiment_qat(
         raise api_error(status_code=404, code="experiment_not_found", message="Experiment not found in project")
     config_json = current.get("config_json")
     task = str(config_json.get("task") or "classification") if isinstance(config_json, dict) else "classification"
-    support = _variant_task_support(task)
+    support = _variant_task_support(task, _model_config_for_experiment(project_id, current))
     if not support["qat_supported"]:
         raise api_error(
             status_code=409,

@@ -10,9 +10,17 @@ _TASK_INFER_ENDPOINT: dict[str, str] = {
     "segmentation": "/infer/segmentation",
 }
 
+_TASK_TENSORRT_INFER_ENDPOINT: dict[str, str] = {
+    "bbox": "/infer/detection/tensorrt",
+}
+
 _TASK_WARMUP_ENDPOINT: dict[str, str] = {
     "classification": "/infer/classification/warmup",
     "bbox": "/infer/detection/warmup",
+}
+
+_TASK_TENSORRT_WARMUP_ENDPOINT: dict[str, str] = {
+    "bbox": "/infer/detection/tensorrt/warmup",
 }
 
 
@@ -73,3 +81,36 @@ class InferenceClient:
 
     async def warmup_detection(self, payload: dict[str, Any]) -> dict[str, Any]:
         return await self.warmup("bbox", payload)
+
+    async def infer_tensorrt(self, task_kind: str, payload: dict[str, Any]) -> dict[str, Any]:
+        endpoint = _TASK_TENSORRT_INFER_ENDPOINT.get(task_kind)
+        if endpoint is None:
+            raise ValueError(f"Unsupported task kind for TensorRT inference: {task_kind!r}")
+        async with httpx.AsyncClient(timeout=self._timeout) as client:
+            response = await client.post(f"{self._base_url}{endpoint}", json=payload)
+        response.raise_for_status()
+        parsed = response.json()
+        return parsed if isinstance(parsed, dict) else {}
+
+    async def infer_detection_tensorrt(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return await self.infer_tensorrt("bbox", payload)
+
+    async def warmup_tensorrt(self, task_kind: str, payload: dict[str, Any]) -> dict[str, Any]:
+        endpoint = _TASK_TENSORRT_WARMUP_ENDPOINT.get(task_kind)
+        if endpoint is None:
+            raise ValueError(f"Unsupported task kind for TensorRT warmup: {task_kind!r}")
+        async with httpx.AsyncClient(timeout=self._timeout) as client:
+            response = await client.post(f"{self._base_url}{endpoint}", json=payload)
+        response.raise_for_status()
+        parsed = response.json()
+        return parsed if isinstance(parsed, dict) else {}
+
+    async def warmup_detection_tensorrt(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return await self.warmup_tensorrt("bbox", payload)
+
+    async def validate_detection_tensorrt(self, payload: dict[str, Any]) -> dict[str, Any]:
+        async with httpx.AsyncClient(timeout=max(self._timeout, 60.0)) as client:
+            response = await client.post(f"{self._base_url}/infer/detection/tensorrt/validate", json=payload)
+        response.raise_for_status()
+        parsed = response.json()
+        return parsed if isinstance(parsed, dict) else {}

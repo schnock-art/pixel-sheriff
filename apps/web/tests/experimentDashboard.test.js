@@ -54,6 +54,9 @@ test("dashboardTabsForTask and dashboardSeriesForTask expose detection metrics",
   const tabs = dashboardTabsForTask("detection");
   assert.deepEqual(tabs.map((tab) => tab.key), ["loss", "map", "quality", "counts", "runtime"]);
 
+  const lossSeries = dashboardSeriesForTask("detection", "loss");
+  assert.deepEqual(lossSeries.map((series) => series.key), ["train_loss", "val_loss"]);
+
   const mapSeries = dashboardSeriesForTask("detection", "map");
   assert.deepEqual(mapSeries.map((series) => series.key), ["val_map", "val_map_50_95"]);
 

@@ -28,7 +28,7 @@ Experiment artifact variants:
 
 - `classification` and `detection` experiments publish comparable ONNX variants for `fp32`, `ptq_int8`, and `qat_int8`
 - PTQ is static INT8 quantization on top of the exported FP32 ONNX artifact
-- QAT currently means checkpoint fine-tune followed by static INT8 quantization of the fine-tuned ONNX export
+- QAT now means real fake-quant-aware training for `resnet_classifier` and `efficientnet_v2_classifier`, plus experimental `ssdlite320_mobilenet_v3_large`, followed by float ONNX export plus ONNX Runtime QDQ
 
 ## Runtime Topology
 
@@ -330,6 +330,8 @@ Current variant contract:
 - every completed experiment still exports the canonical FP32 ONNX artifact under the run `onnx/` directory
 - the trainer mirrors that FP32 export into the run `variants/fp32/` directory and can derive `ptq_int8` or `qat_int8` siblings from the same attempt
 - variant comparison is currently supported for `classification` and `detection`; `segmentation` remains FP32-only
+- real QAT support is family-aware: `resnet_classifier` and `efficientnet_v2_classifier` are supported, `ssdlite320_mobilenet_v3_large` is supported as experimental, and `retinanet` returns unsupported for real QAT v1
+- the variants API exposes `qat_mode`, `qat_experimental`, `qat_warning`, and per-row `qat` metadata so the web app can render support state without inferring semantics from status strings
 - each variant writes its own ONNX model, metadata, split evaluation summaries, per-device benchmark summary, and status row
 - QAT variants also persist their fine-tune metric rows under the variant directory so the experiment detail dashboard can overlay live QAT progress on the normal charts
 - the experiment detail page streams the base training run over SSE, but PTQ/QAT follow-up jobs poll variant artifacts separately so completed-run event streams do not replay and bounce the page while a variant is still running
@@ -337,9 +339,11 @@ Current variant contract:
 Current quantization behavior:
 
 - PTQ calibrates against the `train` split and writes static INT8 ONNX output
-- QAT fine-tunes from the selected checkpoint using the task-specific trainer loop, exports an intermediate FP32 ONNX, then applies the same static INT8 quantization flow
-- detection variants keep the current family constraints, so `retinanet` and `ssdlite320_mobilenet_v3_large` share the same variant lifecycle and SSDLite keeps its existing small-batch training guard
-- detection PTQ/QAT currently quantize the exported detection graph end-to-end after ONNX export, so quality can regress materially and CUDA INT8 benchmarks may still underperform FP32 depending on execution-provider support
+- QAT prepares a fake-quant model before the task-specific fine-tune loop and saves that prepared-model checkpoint only under the variant directory
+- deployable QAT export rebuilds a clean float model for the same family, loads only the learned float tensors from the QAT checkpoint, exports FP32 ONNX, then applies ONNX Runtime QDQ static quantization with the current `calibration_max_samples` flow on the `train` split
+- QAT metadata now records `mode: fake_quant` and `export_flow: float_export_then_ort_qdq`; SSDLite variants also mark `experimental: true`
+- detection keeps its family-specific constraints: `ssdlite320_mobilenet_v3_large` retains the existing small-batch training guard while `retinanet` stays PTQ-only for INT8 in v1
+- detection PTQ/QAT still quantize through the exported detection graph after float ONNX export, so quality can regress materially and CUDA INT8 benchmarks may still underperform FP32 depending on execution-provider support
 
 ### Deployment Prediction Review
 
@@ -464,6 +468,7 @@ Trainer:
 - Florence warmup and detect endpoints
 - shared augmentation resolution and execution for classification, detection, and segmentation
 - non-Darwin builds install `onnxruntime-gpu`, and deployed inference uses CUDA whenever `CUDAExecutionProvider` is available inside the trainer container
+- FP16 variant generation now validates converted ONNX artifacts before marking them ready, and detection FP16 exports repair output tensor type metadata when conversion would otherwise leave an ONNX Runtime load mismatch
 
 Key trainer inference endpoints:
 

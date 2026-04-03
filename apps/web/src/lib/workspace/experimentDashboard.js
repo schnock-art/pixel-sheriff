@@ -102,6 +102,7 @@ function dashboardSeriesForTask(task, tab) {
     if (tab === "loss") {
       return withSeriesDefaults([
         { key: "train_loss", label: "train loss", color: "#cc6f36" },
+        { key: "val_loss", label: "val loss", color: "#c96262" },
       ]);
     }
     if (tab === "map") {

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -65,6 +65,44 @@ class InferDetectionWarmupRequest(BaseModel):
     metadata_relpath: str
     device_preference: Literal["auto", "cuda", "cpu"] = "auto"
     model_key: str | None = None
+
+
+class InferTensorRTDetectionRequest(BaseModel):
+    engine_relpath: str
+    metadata_relpath: str
+    asset_relpath: str
+    device_preference: Literal["auto", "cuda", "cpu"] = "cuda"
+    score_threshold: float = Field(default=0.3, ge=0.0, le=1.0)
+    engine_key: str | None = None
+    target_device_fingerprint: str | None = None
+
+
+class InferTensorRTDetectionWarmupRequest(BaseModel):
+    engine_relpath: str
+    metadata_relpath: str
+    device_preference: Literal["auto", "cuda", "cpu"] = "cuda"
+    engine_key: str | None = None
+    target_device_fingerprint: str | None = None
+
+
+class ValidateTensorRTDetectionRequest(BaseModel):
+    onnx_relpath: str
+    metadata_relpath: str
+    model_key: str
+    device_preference: Literal["auto", "cuda", "cpu"] = "cuda"
+    dataset_export: dict[str, Any]
+    preferred_split: Literal["val", "test"] = "val"
+    baseline_metrics: dict[str, float | None] = Field(default_factory=dict)
+    baseline_latency_ms: float | None = None
+    thresholds: dict[str, float] = Field(default_factory=dict)
+
+
+class ValidateTensorRTDetectionResponse(BaseModel):
+    runtime_backend: Literal["tensorrt"] = "tensorrt"
+    validation_status: Literal["passed", "failed"]
+    engine_relpath: str | None = None
+    target_device: dict[str, Any] = Field(default_factory=dict)
+    validation_summary: dict[str, Any] = Field(default_factory=dict)
 
 
 # --- Segmentation ---

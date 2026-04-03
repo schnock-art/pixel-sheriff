@@ -137,6 +137,7 @@ def run_detection_training(
     should_cancel: Callable[[], bool],
     on_epoch: Callable[[DetectionEpochMetrics], None],
     on_checkpoint: Callable[[str, int, str | None, float | None, dict[str, Any]], None],
+    model: torch.nn.Module | None = None,
     device: torch.device | None = None,
     resume_state: dict[str, Any] | None = None,
 ) -> tuple[str, DetectionEvaluation | None]:
@@ -144,7 +145,7 @@ def run_detection_training(
     family = _normalized_detection_family(model_config)
     if family == "ssdlite320_mobilenet_v3_large" and _loader_may_emit_small_batch(train_loader):
         raise ValueError("batchnorm_small_batch_unsupported")
-    model = _build_detection_model(model_config, num_classes=num_classes)
+    model = model if model is not None else _build_detection_model(model_config, num_classes=num_classes)
     model.to(resolved_device)
 
     if resolved_device.type == "cuda":

@@ -738,7 +738,19 @@ export interface ExperimentVariantSummary {
   benchmark?: ExperimentVariantBenchmarkSummary | Record<string, unknown> | null;
   benchmarks?: Record<string, ExperimentVariantBenchmarkSummary>;
   metrics?: ExperimentMetricPoint[];
-  qat?: Record<string, unknown> | null;
+  qat?: {
+    mode?: string | null;
+    export_flow?: string | null;
+    experimental?: boolean | null;
+    family?: string | null;
+    strategy?: string | null;
+    warning?: string | null;
+    epochs?: number | null;
+    learning_rate?: number | null;
+    checkpoint_kind?: string | null;
+    best_epoch?: number | null;
+    best_metric?: number | null;
+  } | null;
 }
 
 export interface ExperimentVariantsPayload {
@@ -750,6 +762,9 @@ export interface ExperimentVariantsPayload {
     ptq_supported: boolean;
     qat_supported: boolean;
     qat_reason?: string | null;
+    qat_mode?: string | null;
+    qat_experimental?: boolean;
+    qat_warning?: string | null;
   };
   variants: Partial<Record<ModelVariantKey, ExperimentVariantSummary>>;
 }
@@ -771,14 +786,19 @@ export interface ExperimentLogsChunk {
 
 export type DeploymentDevicePreference = "auto" | "cuda" | "cpu";
 export type DeploymentStatus = "available" | "archived";
+export type DeploymentRuntimeBackend = "onnxruntime" | "tensorrt";
+export type DeploymentPrecision = "fp32" | "fp16" | "int8";
+export type DeploymentValidationStatus = "pending" | "passed" | "failed";
 
 export interface DeploymentSource {
   experiment_id: string;
   attempt: number;
   checkpoint_kind: "best_metric" | "best_loss" | "latest";
   variant_key?: ModelVariantKey | null;
+  requested_variant_key?: RequestedModelVariantKey | null;
   onnx_relpath: string;
   metadata_relpath: string;
+  engine_relpath?: string | null;
 }
 
 export interface DeploymentItem {
@@ -786,11 +806,16 @@ export interface DeploymentItem {
   name: string;
   task_id: string | null;
   task: TaskKind;
-  provider: "onnxruntime";
+  provider: DeploymentRuntimeBackend;
+  runtime_backend: DeploymentRuntimeBackend;
+  precision: DeploymentPrecision;
   device_preference: DeploymentDevicePreference;
   model_key: string;
   source: DeploymentSource;
   status: DeploymentStatus;
+  validation_status: DeploymentValidationStatus;
+  validation_summary?: Record<string, unknown> | null;
+  target_device?: Record<string, unknown> | null;
   created_at: string;
   updated_at: string;
 }

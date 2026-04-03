@@ -18,6 +18,28 @@ from .api_test_helpers import (
     assert_api_error,
 )
 
+
+def _to_ssdlite_detection_config(model_config: dict) -> dict:
+    updated_config = dict(model_config)
+    architecture = dict(updated_config["architecture"])
+    architecture["family"] = "ssdlite320_mobilenet_v3_large"
+    architecture["framework"] = "torchvision"
+    architecture["precision"] = "fp32"
+    architecture["backbone"] = {"name": "mobilenet_v3_large", "pretrained": True}
+    architecture["neck"] = {"type": "none"}
+    architecture["head"] = {"type": "ssdlite", "num_classes": updated_config["source_dataset"]["num_classes"]}
+    updated_config["input"]["input_size"] = [320, 320]
+    updated_config["architecture"] = architecture
+    updated_config["loss"] = {"type": "ssdlite_default"}
+    updated_config["outputs"]["primary"] = {
+        "name": "coco_detections",
+        "type": "task_output",
+        "task": "detection",
+        "format": "coco_detections",
+    }
+    updated_config["export"]["onnx"]["output_names"] = ["coco_detections"]
+    return updated_config
+
 @pytest.mark.asyncio
 async def test_experiment_create_from_model_returns_draft_record(client: AsyncClient) -> None:
     project_id, model_id = await _create_project_model(client, project_name="exp-create")
@@ -736,7 +758,40 @@ async def test_experiment_variants_endpoint_returns_seeded_variant_summaries(cli
 
 
 @pytest.mark.asyncio
-async def test_experiment_variants_endpoint_reports_detection_qat_support(client: AsyncClient) -> None:
+async def test_experiment_variants_endpoint_reports_family_aware_qat_support(client: AsyncClient) -> None:
+    classification_project_id, classification_model_id, _task_id = await _create_classification_project_model(
+        client,
+        project_name="exp-classification-variant-support",
+    )
+    classification_created = await client.post(
+        f"/api/v1/projects/{classification_project_id}/experiments",
+        json={"model_id": classification_model_id, "name": "classification-variants"},
+    )
+    assert classification_created.status_code == 200
+    classification_experiment_id = classification_created.json()["id"]
+    _seed_experiment_run_artifacts(
+        project_id=classification_project_id,
+        experiment_id=classification_experiment_id,
+        attempt=1,
+        include_onnx=True,
+        onnx_status="exported",
+    )
+
+    classification_response = await client.get(
+        f"/api/v1/projects/{classification_project_id}/experiments/{classification_experiment_id}/variants"
+    )
+    assert classification_response.status_code == 200
+    assert classification_response.json()["support"] == {
+        "fp16_supported": True,
+        "fp16_reason": None,
+        "ptq_supported": True,
+        "qat_supported": True,
+        "qat_reason": None,
+        "qat_mode": "fake_quant",
+        "qat_experimental": False,
+        "qat_warning": None,
+    }
+
     project_id, model_id = await _create_project_model(client, project_name="exp-detection-variant-support")
     created = await client.post(
         f"/api/v1/projects/{project_id}/experiments",
@@ -754,25 +809,133 @@ async def test_experiment_variants_endpoint_reports_detection_qat_support(client
 
     response = await client.get(f"/api/v1/projects/{project_id}/experiments/{experiment_id}/variants")
     assert response.status_code == 200
-    payload = response.json()
-    assert payload["support"] == {
+    assert response.json()["support"] == {
+        "fp16_supported": True,
+        "fp16_reason": None,
+        "ptq_supported": True,
+        "qat_supported": False,
+        "qat_reason": "Real fake-quant QAT v1 is not supported for detection family 'retinanet'",
+        "qat_mode": None,
+        "qat_experimental": False,
+        "qat_warning": None,
+    }
+
+    ssdlite_created = await client.post(
+        f"/api/v1/projects/{project_id}/experiments",
+        json={"model_id": model_id, "name": "ssdlite-variants"},
+    )
+    assert ssdlite_created.status_code == 200
+    ssdlite_payload = ssdlite_created.json()
+    model_response = await client.get(f"/api/v1/projects/{project_id}/models/{model_id}")
+    assert model_response.status_code == 200
+    model_config = _to_ssdlite_detection_config(model_response.json()["config_json"])
+    updated = await client.put(
+        f"/api/v1/projects/{project_id}/models/{model_id}",
+        json={"config_json": model_config},
+    )
+    assert updated.status_code == 200
+    _seed_experiment_run_artifacts(
+        project_id=project_id,
+        experiment_id=ssdlite_payload["id"],
+        attempt=1,
+        include_onnx=True,
+        onnx_status="exported",
+    )
+
+    ssdlite_response = await client.get(f"/api/v1/projects/{project_id}/experiments/{ssdlite_payload['id']}/variants")
+    assert ssdlite_response.status_code == 200
+    assert ssdlite_response.json()["support"] == {
         "fp16_supported": True,
         "fp16_reason": None,
         "ptq_supported": True,
         "qat_supported": True,
         "qat_reason": None,
+        "qat_mode": "fake_quant",
+        "qat_experimental": True,
+        "qat_warning": "Real fake-quant QAT is experimental for SSDLite and still exports through float ONNX + ORT QDQ.",
     }
 
 
 @pytest.mark.asyncio
-async def test_trigger_detection_qat_variant_enqueues_quantize_job(client: AsyncClient) -> None:
+async def test_trigger_classification_qat_variant_enqueues_quantize_job(client: AsyncClient) -> None:
+    project_id, model_id, _task_id = await _create_classification_project_model(client, project_name="exp-classification-qat")
+    created = await client.post(
+        f"/api/v1/projects/{project_id}/experiments",
+        json={"model_id": model_id, "name": "classification-qat"},
+    )
+    assert created.status_code == 200
+    experiment_id = created.json()["id"]
+    _seed_experiment_run_artifacts(
+        project_id=project_id,
+        experiment_id=experiment_id,
+        attempt=1,
+        include_onnx=True,
+        onnx_status="exported",
+    )
+
+    settings = get_settings()
+    experiment_dir = Path(settings.storage_root) / "experiments" / project_id / experiment_id
+    run_dir = experiment_dir / "runs" / "1"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "run.json").write_text(
+        json.dumps(
+            {
+                "attempt": 1,
+                "dataset_export": {"zip_relpath": f"exports/{project_id}/classification-qat.zip"},
+            },
+            indent=2,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    import sheriff_api.routers.experiments.variants as variants_router
+
+    calls: list[dict] = []
+
+    async def _enqueue(job_payload: dict) -> None:
+        calls.append(job_payload)
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(variants_router.train_queue, "enqueue_job", _enqueue)
+    response = await client.post(
+        f"/api/v1/projects/{project_id}/experiments/{experiment_id}/variants/qat",
+        json={"epochs_override": 4, "learning_rate_override": 0.0005, "calibration_max_samples": 32},
+    )
+    monkeypatch.undo()
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["variant_key"] == "qat_int8"
+    assert payload["status"] == "queued"
+    assert len(calls) == 1
+    assert calls[0]["job_type"] == "quantize_qat"
+    assert calls[0]["task"] == "classification"
+    assert calls[0]["variant_key"] == "qat_int8"
+    assert calls[0]["dataset_export"] == {"zip_relpath": f"exports/{project_id}/classification-qat.zip"}
+    assert calls[0]["epochs_override"] == 4
+    assert calls[0]["learning_rate_override"] == 0.0005
+    assert calls[0]["calibration_max_samples"] == 32
+
+
+@pytest.mark.asyncio
+async def test_trigger_ssdlite_qat_variant_enqueues_quantize_job(client: AsyncClient) -> None:
     project_id, model_id = await _create_project_model(client, project_name="exp-detection-qat")
     created = await client.post(
         f"/api/v1/projects/{project_id}/experiments",
         json={"model_id": model_id, "name": "detection-qat"},
     )
     assert created.status_code == 200
-    experiment_id = created.json()["id"]
+    experiment_payload = created.json()
+    experiment_id = experiment_payload["id"]
+    model_response = await client.get(f"/api/v1/projects/{project_id}/models/{model_id}")
+    assert model_response.status_code == 200
+    model_config = _to_ssdlite_detection_config(model_response.json()["config_json"])
+    updated = await client.put(
+        f"/api/v1/projects/{project_id}/models/{model_id}",
+        json={"config_json": model_config},
+    )
+    assert updated.status_code == 200
     _seed_experiment_run_artifacts(
         project_id=project_id,
         experiment_id=experiment_id,
@@ -824,6 +987,32 @@ async def test_trigger_detection_qat_variant_enqueues_quantize_job(client: Async
     assert calls[0]["epochs_override"] == 4
     assert calls[0]["learning_rate_override"] == 0.0005
     assert calls[0]["calibration_max_samples"] == 32
+
+
+@pytest.mark.asyncio
+async def test_trigger_retinanet_qat_variant_returns_unsupported(client: AsyncClient) -> None:
+    project_id, model_id = await _create_project_model(client, project_name="exp-retinanet-qat")
+    created = await client.post(
+        f"/api/v1/projects/{project_id}/experiments",
+        json={"model_id": model_id, "name": "retinanet-qat"},
+    )
+    assert created.status_code == 200
+    experiment_id = created.json()["id"]
+    _seed_experiment_run_artifacts(
+        project_id=project_id,
+        experiment_id=experiment_id,
+        attempt=1,
+        include_onnx=True,
+        onnx_status="exported",
+    )
+
+    response = await client.post(f"/api/v1/projects/{project_id}/experiments/{experiment_id}/variants/qat")
+    assert_api_error(
+        response,
+        status_code=409,
+        code="qat_unsupported",
+        message="Real fake-quant QAT v1 is not supported for detection family 'retinanet'",
+    )
 
 
 @pytest.mark.asyncio

@@ -434,6 +434,9 @@ class ExperimentVariantSupportResponse(BaseModel):
     ptq_supported: bool = False
     qat_supported: bool = False
     qat_reason: str | None = None
+    qat_mode: str | None = None
+    qat_experimental: bool = False
+    qat_warning: str | None = None
 
 
 class ExperimentVariantsResponse(BaseModel):

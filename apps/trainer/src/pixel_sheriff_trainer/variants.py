@@ -11,7 +11,7 @@ import zipfile
 import numpy as np
 import torch
 
-from pixel_sheriff_ml.model_factory import build_classifier_model
+from pixel_sheriff_ml.model_factory import architecture_family, build_classifier_model
 from pixel_sheriff_trainer.classification.dataset import _asset_label_samples
 from pixel_sheriff_trainer.classification.eval import ClassMetricsRow, ClassifierEvaluation, PredictionRow
 from pixel_sheriff_trainer.classification.train import run_training
@@ -20,6 +20,7 @@ from pixel_sheriff_trainer.detection.evaluation.boxes import bbox_xywh_to_xyxy
 from pixel_sheriff_trainer.detection.train import (
     DetectionEpochMetrics,
     _build_detection_model,
+    _normalized_detection_family,
     run_detection_training,
 )
 from pixel_sheriff_trainer.export_onnx import (
@@ -27,6 +28,7 @@ from pixel_sheriff_trainer.export_onnx import (
     _input_shape_from_model,
     _preprocess_from_model,
     _resolve_best_checkpoint,
+    _validate_exported_onnx,
     export_model_to_onnx,
 )
 from pixel_sheriff_trainer.inference.app import _parse_detection_output, _run_onnx, _run_onnx_detection
@@ -55,6 +57,217 @@ VARIANT_KINDS = {
     VARIANT_QAT_INT8: "qat",
 }
 VARIANT_STATUSES = {"queued", "running", "ready", "failed", "unsupported"}
+QAT_BACKEND = "fbgemm"
+QAT_MODE = "fake_quant"
+QAT_EXPORT_FLOW = "float_export_then_ort_qdq"
+QAT_STRATEGY = "fake_quant_qat_then_ort_qdq"
+QAT_EXPERIMENTAL_DETECTION_FAMILIES = {"ssdlite320_mobilenet_v3_large"}
+QAT_SUPPORTED_CLASSIFICATION_FAMILIES = {"resnet_classifier", "efficientnet_v2_classifier"}
+
+
+def _normalized_variant_family(task: str, model_config: dict[str, Any] | None = None) -> str:
+    normalized_task = str(task or "").strip().lower()
+    if normalized_task == "classification":
+        return architecture_family(model_config or {})
+    if normalized_task == "detection":
+        return _normalized_detection_family(model_config or {})
+    return ""
+
+
+def _qat_support(task: str, model_config: dict[str, Any] | None = None) -> dict[str, Any]:
+    normalized_task = str(task or "").strip().lower()
+    family = _normalized_variant_family(normalized_task, model_config)
+    if normalized_task == "classification":
+        supported = family in QAT_SUPPORTED_CLASSIFICATION_FAMILIES
+        reason = None if supported else f"Real fake-quant QAT v1 is not supported for classifier family '{family or 'unknown'}'"
+        return {
+            "qat_supported": supported,
+            "qat_reason": reason,
+            "qat_mode": QAT_MODE if supported else None,
+            "qat_experimental": False,
+            "qat_warning": None,
+            "qat_family": family or None,
+        }
+    if normalized_task == "detection":
+        supported = family in QAT_EXPERIMENTAL_DETECTION_FAMILIES
+        warning = (
+            "Real fake-quant QAT is experimental for SSDLite and still exports through float ONNX + ORT QDQ."
+            if supported
+            else None
+        )
+        reason = None if supported else f"Real fake-quant QAT v1 is not supported for detection family '{family or 'unknown'}'"
+        return {
+            "qat_supported": supported,
+            "qat_reason": reason,
+            "qat_mode": QAT_MODE if supported else None,
+            "qat_experimental": supported,
+            "qat_warning": warning,
+            "qat_family": family or None,
+        }
+    return {
+        "qat_supported": False,
+        "qat_reason": "QAT is not supported for this task",
+        "qat_mode": None,
+        "qat_experimental": False,
+        "qat_warning": None,
+        "qat_family": family or None,
+    }
+
+
+def _build_clean_variant_model(
+    *,
+    task: str,
+    model_config: dict[str, Any],
+    num_classes: int,
+) -> torch.nn.Module:
+    normalized_task = str(task or "").strip().lower()
+    if normalized_task == "classification":
+        return build_classifier_model(model_config, num_classes_override=num_classes)
+    if normalized_task == "detection":
+        return _build_detection_model(model_config, num_classes=num_classes)
+    raise ValueError(f"qat_model_task_unsupported:{normalized_task}")
+
+
+def _input_tensor_for_qat(model_config: dict[str, Any]) -> torch.Tensor:
+    channels, height, width = _input_shape_from_model(model_config)
+    return torch.randn(1, int(channels), int(height), int(width))
+
+
+def _set_qconfig_recursive(module: torch.nn.Module, qconfig: Any) -> None:
+    module.qconfig = qconfig
+    for child in module.children():
+        _set_qconfig_recursive(child, qconfig)
+
+
+def _prepare_classification_qat_model(model_config: dict[str, Any], *, num_classes: int) -> torch.nn.Module:
+    from torch.ao.quantization import get_default_qat_qconfig_mapping
+    from torch.ao.quantization.quantize_fx import prepare_qat_fx
+
+    float_model = build_classifier_model(model_config, num_classes_override=num_classes)
+    float_model.train()
+    example_inputs = (_input_tensor_for_qat(model_config),)
+    return prepare_qat_fx(float_model, get_default_qat_qconfig_mapping(QAT_BACKEND), example_inputs)
+
+
+def _prepare_detection_qat_model(model_config: dict[str, Any], *, num_classes: int) -> torch.nn.Module:
+    from torch.ao.quantization import get_default_qat_qconfig, prepare_qat
+
+    model = _build_detection_model(model_config, num_classes=num_classes)
+    model.train()
+    qconfig = get_default_qat_qconfig(QAT_BACKEND)
+    targets = [
+        model.backbone.features,
+        model.backbone.extra,
+        model.head.classification_head.module_list,
+        model.head.regression_head.module_list,
+    ]
+    for target in targets:
+        _set_qconfig_recursive(target, qconfig)
+    return prepare_qat(model)
+
+
+def _prepare_qat_training_model(
+    *,
+    task: str,
+    model_config: dict[str, Any],
+    num_classes: int,
+) -> torch.nn.Module:
+    normalized_task = str(task or "").strip().lower()
+    if normalized_task == "classification":
+        return _prepare_classification_qat_model(model_config, num_classes=num_classes)
+    if normalized_task == "detection":
+        return _prepare_detection_qat_model(model_config, num_classes=num_classes)
+    raise ValueError(f"qat_model_task_unsupported:{normalized_task}")
+
+
+def _is_qat_auxiliary_state_key(key: str) -> bool:
+    return "activation_post_process" in key or "weight_fake_quant" in key
+
+
+def _batchnorm_module_path_for_fused_path(float_model: torch.nn.Module, fused_module_path: str) -> str | None:
+    parent_path, _dot, leaf = fused_module_path.rpartition(".")
+    candidates: list[str] = []
+    prefix = f"{parent_path}." if parent_path else ""
+    if leaf.isdigit():
+        candidates.append(f"{prefix}{int(leaf) + 1}")
+    if leaf.startswith("conv") and leaf[4:].isdigit():
+        candidates.append(f"{prefix}bn{leaf[4:]}")
+    for candidate in candidates:
+        try:
+            module = float_model.get_submodule(candidate)
+        except Exception:
+            continue
+        if isinstance(module, (torch.nn.BatchNorm1d, torch.nn.BatchNorm2d, torch.nn.BatchNorm3d)):
+            return candidate
+    return None
+
+
+def _map_qat_state_key_to_float_key(key: str, float_model: torch.nn.Module) -> str | None:
+    target_state = float_model.state_dict()
+    if key in target_state:
+        return key
+    if _is_qat_auxiliary_state_key(key) or ".bn." not in key:
+        return None
+    fused_module_path, bn_suffix = key.split(".bn.", 1)
+    batchnorm_path = _batchnorm_module_path_for_fused_path(float_model, fused_module_path)
+    if batchnorm_path is None:
+        return None
+    candidate = f"{batchnorm_path}.{bn_suffix}"
+    return candidate if candidate in target_state else None
+
+
+def _coerce_state_tensor(value: torch.Tensor, reference: torch.Tensor) -> torch.Tensor:
+    return value.detach().to(device=reference.device, dtype=reference.dtype)
+
+
+def _load_float_checkpoint_into_qat_model(
+    target_model: torch.nn.Module,
+    *,
+    float_model: torch.nn.Module,
+    source_state: dict[str, Any],
+) -> None:
+    target_state = target_model.state_dict()
+    adapted: dict[str, torch.Tensor] = {}
+    for target_key, reference in target_state.items():
+        if _is_qat_auxiliary_state_key(target_key):
+            continue
+        source_key = _map_qat_state_key_to_float_key(target_key, float_model)
+        if source_key is None:
+            continue
+        source_value = source_state.get(source_key)
+        if not isinstance(source_value, torch.Tensor) or tuple(source_value.shape) != tuple(reference.shape):
+            continue
+        adapted[target_key] = _coerce_state_tensor(source_value, reference)
+    load_result = target_model.load_state_dict(adapted, strict=False)
+    missing_keys = [key for key in load_result.missing_keys if not _is_qat_auxiliary_state_key(key)]
+    if missing_keys:
+        raise ValueError(f"qat_prepare_state_missing:{','.join(missing_keys[:5])}")
+    if load_result.unexpected_keys:
+        raise ValueError(f"qat_prepare_state_unexpected:{','.join(load_result.unexpected_keys[:5])}")
+
+
+def _load_qat_checkpoint_into_float_model(
+    target_model: torch.nn.Module,
+    *,
+    source_state: dict[str, Any],
+) -> None:
+    target_state = target_model.state_dict()
+    adapted: dict[str, torch.Tensor] = {}
+    for source_key, source_value in source_state.items():
+        if not isinstance(source_value, torch.Tensor):
+            continue
+        target_key = _map_qat_state_key_to_float_key(source_key, target_model)
+        if target_key is None:
+            continue
+        reference = target_state.get(target_key)
+        if not isinstance(reference, torch.Tensor) or tuple(source_value.shape) != tuple(reference.shape):
+            continue
+        adapted[target_key] = _coerce_state_tensor(source_value, reference)
+    load_result = target_model.load_state_dict(adapted, strict=False)
+    if load_result.missing_keys:
+        raise ValueError(f"qat_export_state_missing:{','.join(load_result.missing_keys[:5])}")
+    if load_result.unexpected_keys:
+        raise ValueError(f"qat_export_state_unexpected:{','.join(load_result.unexpected_keys[:5])}")
 
 
 def _read_json(path: Path, default: Any) -> Any:
@@ -70,6 +283,75 @@ def _read_json(path: Path, default: Any) -> Any:
 def _write_json(path: Path, payload: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+
+
+def _input_shape_from_metadata(metadata: dict[str, Any]) -> tuple[int, int, int]:
+    raw_input_shape = metadata.get("input_shape")
+    if isinstance(raw_input_shape, list) and len(raw_input_shape) == 3:
+        try:
+            return tuple(int(value) for value in raw_input_shape)
+        except (TypeError, ValueError):
+            pass
+
+    preprocess = metadata.get("preprocess")
+    if not isinstance(preprocess, dict):
+        return (3, 224, 224)
+    resize = preprocess.get("resize")
+    if not isinstance(resize, dict):
+        return (3, 224, 224)
+    try:
+        channels = int(preprocess.get("channels") or 3)
+        height = int(resize.get("height") or 224)
+        width = int(resize.get("width") or 224)
+    except (TypeError, ValueError):
+        return (3, 224, 224)
+    return (channels, height, width)
+
+
+def _repair_detection_fp16_output_types(onnx_module: Any, model: Any) -> tuple[Any, bool]:
+    inferred_model = onnx_module.shape_inference.infer_shapes(model)
+    value_infos = list(getattr(inferred_model.graph, "value_info", []))
+    value_infos.extend(list(getattr(inferred_model.graph, "output", [])))
+    output_type_by_name: dict[str, int] = {}
+    for value_info in value_infos:
+        name = str(getattr(value_info, "name", "") or "")
+        tensor_type = getattr(getattr(value_info, "type", None), "tensor_type", None)
+        elem_type = getattr(tensor_type, "elem_type", None)
+        if name and isinstance(elem_type, int) and int(elem_type) > 0:
+            output_type_by_name[name] = int(elem_type)
+
+    repaired = False
+    for output in getattr(model.graph, "output", []):
+        name = str(getattr(output, "name", "") or "")
+        expected_elem_type = output_type_by_name.get(name)
+        tensor_type = getattr(getattr(output, "type", None), "tensor_type", None)
+        current_elem_type = getattr(tensor_type, "elem_type", None)
+        if not name or not isinstance(expected_elem_type, int) or tensor_type is None:
+            continue
+        if int(current_elem_type or 0) == expected_elem_type:
+            continue
+        tensor_type.elem_type = expected_elem_type
+        repaired = True
+    return model, repaired
+
+
+def _validate_fp16_variant_artifact(model_path: Path, metadata: dict[str, Any]) -> dict[str, Any]:
+    task = str(metadata.get("task") or "").strip().lower() or None
+    onnx_metadata = metadata.get("onnx")
+    output_names = None
+    if isinstance(onnx_metadata, dict):
+        raw_output_names = onnx_metadata.get("output_names")
+        if isinstance(raw_output_names, list):
+            output_names = [str(name) for name in raw_output_names if str(name or "").strip()]
+    input_shape = _input_shape_from_metadata(metadata)
+    dynamic_batch_enabled = task != "detection"
+    return _validate_exported_onnx(
+        model_path,
+        input_shape=input_shape,
+        output_names=output_names,
+        task=task,
+        batch_sizes=(1, 4) if dynamic_batch_enabled else (1,),
+    )
 
 
 def _merge_dict(base: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
@@ -183,19 +465,21 @@ def _variant_event(
     return payload
 
 
-def variant_task_support(task: str) -> dict[str, Any]:
+def variant_task_support(task: str, model_config: dict[str, Any] | None = None) -> dict[str, Any]:
     normalized = str(task or "").strip().lower()
     fp16_supported = normalized in {"classification", "detection"}
     ptq_supported = normalized in {"classification", "detection"}
-    qat_supported = normalized in {"classification", "detection"}
     fp16_reason = None if fp16_supported else "FP16 is not supported for this task"
-    qat_reason = None if qat_supported else "QAT is not supported for this task"
+    qat_support = _qat_support(normalized, model_config)
     return {
         "fp16_supported": fp16_supported,
         "fp16_reason": fp16_reason,
         "ptq_supported": ptq_supported,
-        "qat_supported": qat_supported,
-        "qat_reason": qat_reason,
+        "qat_supported": bool(qat_support["qat_supported"]),
+        "qat_reason": qat_support["qat_reason"],
+        "qat_mode": qat_support["qat_mode"],
+        "qat_experimental": bool(qat_support["qat_experimental"]),
+        "qat_warning": qat_support["qat_warning"],
     }
 
 
@@ -1022,11 +1306,24 @@ def run_fp16_variant(
 
     model_path, metadata_path = _variant_onnx_paths(storage, project_id, experiment_id, attempt, VARIANT_FP16)
     model_path.parent.mkdir(parents=True, exist_ok=True)
+    base_metadata = load_metadata(base_metadata_path)
     fp32_model = onnx.load_model(str(base_model))
     fp16_model = convert_float_to_float16(fp32_model, keep_io_types=True)
+    output_types_repaired = False
+    if normalized_task == "detection":
+        fp16_model, output_types_repaired = _repair_detection_fp16_output_types(onnx, fp16_model)
     onnx.save_model(fp16_model, str(model_path))
 
-    base_metadata = load_metadata(base_metadata_path)
+    validation = _validate_fp16_variant_artifact(model_path, base_metadata)
+    validation_status = str(validation.get("status") or "failed")
+    validation_error = None
+    if validation_status != "passed":
+        validation_error = str(validation.get("onnxruntime", {}).get("error") or "ONNX validation failed")
+        try:
+            model_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+
     metadata_payload = dict(base_metadata)
     metadata_payload["variant_key"] = VARIANT_FP16
     metadata_payload["variant_kind"] = "fp16"
@@ -1034,8 +1331,40 @@ def run_fp16_variant(
     metadata_payload["numeric_precision"] = "fp16"
     metadata_payload["checkpoint_kind"] = checkpoint_kind or base_metadata.get("checkpoint_kind")
     metadata_payload["checkpoint_uri"] = base_metadata.get("checkpoint_uri")
+    metadata_payload["status"] = "exported" if validation_status == "passed" else "failed"
+    metadata_payload["model_uri"] = _as_relative_uri(storage, model_path) if model_path.exists() else None
+    metadata_payload["validation"] = validation
+    metadata_payload["error"] = validation_error
+    metadata_payload.setdefault("onnx", {})
+    if isinstance(metadata_payload["onnx"], dict):
+        metadata_payload["onnx"]["fp16_conversion"] = {
+            "keep_io_types": True,
+            "detection_output_types_repaired": output_types_repaired,
+        }
     metadata_payload["variant_exported_at"] = utc_now_iso()
     _write_json(metadata_path, metadata_payload)
+
+    if validation_status != "passed":
+        row = _update_variant_row(
+            storage,
+            project_id=project_id,
+            experiment_id=experiment_id,
+            attempt=attempt,
+            variant_key=VARIANT_FP16,
+            patch={
+                "status": "failed",
+                "error": validation_error,
+                "onnx": {
+                    "model_relpath": None,
+                    "metadata_relpath": _as_relative_uri(storage, metadata_path),
+                    "size_bytes": None,
+                },
+                "quantized": False,
+            },
+        )
+        if emit_event is not None:
+            emit_event(_variant_event(VARIANT_FP16, "failed", attempt=attempt, error=validation_error))
+        return row
 
     evaluations = _write_variant_evaluations(
         storage,
@@ -1296,21 +1625,26 @@ def run_qat_variant(
     calibration_max_samples: int,
     emit_event: callable | None = None,
 ) -> dict[str, Any]:
-    from onnxruntime.quantization import QuantFormat, QuantType, quantize_static
-
     normalized_task = str(task or "").strip().lower()
-    if normalized_task not in {"classification", "detection"}:
+    qat_support = _qat_support(normalized_task, model_config)
+    if not qat_support["qat_supported"]:
+        qat_reason = str(qat_support["qat_reason"] or "QAT is not supported for this task")
         row = _update_variant_row(
             storage,
             project_id=project_id,
             experiment_id=experiment_id,
             attempt=attempt,
             variant_key=VARIANT_QAT_INT8,
-            patch={"status": "unsupported", "error": "QAT is not supported for this task"},
+            patch={"status": "unsupported", "error": qat_reason},
         )
         if emit_event is not None:
-            emit_event(_variant_event(VARIANT_QAT_INT8, "unsupported", attempt=attempt, error="QAT is not supported for this task"))
+            emit_event(_variant_event(VARIANT_QAT_INT8, "unsupported", attempt=attempt, error=qat_reason))
         return row
+    from onnxruntime.quantization import QuantFormat, QuantType, quantize_static
+
+    qat_family = str(qat_support["qat_family"] or "")
+    qat_experimental = bool(qat_support["qat_experimental"])
+    qat_warning = str(qat_support["qat_warning"] or "") or None
 
     checkpoint_kind_resolved, checkpoint_path = _resolve_checkpoint_for_kind(
         storage,
@@ -1339,7 +1673,15 @@ def run_qat_variant(
             "status": "running",
             "error": None,
             "checkpoint_kind": checkpoint_kind_resolved,
-            "quantization_strategy": "finetune_then_ptq",
+            "quantization_strategy": QAT_STRATEGY,
+            "qat": {
+                "mode": QAT_MODE,
+                "export_flow": QAT_EXPORT_FLOW,
+                "experimental": qat_experimental,
+                "family": qat_family or None,
+                "strategy": QAT_STRATEGY,
+                "warning": qat_warning,
+            },
         },
     )
     if emit_event is not None:
@@ -1385,7 +1727,22 @@ def run_qat_variant(
     device = resolve_device(tuned_training_config)
     checkpoint_payload = torch.load(checkpoint_path, map_location="cpu")
     model_state = checkpoint_payload.get("model_state_dict") if isinstance(checkpoint_payload, dict) else None
-    resume_state = {"model_state_dict": model_state} if isinstance(model_state, dict) else None
+    qat_training_model = _prepare_qat_training_model(
+        task=normalized_task,
+        model_config=model_config,
+        num_classes=loaders.num_classes,
+    )
+    float_reference_model = _build_clean_variant_model(
+        task=normalized_task,
+        model_config=model_config,
+        num_classes=loaders.num_classes,
+    )
+    if isinstance(model_state, dict):
+        _load_float_checkpoint_into_qat_model(
+            qat_training_model,
+            float_model=float_reference_model,
+            source_state=model_state,
+        )
 
     training_log_path = storage.variant_training_log_path(project_id, experiment_id, attempt, VARIANT_QAT_INT8)
     training_log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1481,8 +1838,9 @@ def run_qat_variant(
             should_cancel=lambda: False,
             on_epoch=on_epoch,
             on_checkpoint=on_checkpoint,
+            model=qat_training_model,
             device=device,
-            resume_state=resume_state,
+            resume_state=None,
         )
     else:
         run_status, _final_eval = run_detection_training(
@@ -1496,8 +1854,9 @@ def run_qat_variant(
             should_cancel=lambda: False,
             on_epoch=on_epoch,
             on_checkpoint=on_checkpoint,
+            model=qat_training_model,
             device=device,
-            resume_state=resume_state,
+            resume_state=None,
         )
     if run_status not in {"completed", "done"}:
         raise ValueError(f"qat_training_{run_status}")
@@ -1507,11 +1866,14 @@ def run_qat_variant(
         best_checkpoint = storage.variant_checkpoints_dir(project_id, experiment_id, attempt, VARIANT_QAT_INT8) / "latest.pt"
     checkpoint_payload = torch.load(best_checkpoint, map_location="cpu")
     model_state = checkpoint_payload.get("model_state_dict") if isinstance(checkpoint_payload, dict) else checkpoint_payload
-    if normalized_task == "classification":
-        model = build_classifier_model(model_config, num_classes_override=loaders.num_classes)
-    else:
-        model = _build_detection_model(model_config, num_classes=loaders.num_classes)
-    model.load_state_dict(model_state, strict=True)
+    model = _build_clean_variant_model(
+        task=normalized_task,
+        model_config=model_config,
+        num_classes=loaders.num_classes,
+    )
+    if not isinstance(model_state, dict):
+        raise ValueError("qat_export_checkpoint_missing_state")
+    _load_qat_checkpoint_into_float_model(model, source_state=model_state)
     model.eval()
 
     fp32_temp_dir = variant_dir / "fp32_qat"
@@ -1570,18 +1932,24 @@ def run_qat_variant(
     metadata_payload["variant_kind"] = "qat"
     metadata_payload["quantized"] = True
     metadata_payload["quantization"] = {
-        "mode": "static_int8_after_finetune",
-        "strategy": "finetune_then_ptq",
+        "mode": QAT_STRATEGY,
+        "strategy": QAT_STRATEGY,
         "activation_type": "qint8",
         "weight_type": "qint8",
         "calibration_max_samples": len(tensors),
     }
     metadata_payload["qat"] = {
+        "mode": QAT_MODE,
         "epochs": qat_epochs,
         "learning_rate": qat_lr,
+        "export_flow": QAT_EXPORT_FLOW,
+        "experimental": qat_experimental,
+        "family": qat_family or None,
         "checkpoint_kind": checkpoint_kind_resolved,
         "best_epoch": summary.get("best_epoch"),
         "best_metric": summary.get("best_metric"),
+        "strategy": QAT_STRATEGY,
+        "warning": qat_warning,
     }
     metadata_payload["variant_exported_at"] = utc_now_iso()
     _write_json(metadata_path, metadata_payload)
@@ -1621,10 +1989,16 @@ def run_qat_variant(
             "benchmark": benchmark.get("benchmark"),
             "benchmarks": benchmark.get("devices", {}),
             "quantized": True,
+            "quantization_strategy": QAT_STRATEGY,
             "qat": {
+                "mode": QAT_MODE,
                 "epochs": qat_epochs,
                 "learning_rate": qat_lr,
-                "strategy": "finetune_then_ptq",
+                "export_flow": QAT_EXPORT_FLOW,
+                "experimental": qat_experimental,
+                "family": qat_family or None,
+                "strategy": QAT_STRATEGY,
+                "warning": qat_warning,
             },
         },
     )

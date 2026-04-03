@@ -5,10 +5,11 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
-- Detection INT8 variant parity:
-  - detection experiments now report both PTQ and QAT as supported model-variant flows
-  - detection QAT now mirrors classification semantics by fine-tuning from the selected checkpoint before producing a static INT8 ONNX export
-  - added focused trainer and API regression coverage for detection variant support, queuing, and artifact generation paths
+- Real fake-quant QAT v1:
+  - `qat_int8` now performs real fake-quant-aware training for `resnet_classifier` and `efficientnet_v2_classifier`
+  - detection real QAT is now enabled experimentally for `ssdlite320_mobilenet_v3_large`, while `retinanet` returns unsupported instead of silently falling back to fine-tune-then-PTQ
+  - variants API support payloads now expose `qat_mode`, `qat_experimental`, and `qat_warning`, and QAT rows now carry explicit `mode`, `export_flow`, `experimental`, and `family` metadata
+  - added focused trainer, API, and web regression coverage for fake-quant prep, clean-float export reconstruction, family-aware support state, and QAT warning rendering
 - Docs and test baseline cleanup:
   - moved historical `docu/` references into `docs/archive/` and added `docs/README.md` as the current docs index
   - moved the changelog into `docs/CHANGELOG.md` so the repo now has a single docs home
@@ -47,11 +48,14 @@ All notable changes to this project will be documented in this file.
   - `make test-api-focused` / `make test-api-safe` now invoke the API test script through `bash` for better Windows compatibility
 
 ### Changed
+- Experiment FP16 variant generation now validates converted ONNX artifacts before publishing them, and detection FP16 exports repair output tensor type metadata so ONNX Runtime load errors fail fast during generation instead of later on the experiment page.
+- Experiment dashboards now show `val_loss` again on the detection loss chart alongside `train_loss`.
 - Experiment variant UX and export plumbing:
   - trainer installs `onnxconverter-common` so FP16 exports no longer fail in fresh environments with `fp16_conversion_unavailable: No module named 'onnxconverter_common'`
   - experiment detail now polls PTQ/QAT variant artifacts separately from the base training SSE stream, which stops closed event streams from replaying and bouncing the page while a variant job is still running
   - QAT fine-tune metric rows now flow through the variants API and render as dashed overlay lines in the normal experiment dashboard so QAT progress stays visible during the follow-up run
-  - documented the current detection INT8 caveat that PTQ/QAT still quantize the exported detection graph end-to-end, which can hurt mAP and may not beat FP32 on CUDA
+  - QAT export now rebuilds a clean float family model from the fake-quant checkpoint, exports FP32 ONNX, and then produces the deployable INT8 artifact through ONNX Runtime QDQ on the calibrated `train` split
+  - documented the current detection INT8 caveat that PTQ/QAT still quantize the exported detection graph through the ONNX export path, which can hurt mAP and may not beat FP32 on CUDA
 - Deployed-model selection and runtime behavior:
   - bbox prelabel configs now support an explicit `deployment_id` so video import and webcam capture can pin a compatible deployment instead of always resolving the project active deployment
   - import/capture modal selectors now expose compatible deployed-model dropdowns for both advisory preview inference and real bbox prelabel sessions
